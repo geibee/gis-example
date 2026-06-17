@@ -1,0 +1,26 @@
+{
+  "type": "FeatureCollection",
+  "name": "buildings",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "EPSG:4326" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "building_id": "B-001", "floors": 4, "usage": "house" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[139.7605, 35.6814], [139.7610, 35.6814], [139.7610, 35.6818], [139.7605, 35.6818], [139.7605, 35.6814]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "building_id": "B-002", "floors": 9, "usage": "office" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[139.7628, 35.6813], [139.7634, 35.6813], [139.7634, 35.6819], [139.7628, 35.6819], [139.7628, 35.6813]]]
+      }
+    }
+  ]
+}

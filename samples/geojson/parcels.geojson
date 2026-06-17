@@ -1,0 +1,26 @@
+{
+  "type": "FeatureCollection",
+  "name": "parcels",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "EPSG:4326" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "parcel_no": "A-001", "landuse": "residential", "area_m2": 1200 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[139.7600, 35.6810], [139.7620, 35.6810], [139.7620, 35.6825], [139.7600, 35.6825], [139.7600, 35.6810]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcel_no": "A-002", "landuse": "commercial", "area_m2": 900 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[139.7622, 35.6810], [139.7642, 35.6810], [139.7642, 35.6825], [139.7622, 35.6825], [139.7622, 35.6810]]]
+      }
+    }
+  ]
+}
