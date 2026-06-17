@@ -20,6 +20,7 @@ import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.get
+import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.utils.io.core.readBytes
@@ -68,6 +69,7 @@ fun Application.module() {
         }
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Patch)
         allowMethod(HttpMethod.Options)
         allowHeader(HttpHeaders.ContentType)
     }
@@ -97,6 +99,13 @@ fun Application.module() {
             val layerId = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
             val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
             call.respond(db.getFeature(layerId, featureId))
+        }
+
+        patch("/api/layers/{id}/features/{featureId}") {
+            val layerId = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
+            val request = call.receive<FeatureUpdateRequest>()
+            call.respond(db.updateFeature(layerId, featureId, request))
         }
 
         post("/api/import-jobs") {

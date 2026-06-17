@@ -21,7 +21,8 @@ body,
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -126,15 +127,29 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   min-width: 0;
   width: 100%;
-  height: 36px;
   border: 1px solid #c9d2dc;
   border-radius: 6px;
   background: #ffffff;
   color: #1f2933;
+}
+
+input,
+select {
+  height: 36px;
   padding: 0 10px;
+}
+
+textarea {
+  min-height: 150px;
+  resize: vertical;
+  padding: 9px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 input[type="file"] {
@@ -151,6 +166,11 @@ input[type="file"] {
 .button-row {
   display: flex;
   gap: 8px;
+}
+
+.button-row .command-button {
+  width: auto;
+  flex: 1;
 }
 
 .command-button,
@@ -239,10 +259,37 @@ input[type="file"] {
 
 .layer-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: 22px 34px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: 42px;
+  border-radius: 6px;
+}
+
+.layer-row:not(.base-layer) {
+  cursor: grab;
+}
+
+.layer-row:not(.base-layer):hover {
+  background: #eef3f7;
+}
+
+.layer-row.dragging {
+  background: #e1edf2;
+  opacity: 0.62;
+}
+
+.drag-handle {
+  display: inline-flex;
+  width: 22px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  color: #7b8794;
+}
+
+.drag-handle.disabled {
+  visibility: hidden;
 }
 
 .layer-meta {
@@ -314,6 +361,14 @@ input[type="file"] {
 }
 
 .feature-heading {
+  display: flex;
+  min-width: 0;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.feature-heading > div {
   min-width: 0;
 }
 
@@ -346,6 +401,16 @@ input[type="file"] {
   color: #1f2933;
   font-size: 12px;
   font-weight: 650;
+}
+
+.feature-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.feature-editor-fields {
+  display: grid;
+  gap: 10px;
 }
 
 .job-group {

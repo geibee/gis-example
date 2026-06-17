@@ -5,11 +5,13 @@ import com.zaxxer.hikari.HikariDataSource
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.postgresql.util.PGobject
 import java.sql.Connection
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -211,6 +213,103 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     }
 
+    fun updateFeature(layerId: String, featureId: String, request: FeatureUpdateRequest): FeatureDto {
+        val layer = getLayer(layerId)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
+        val editableAttributes = layer.attributes
+            .map { it.name }
+            .filterNot { it == layer.featureIdColumn || it == layer.geometryColumn }
+            .toSet()
+        val invalidAttributes = request.properties.keys.filterNot { it in editableAttributes }
+        if (invalidAttributes.isNotEmpty()) {
+            throw ApiException(
+                io.ktor.http.HttpStatusCode.BadRequest,
+                "Unknown or read-only attribute(s): ${invalidAttributes.joinToString(", ")}"
+            )
+        }
+
+        val propertyNames = request.properties.keys.sorted()
+        val geometry = request.geometry?.takeUnless { it is JsonNull }
+        if (propertyNames.isEmpty() && geometry == null) {
+            return getFeature(layerId, featureId)
+        }
+        if (geometry != null && geometry !is JsonObject) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Geometry must be a GeoJSON object")
+        }
+
+        val tableRef = "${quoteIdent(layer.schemaName)}.${quoteIdent(layer.tableName)}"
+        val rawGeometryUpdate = "ST_MakeValid(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(?), 4326), 3857))"
+        val geometryUpdate = if (layer.geometryType.uppercase().contains("MULTI")) {
+            "ST_Multi($rawGeometryUpdate)"
+        } else {
+            rawGeometryUpdate
+        }
+        val setClauses = buildList {
+            propertyNames.forEach { name ->
+                add("${quoteIdent(name)} = (payload.row).${quoteIdent(name)}")
+            }
+            if (geometry != null) {
+                add("${quoteIdent(layer.geometryColumn)} = $geometryUpdate")
+            }
+        }
+        val filteredProperties = JsonObject(propertyNames.associateWith { request.properties.getValue(it) })
+        val sql = """
+            WITH payload AS (
+                SELECT jsonb_populate_record(NULL::$tableRef, ?::jsonb) AS row
+            )
+            UPDATE $tableRef AS t
+            SET ${setClauses.joinToString(", ")}
+            FROM payload
+            WHERE t.${quoteIdent(layer.featureIdColumn)}::text = ?
+            RETURNING
+                (to_jsonb(t) - ?)::text AS properties,
+                ST_AsGeoJSON(ST_Transform(t.${quoteIdent(layer.geometryColumn)}, 4326), 6)::text AS geometry
+        """.trimIndent()
+
+        return dataSource.connection.use { connection ->
+            val previousAutoCommit = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                val updated = connection.prepareStatement(sql).use { stmt ->
+                    var index = 1
+                    stmt.setString(index++, json.encodeToString(filteredProperties))
+                    if (geometry != null) {
+                        stmt.setString(index++, json.encodeToString(geometry))
+                    }
+                    stmt.setString(index++, featureId)
+                    stmt.setString(index, layer.geometryColumn)
+                    stmt.executeQuery().use { rs ->
+                        if (!rs.next()) {
+                            throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feature not found")
+                        }
+                        FeatureDto(
+                            layerId = layerId,
+                            featureId = featureId,
+                            properties = json.parseToJsonElement(rs.getString("properties")).jsonObject,
+                            geometry = rs.getString("geometry")?.let { json.parseToJsonElement(it) }
+                        )
+                    }
+                }
+                if (geometry != null) {
+                    refreshLayerMetadata(connection, layer)
+                }
+                connection.commit()
+                updated
+            } catch (exc: ApiException) {
+                connection.rollback()
+                throw exc
+            } catch (exc: SQLException) {
+                connection.rollback()
+                throw ApiException(
+                    io.ktor.http.HttpStatusCode.BadRequest,
+                    "Feature update failed: ${exc.message ?: "invalid feature update"}"
+                )
+            } finally {
+                connection.autoCommit = previousAutoCommit
+            }
+        }
+    }
+
     fun getMvtTile(layerId: String, z: Int, x: Int, y: Int): ByteArray {
         if (z !in 0..24 || x < 0 || y < 0) {
             throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Invalid tile coordinate")
@@ -315,6 +414,44 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             }
         }
         return layers.map { byLayer.getValue(it.id).copy(attributes = attrs.getValue(it.id)) }
+    }
+
+    private fun refreshLayerMetadata(connection: Connection, layer: LayerDto) {
+        val tableRef = "${quoteIdent(layer.schemaName)}.${quoteIdent(layer.tableName)}"
+        val geometryColumn = quoteIdent(layer.geometryColumn)
+        connection.prepareStatement(
+            """
+            WITH stats AS (
+                SELECT
+                    count(*)::bigint AS row_count,
+                    (array_agg(GeometryType($geometryColumn) ORDER BY GeometryType($geometryColumn)) FILTER (WHERE $geometryColumn IS NOT NULL))[1] AS geometry_type,
+                    ST_Extent(ST_Transform($geometryColumn, 4326)) AS bbox
+                FROM $tableRef
+            ),
+            formatted AS (
+                SELECT
+                    row_count,
+                    COALESCE(geometry_type, 'GEOMETRY') AS geometry_type,
+                    CASE
+                        WHEN bbox IS NULL THEN NULL
+                        ELSE jsonb_build_array(ST_XMin(bbox), ST_YMin(bbox), ST_XMax(bbox), ST_YMax(bbox))
+                    END AS bbox_4326
+                FROM stats
+            )
+            UPDATE app.layers AS l
+            SET row_count = formatted.row_count,
+                geometry_type = formatted.geometry_type,
+                bbox_4326 = formatted.bbox_4326
+            FROM formatted
+            WHERE l.id = ?::uuid
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+        connection.createStatement().use { stmt ->
+            stmt.execute("ANALYZE $tableRef")
+        }
     }
 
     private fun ResultSet.toImportJobDto(): ImportJobDto = ImportJobDto(

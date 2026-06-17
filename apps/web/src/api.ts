@@ -24,6 +24,14 @@ export function getFeature(layerId: string, featureId: string): Promise<Feature>
   return requestJson<Feature>(`/api/layers/${layerId}/features/${encodeURIComponent(featureId)}`);
 }
 
+export function updateFeature(layerId: string, featureId: string, body: unknown): Promise<Feature> {
+  return requestJson<Feature>(`/api/layers/${layerId}/features/${encodeURIComponent(featureId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
 export function createImportJob(formData: FormData): Promise<ImportJob> {
   return requestJson<ImportJob>("/api/import-jobs", {
     method: "POST",

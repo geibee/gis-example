@@ -14,6 +14,7 @@ services:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
       - ./postgres/010-seed-tokyo-gis-data.sql.gz:/docker-entrypoint-initdb.d/010-seed-tokyo-gis-data.sql.gz:ro
       - ./postgres/020-seed-tokyo-metadata.sql.gz:/docker-entrypoint-initdb.d/020-seed-tokyo-metadata.sql.gz:ro
+      - ./postgres/040-seed-tokyo-commercial-zoning.sql.gz:/docker-entrypoint-initdb.d/040-seed-tokyo-commercial-zoning.sql.gz:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gis -d gis"]
       interval: 5s

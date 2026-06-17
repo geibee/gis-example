@@ -308,6 +308,12 @@ def execute_analysis(
     if target.project_id != project_id:
         raise ValueError("Target layer does not belong to analysis project")
 
+    operation = (criteria.get("operation") or "and_filter").lower()
+    if operation == "outer_boundary":
+        return execute_outer_boundary_analysis(conn, job, criteria, result_table, project_id, target)
+    if operation != "and_filter":
+        raise ValueError(f"Unsupported analysis operation: {criteria.get('operation')}")
+
     referenced_ids = {target.id}
     referenced_ids.update(cond["layerId"] for cond in criteria.get("attributeConditions", []))
     referenced_ids.update(cond["layerId"] for cond in criteria.get("spatialConditions", []))
@@ -344,6 +350,85 @@ def execute_analysis(
     return layer_id, count
 
 
+def execute_outer_boundary_analysis(
+    conn: psycopg.Connection,
+    job: dict[str, Any],
+    criteria: dict[str, Any],
+    result_table: str,
+    project_id: str,
+    target: LayerMeta,
+) -> tuple[str, int]:
+    boundary_layer_id = criteria.get("boundaryLayerId")
+    if not boundary_layer_id:
+        raise ValueError("boundaryLayerId is required for outer_boundary")
+    boundary = load_layer(conn, boundary_layer_id)
+    if boundary.project_id != project_id:
+        raise ValueError("Boundary layer does not belong to analysis project")
+
+    validate_outer_boundary_criteria(target, boundary, criteria)
+    buffer_meters = outer_boundary_buffer(criteria)
+
+    result_ref = qtable("gis_data", result_table)
+    target_ref = qtable(target.schema_name, target.table_name)
+    boundary_ref = qtable(boundary.schema_name, boundary.table_name)
+    target_geom = quote_ident(target.geometry_column)
+    boundary_geom = quote_ident(boundary.geometry_column)
+
+    conn.execute(f"DROP TABLE IF EXISTS {result_ref}")
+    conn.execute(
+        f"""
+        CREATE TABLE {result_ref} AS
+        WITH zone AS (
+            SELECT ST_MemUnion(ST_Buffer(b.{boundary_geom}, %s)) AS geom
+            FROM {boundary_ref} AS b
+            WHERE b.{boundary_geom} IS NOT NULL
+        ),
+        source_geoms AS (
+            SELECT geom
+            FROM zone
+            WHERE geom IS NOT NULL AND NOT ST_IsEmpty(geom)
+
+            UNION ALL
+
+            SELECT t.{target_geom} AS geom
+            FROM {target_ref} AS t
+            CROSS JOIN zone
+            WHERE zone.geom IS NOT NULL
+              AND NOT ST_IsEmpty(zone.geom)
+              AND t.{target_geom} IS NOT NULL
+              AND t.{target_geom} && zone.geom
+              AND ST_Intersects(t.{target_geom}, zone.geom)
+              AND NOT ST_CoveredBy(t.{target_geom}, zone.geom)
+        ),
+        merged AS (
+            SELECT ST_MemUnion(geom) AS geom
+            FROM source_geoms
+        )
+        SELECT
+            1::integer AS fid,
+            'outer_boundary'::text AS operation,
+            %s::double precision AS buffer_meters,
+            ST_Multi(ST_CollectionExtract(ST_MakeValid(geom), 3))::geometry(MultiPolygon, 3857) AS geom
+        FROM merged
+        WHERE geom IS NOT NULL AND NOT ST_IsEmpty(geom)
+        """,
+        (buffer_meters, buffer_meters),
+    )
+    normalize_imported_table(conn, result_table)
+    count = conn.execute(f"SELECT count(*)::int AS count FROM {result_ref}").fetchone()["count"]
+    if count == 0:
+        raise ValueError("Boundary layer has no geometry")
+    layer_id = insert_layer_metadata(
+        conn=conn,
+        project_id=project_id,
+        name=job["name"],
+        table_name=result_table,
+        source_srid=3857,
+        is_result=True,
+    )
+    return layer_id, count
+
+
 def validate_analysis_criteria(target: LayerMeta, layers: dict[str, LayerMeta], criteria: dict[str, Any]) -> None:
     for condition in criteria.get("attributeConditions", []):
         layer = layers[condition["layerId"]]
@@ -365,6 +450,30 @@ def validate_analysis_criteria(target: LayerMeta, layers: dict[str, LayerMeta], 
             raise ValueError("Spatial condition layer must differ from target layer")
         if operator == "dwithin" and float(condition.get("distanceMeters") or 0) <= 0:
             raise ValueError("dwithin requires positive distanceMeters")
+
+
+def validate_outer_boundary_criteria(target: LayerMeta, boundary: LayerMeta, criteria: dict[str, Any]) -> None:
+    if not is_polygon_layer(target):
+        raise ValueError("Outer boundary target layer must be polygon")
+    if not (is_polygon_layer(boundary) or is_line_layer(boundary)):
+        raise ValueError("Boundary layer must be polygon or line")
+    outer_boundary_buffer(criteria)
+
+
+def outer_boundary_buffer(criteria: dict[str, Any]) -> float:
+    raw_value = criteria.get("bufferMeters")
+    value = 1000.0 if raw_value is None else float(raw_value)
+    if value <= 0:
+        raise ValueError("bufferMeters must be positive")
+    return value
+
+
+def is_polygon_layer(layer: LayerMeta) -> bool:
+    return "POLYGON" in layer.geometry_type.upper()
+
+
+def is_line_layer(layer: LayerMeta) -> bool:
+    return "LINE" in layer.geometry_type.upper()
 
 
 def build_where_clause(
@@ -496,15 +605,34 @@ def mark_import_failed(conn: psycopg.Connection, job_id: str, exc: Exception) ->
 
 def mark_analysis_failed(conn: psycopg.Connection, job_id: str, exc: Exception) -> None:
     message = str(exc)[:4000]
-    with conn.transaction():
-        conn.execute(
-            """
-            UPDATE app.analysis_jobs
-            SET status = 'failed', error_message = %s, finished_at = now()
-            WHERE id = %s::uuid
-            """,
-            (message, job_id),
-        )
+    try:
+        with conn.transaction():
+            conn.execute(
+                """
+                UPDATE app.analysis_jobs
+                SET status = 'failed', error_message = %s, finished_at = now()
+                WHERE id = %s::uuid
+                """,
+                (message, job_id),
+            )
+    except Exception:
+        for _ in range(5):
+            try:
+                with connect() as retry_conn:
+                    with retry_conn.transaction():
+                        retry_conn.execute(
+                            """
+                            UPDATE app.analysis_jobs
+                            SET status = 'failed', error_message = %s, finished_at = now()
+                            WHERE id = %s::uuid
+                            """,
+                            (message, job_id),
+                        )
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            traceback.print_exc()
     print(f"Analysis job {job_id} failed: {message}", flush=True)
 
 

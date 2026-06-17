@@ -78,6 +78,9 @@ data class AnalysisJobRequest(
     val projectId: String? = null,
     val name: String? = null,
     val targetLayerId: String,
+    val operation: String? = null,
+    val boundaryLayerId: String? = null,
+    val bufferMeters: Double? = null,
     val attributeConditions: List<AttributeConditionDto> = emptyList(),
     val spatialConditions: List<SpatialConditionDto> = emptyList()
 )
@@ -102,6 +105,12 @@ data class FeatureDto(
     val layerId: String,
     val featureId: String,
     val properties: JsonObject,
+    val geometry: JsonElement? = null
+)
+
+@Serializable
+data class FeatureUpdateRequest(
+    val properties: JsonObject = JsonObject(emptyMap()),
     val geometry: JsonElement? = null
 )
 

@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import maplibregl, { type Map as MapLibreMap, type MapLayerMouseEvent } from "maplibre-gl";
 import {
   Eye,
   EyeOff,
+  GripVertical,
   Layers,
   Loader2,
   Map as MapIcon,
+  Pencil,
   Play,
   Plus,
   RefreshCcw,
+  Save,
   Trash2,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
 import {
   createAnalysisJob,
@@ -19,7 +23,8 @@ import {
   getFeature,
   getImportJob,
   getLayers,
-  getProjects
+  getProjects,
+  updateFeature
 } from "./api";
 import type {
   AnalysisJob,
@@ -47,14 +52,25 @@ const baseStyle = {
 const attributeOperators = ["=", "!=", "<", "<=", ">", ">=", "LIKE", "IN", "IS NULL"];
 const spatialOperators = ["intersects", "contains", "within", "dwithin"];
 const layerColors = ["#0f766e", "#b45309", "#2563eb", "#be123c", "#7c3aed", "#15803d", "#c2410c"];
+const imperialPalaceCenter: [number, number] = [139.7528, 35.6852];
+const defaultMapZoom = 12.5;
+const layerViewStateStoragePrefix = "gis-example.layer-view-state.";
+
+type LayerViewState = {
+  baseMapVisible: boolean;
+  visibleLayerIds: string[];
+  layerOrder: string[];
+};
 
 export default function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const styleLayersByLayerId = useRef<Record<string, string[]>>({});
   const appLayerByStyleLayer = useRef<Record<string, string>>({});
-  const fittedInitialBounds = useRef(false);
+  const initializedLayerBounds = useRef(false);
   const seenLayerIds = useRef<Set<string>>(new Set());
+  const loadedLayerProjectId = useRef<string | null>(null);
+  const layersRef = useRef<Layer[]>([]);
 
   const [mapReady, setMapReady] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -62,6 +78,7 @@ export default function App() {
   const [layers, setLayers] = useState<Layer[]>([]);
   const [baseMapVisible, setBaseMapVisible] = useState(true);
   const [visibleLayerIds, setVisibleLayerIds] = useState<Set<string>>(new Set());
+  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<Feature | null>(null);
   const [selectedFeatureLayer, setSelectedFeatureLayer] = useState<Layer | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -78,28 +95,67 @@ export default function App() {
   const [spatialConditions, setSpatialConditions] = useState<SpatialConditionDraft[]>([]);
   const [analysisJobs, setAnalysisJobs] = useState<AnalysisJob[]>([]);
 
+  const [outerBoundaryName, setOuterBoundaryName] = useState("");
+  const [outerTargetLayerId, setOuterTargetLayerId] = useState("");
+  const [outerBoundaryLayerId, setOuterBoundaryLayerId] = useState("");
+  const [outerBoundaryBufferMeters, setOuterBoundaryBufferMeters] = useState("1000");
+
+  const [featureEditOpen, setFeatureEditOpen] = useState(false);
+  const [featurePropertyDraft, setFeaturePropertyDraft] = useState<Record<string, string>>({});
+  const [featureGeometryDraft, setFeatureGeometryDraft] = useState("");
+  const [savingFeature, setSavingFeature] = useState(false);
+
   const layerById = useMemo(() => new Map(layers.map((layer) => [layer.id, layer])), [layers]);
+  const polygonLayers = useMemo(() => layers.filter(isPolygonLayer), [layers]);
+  const boundaryCandidateLayers = useMemo(() => layers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer)), [layers]);
+
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
 
   const refreshLayers = useCallback(async () => {
     if (!selectedProject) return;
     setLoadingLayers(true);
     try {
       const nextLayers = await getLayers(selectedProject);
-      setLayers(nextLayers);
+      const savedViewState = readLayerViewState(selectedProject);
+      const previousLayers = loadedLayerProjectId.current === selectedProject ? layersRef.current : [];
+      const previousLayerIds = new Set(previousLayers.map((layer) => layer.id));
+      const orderedLayers = orderLayers(nextLayers, savedViewState?.layerOrder ?? previousLayers.map((layer) => layer.id));
+      const nextPolygonLayers = nextLayers.filter(isPolygonLayer);
+      const nextBoundaryCandidateLayers = nextLayers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer));
+      loadedLayerProjectId.current = selectedProject;
+      if (typeof savedViewState?.baseMapVisible === "boolean") {
+        setBaseMapVisible(savedViewState.baseMapVisible);
+      }
+      setLayers(orderedLayers);
       setVisibleLayerIds((current) => {
-        const next = new Set(current);
-        for (const layer of nextLayers) {
-          if (!current.size || layer.isResult) next.add(layer.id);
-        }
-        return next;
+        return restoreVisibleLayerIds(orderedLayers, savedViewState, previousLayerIds, current);
       });
-      if (!targetLayerId && nextLayers[0]) setTargetLayerId(nextLayers[0].id);
+      if (!nextLayers.some((layer) => layer.id === targetLayerId)) {
+        setTargetLayerId(nextLayers[0]?.id ?? "");
+      }
+      if (!nextPolygonLayers.some((layer) => layer.id === outerTargetLayerId)) {
+        setOuterTargetLayerId(nextPolygonLayers[0]?.id ?? "");
+      }
+      if (!nextBoundaryCandidateLayers.some((layer) => layer.id === outerBoundaryLayerId)) {
+        setOuterBoundaryLayerId(nextBoundaryCandidateLayers[0]?.id ?? "");
+      }
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingLayers(false);
     }
-  }, [selectedProject, targetLayerId]);
+  }, [outerBoundaryLayerId, outerTargetLayerId, selectedProject, targetLayerId]);
+
+  useEffect(() => {
+    if (!selectedProject || loadedLayerProjectId.current !== selectedProject) return;
+    writeLayerViewState(selectedProject, {
+      baseMapVisible,
+      visibleLayerIds: layers.filter((layer) => visibleLayerIds.has(layer.id)).map((layer) => layer.id),
+      layerOrder: layers.map((layer) => layer.id)
+    });
+  }, [baseMapVisible, layers, selectedProject, visibleLayerIds]);
 
   useEffect(() => {
     getProjects()
@@ -119,8 +175,8 @@ export default function App() {
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: baseStyle as maplibregl.StyleSpecification,
-      center: [139.7618, 35.6817],
-      zoom: 15,
+      center: imperialPalaceCenter,
+      zoom: defaultMapZoom,
       attributionControl: { compact: true }
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
@@ -167,6 +223,7 @@ export default function App() {
         }
       }
     });
+    syncMapLayerOrder(map, layers, styleLayersByLayerId.current);
   }, [layers, mapReady, visibleLayerIds]);
 
   useEffect(() => {
@@ -176,9 +233,15 @@ export default function App() {
     const visibleLayersWithBounds = layers.filter((layer) => visibleLayerIds.has(layer.id) && layer.bbox4326);
     if (!visibleLayersWithBounds.length) return;
 
-    const layerToFit = !fittedInitialBounds.current
-      ? visibleLayersWithBounds[0]
-      : visibleLayersWithBounds.find((layer) => !seenLayerIds.current.has(layer.id));
+    if (!initializedLayerBounds.current) {
+      for (const layer of layers) {
+        seenLayerIds.current.add(layer.id);
+      }
+      initializedLayerBounds.current = true;
+      return;
+    }
+
+    const layerToFit = visibleLayersWithBounds.find((layer) => !seenLayerIds.current.has(layer.id));
 
     if (layerToFit?.bbox4326) {
       map.fitBounds(
@@ -188,7 +251,6 @@ export default function App() {
         ],
         { padding: 48, duration: 600, maxZoom: 16 }
       );
-      fittedInitialBounds.current = true;
     }
 
     for (const layer of layers) {
@@ -231,6 +293,28 @@ export default function App() {
       map.off("click", handleClick);
     };
   }, [layerById, mapReady]);
+
+  useEffect(() => {
+    if (!selectedFeature || !selectedFeatureLayer) {
+      setFeatureEditOpen(false);
+      setFeaturePropertyDraft({});
+      setFeatureGeometryDraft("");
+      return;
+    }
+
+    const nextDraft: Record<string, string> = {};
+    for (const attribute of editableFeatureAttributes(selectedFeatureLayer)) {
+      nextDraft[attribute.name] = formatEditorValue(selectedFeature.properties[attribute.name]);
+    }
+    setFeatureEditOpen(false);
+    setFeaturePropertyDraft(nextDraft);
+    setFeatureGeometryDraft(selectedFeature.geometry ? JSON.stringify(selectedFeature.geometry, null, 2) : "");
+  }, [selectedFeature, selectedFeatureLayer]);
+
+  const reloadLayerSource = (layerId: string) => {
+    const source = mapRef.current?.getSource(layerId) as { reload?: () => void } | undefined;
+    source?.reload?.();
+  };
 
   const submitUpload = async () => {
     if (!selectedProject || !uploadFile) return;
@@ -291,6 +375,63 @@ export default function App() {
     }
   };
 
+  const submitOuterBoundary = async () => {
+    if (!selectedProject || !outerTargetLayerId || !outerBoundaryLayerId) return;
+    const bufferMeters = Number(outerBoundaryBufferMeters || "1000");
+    if (!Number.isFinite(bufferMeters) || bufferMeters <= 0) {
+      setNotice("バッファ距離は正の数値で入力してください");
+      return;
+    }
+    const body = {
+      projectId: selectedProject,
+      name: outerBoundaryName.trim() || undefined,
+      targetLayerId: outerTargetLayerId,
+      operation: "outer_boundary",
+      boundaryLayerId: outerBoundaryLayerId,
+      bufferMeters
+    };
+    try {
+      const job = await createAnalysisJob(body);
+      setAnalysisJobs((current) => upsertJob(current, job));
+      pollAnalysisJob(job.id);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    }
+  };
+
+  const saveSelectedFeature = async () => {
+    if (!selectedFeature || !selectedFeatureLayer) return;
+    let geometry: unknown = null;
+    try {
+      if (featureGeometryDraft.trim()) {
+        geometry = JSON.parse(featureGeometryDraft);
+      }
+      const properties = Object.fromEntries(
+        editableFeatureAttributes(selectedFeatureLayer).map((attribute) => [
+          attribute.name,
+          parseEditedProperty(
+            featurePropertyDraft[attribute.name] ?? "",
+            selectedFeature.properties[attribute.name],
+            attribute.name
+          )
+        ])
+      );
+      setSavingFeature(true);
+      const feature = await updateFeature(selectedFeatureLayer.id, selectedFeature.featureId, {
+        properties,
+        geometry
+      });
+      setSelectedFeature(feature);
+      reloadLayerSource(selectedFeatureLayer.id);
+      void refreshLayers();
+      setNotice("地物を保存しました");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSavingFeature(false);
+    }
+  };
+
   const pollAnalysisJob = (id: string) => {
     const timer = window.setInterval(async () => {
       try {
@@ -314,6 +455,25 @@ export default function App() {
       else next.add(layerId);
       return next;
     });
+  };
+
+  const startLayerDrag = (event: DragEvent<HTMLDivElement>, layerId: string) => {
+    setDraggingLayerId(layerId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", layerId);
+  };
+
+  const dragLayerOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const dropLayer = (event: DragEvent<HTMLDivElement>, targetLayerId: string) => {
+    event.preventDefault();
+    const sourceLayerId = event.dataTransfer.getData("text/plain") || draggingLayerId;
+    setDraggingLayerId(null);
+    if (!sourceLayerId || sourceLayerId === targetLayerId) return;
+    setLayers((current) => moveLayerBefore(current, sourceLayerId, targetLayerId));
   };
 
   const addAttributeCondition = () => {
@@ -405,6 +565,7 @@ export default function App() {
           </div>
           <div className="layer-list">
             <div className="layer-row base-layer">
+              <span className="drag-handle disabled" aria-hidden="true" />
               <button
                 className="icon-button"
                 type="button"
@@ -422,7 +583,18 @@ export default function App() {
               </div>
             </div>
             {layers.map((layer) => (
-              <div className="layer-row" key={layer.id}>
+              <div
+                className={`layer-row${draggingLayerId === layer.id ? " dragging" : ""}`}
+                key={layer.id}
+                draggable
+                onDragEnd={() => setDraggingLayerId(null)}
+                onDragOver={dragLayerOver}
+                onDragStart={(event) => startLayerDrag(event, layer.id)}
+                onDrop={(event) => dropLayer(event, layer.id)}
+              >
+                <span className="drag-handle" title="ドラッグして並べ替え" aria-label="ドラッグして並べ替え">
+                  <GripVertical size={16} />
+                </span>
                 <button className="icon-button" type="button" onClick={() => toggleLayer(layer.id)} title="表示切替">
                   {visibleLayerIds.has(layer.id) ? <Eye size={17} /> : <EyeOff size={17} />}
                 </button>
@@ -482,6 +654,54 @@ export default function App() {
             抽出開始
           </button>
         </section>
+
+        <section className="panel-section analysis-section">
+          <div className="section-title">
+            <MapIcon size={16} />
+            <h2>外縁生成</h2>
+          </div>
+          <label>
+            結果名
+            <input value={outerBoundaryName} onChange={(event) => setOuterBoundaryName(event.target.value)} />
+          </label>
+          <label>
+            ポリゴン1
+            <select value={outerTargetLayerId} onChange={(event) => setOuterTargetLayerId(event.target.value)}>
+              {polygonLayers.map((layer) => (
+                <option key={layer.id} value={layer.id}>
+                  {layer.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            区域指定レイヤ
+            <select value={outerBoundaryLayerId} onChange={(event) => setOuterBoundaryLayerId(event.target.value)}>
+              {boundaryCandidateLayers.map((layer) => (
+                <option key={layer.id} value={layer.id}>
+                  {layer.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            バッファ(m)
+            <input
+              value={outerBoundaryBufferMeters}
+              onChange={(event) => setOuterBoundaryBufferMeters(event.target.value)}
+              inputMode="decimal"
+            />
+          </label>
+          <button
+            className="command-button"
+            type="button"
+            onClick={() => void submitOuterBoundary()}
+            disabled={!outerTargetLayerId || !outerBoundaryLayerId}
+          >
+            <Play size={16} />
+            外縁生成開始
+          </button>
+        </section>
       </aside>
 
       <main className="map-panel">
@@ -502,17 +722,40 @@ export default function App() {
           {selectedFeature && selectedFeatureLayer ? (
             <div className="feature-view">
               <div className="feature-heading">
-                <strong>{selectedFeatureLayer.name}</strong>
-                <span>ID {selectedFeature.featureId}</span>
+                <div>
+                  <strong>{selectedFeatureLayer.name}</strong>
+                  <span>ID {selectedFeature.featureId}</span>
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => setFeatureEditOpen((open) => !open)}
+                  title={featureEditOpen ? "編集を閉じる" : "地物編集"}
+                >
+                  {featureEditOpen ? <X size={16} /> : <Pencil size={16} />}
+                </button>
               </div>
-              <div className="property-table">
-                {Object.entries(selectedFeature.properties).map(([key, value]) => (
-                  <div className="property-row" key={key}>
-                    <span>{key}</span>
-                    <strong>{formatValue(value)}</strong>
-                  </div>
-                ))}
-              </div>
+              {featureEditOpen ? (
+                <FeatureEditor
+                  layer={selectedFeatureLayer}
+                  propertyDraft={featurePropertyDraft}
+                  setPropertyDraft={setFeaturePropertyDraft}
+                  geometryDraft={featureGeometryDraft}
+                  setGeometryDraft={setFeatureGeometryDraft}
+                  saving={savingFeature}
+                  onCancel={() => setFeatureEditOpen(false)}
+                  onSave={() => void saveSelectedFeature()}
+                />
+              ) : (
+                <div className="property-table">
+                  {Object.entries(selectedFeature.properties).map(([key, value]) => (
+                    <div className="property-row" key={key}>
+                      <span>{key}</span>
+                      <strong>{formatValue(value)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <p className="empty-state">地図上の地物を選択してください</p>
@@ -657,6 +900,66 @@ function ConditionEditor({
   );
 }
 
+function FeatureEditor({
+  layer,
+  propertyDraft,
+  setPropertyDraft,
+  geometryDraft,
+  setGeometryDraft,
+  saving,
+  onCancel,
+  onSave
+}: {
+  layer: Layer;
+  propertyDraft: Record<string, string>;
+  setPropertyDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  geometryDraft: string;
+  setGeometryDraft: React.Dispatch<React.SetStateAction<string>>;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const editableAttributes = editableFeatureAttributes(layer);
+  return (
+    <div className="feature-editor">
+      {editableAttributes.length ? (
+        <div className="feature-editor-fields">
+          {editableAttributes.map((attribute) => (
+            <label key={attribute.name}>
+              {attribute.name}
+              <input
+                value={propertyDraft[attribute.name] ?? ""}
+                onChange={(event) =>
+                  setPropertyDraft((current) => ({
+                    ...current,
+                    [attribute.name]: event.target.value
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="empty-state compact">編集可能な属性はありません</p>
+      )}
+      <label>
+        GeoJSON
+        <textarea value={geometryDraft} onChange={(event) => setGeometryDraft(event.target.value)} spellCheck={false} />
+      </label>
+      <div className="button-row">
+        <button className="subtle-button" type="button" onClick={onCancel}>
+          <X size={15} />
+          閉じる
+        </button>
+        <button className="command-button" type="button" onClick={onSave} disabled={saving}>
+          {saving ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
+          保存
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function JobList({ title, jobs }: { title: string; jobs: Array<ImportJob | AnalysisJob> }) {
   return (
     <div className="job-group">
@@ -778,6 +1081,125 @@ function parseDraftValue(value: string): string | number | boolean {
   return trimmed;
 }
 
+function parseEditedProperty(value: string, originalValue: unknown, fieldName: string): unknown {
+  const trimmed = value.trim();
+  if (originalValue === null || originalValue === undefined) {
+    return trimmed ? parseDraftValue(value) : null;
+  }
+  if (typeof originalValue === "number") {
+    if (!trimmed) return null;
+    const next = Number(trimmed);
+    if (!Number.isFinite(next)) throw new Error(`${fieldName} は数値で入力してください`);
+    return next;
+  }
+  if (typeof originalValue === "boolean") {
+    if (trimmed.toLowerCase() === "true") return true;
+    if (trimmed.toLowerCase() === "false") return false;
+    throw new Error(`${fieldName} は true または false で入力してください`);
+  }
+  if (typeof originalValue === "object") {
+    if (!trimmed) return null;
+    return JSON.parse(trimmed);
+  }
+  return value;
+}
+
+function moveLayerBefore(layers: Layer[], sourceLayerId: string, targetLayerId: string): Layer[] {
+  const sourceIndex = layers.findIndex((layer) => layer.id === sourceLayerId);
+  const targetIndex = layers.findIndex((layer) => layer.id === targetLayerId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return layers;
+
+  const next = [...layers];
+  const [sourceLayer] = next.splice(sourceIndex, 1);
+  const insertIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  next.splice(insertIndex, 0, sourceLayer);
+  return next;
+}
+
+function orderLayers(layers: Layer[], layerOrder: string[] | undefined): Layer[] {
+  if (!layerOrder?.length) return layers;
+  const layerById = new Map(layers.map((layer) => [layer.id, layer]));
+  const orderedLayers: Layer[] = [];
+  const usedLayerIds = new Set<string>();
+
+  for (const layerId of layerOrder) {
+    const layer = layerById.get(layerId);
+    if (!layer) continue;
+    orderedLayers.push(layer);
+    usedLayerIds.add(layerId);
+  }
+
+  return [...orderedLayers, ...layers.filter((layer) => !usedLayerIds.has(layer.id))];
+}
+
+function restoreVisibleLayerIds(
+  layers: Layer[],
+  savedViewState: Partial<LayerViewState> | null,
+  previousLayerIds: Set<string>,
+  currentVisibleLayerIds: Set<string>
+): Set<string> {
+  if (savedViewState?.visibleLayerIds) {
+    const savedVisibleLayerIds = new Set(savedViewState.visibleLayerIds);
+    const savedKnownLayerIds = new Set(savedViewState.layerOrder ?? []);
+    return new Set(
+      layers
+        .filter((layer) => savedVisibleLayerIds.has(layer.id) || !savedKnownLayerIds.has(layer.id))
+        .map((layer) => layer.id)
+    );
+  }
+
+  if (previousLayerIds.size || currentVisibleLayerIds.size) {
+    const next = new Set(layers.filter((layer) => currentVisibleLayerIds.has(layer.id)).map((layer) => layer.id));
+    for (const layer of layers) {
+      if (!previousLayerIds.has(layer.id)) next.add(layer.id);
+    }
+    return next;
+  }
+
+  return new Set(layers.map((layer) => layer.id));
+}
+
+function syncMapLayerOrder(
+  map: MapLibreMap,
+  layers: Layer[],
+  styleLayerIdsByLayerId: Record<string, string[]>
+) {
+  for (const layer of [...layers].reverse()) {
+    for (const styleLayerId of styleLayerIdsByLayerId[layer.id] ?? []) {
+      if (map.getLayer(styleLayerId)) {
+        map.moveLayer(styleLayerId);
+      }
+    }
+  }
+}
+
+function readLayerViewState(projectId: string): Partial<LayerViewState> | null {
+  try {
+    const rawState = window.localStorage.getItem(layerViewStateStoragePrefix + projectId);
+    if (!rawState) return null;
+    const parsed = JSON.parse(rawState) as Partial<LayerViewState>;
+    return {
+      baseMapVisible: typeof parsed.baseMapVisible === "boolean" ? parsed.baseMapVisible : undefined,
+      visibleLayerIds: Array.isArray(parsed.visibleLayerIds) ? parsed.visibleLayerIds.filter(isString) : undefined,
+      layerOrder: Array.isArray(parsed.layerOrder) ? parsed.layerOrder.filter(isString) : undefined
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeLayerViewState(projectId: string, state: LayerViewState) {
+  try {
+    window.localStorage.setItem(layerViewStateStoragePrefix + projectId, JSON.stringify(state));
+  } catch {
+    // localStorage may be unavailable in private or restricted browser contexts.
+  }
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
 function upsertJob<T extends { id: string }>(jobs: T[], next: T): T[] {
   const filtered = jobs.filter((job) => job.id !== next.id);
   return [next, ...filtered];
@@ -787,6 +1209,24 @@ function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function formatEditorValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function editableFeatureAttributes(layer: Layer) {
+  return layer.attributes.filter((attribute) => attribute.name !== layer.featureIdColumn && attribute.name !== layer.geometryColumn);
+}
+
+function isPolygonLayer(layer: Layer): boolean {
+  return layer.geometryType.toUpperCase().includes("POLYGON");
+}
+
+function isLineLayer(layer: Layer): boolean {
+  return layer.geometryType.toUpperCase().includes("LINE");
 }
 
 function errorMessage(error: unknown): string {

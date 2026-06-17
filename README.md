@@ -32,16 +32,14 @@ Fresh PostgreSQL volumes are seeded automatically during `docker compose up` fro
 The Web UI is immediately usable with these Tokyo layers:
 
 - `地価公示 2023 東京`
-- `行政区域 2023 東京`
 - `小地域（町丁・字等）2020 東京`
-- `公示地価 坪単価100万円以上 2023 東京`
-- `公示地価 坪単価200万円以上 2023 東京`
 - `坪単価200万以上の小地域`
+- `商業地域・近隣商業地域 東京`
 
 The seed data is stored as compressed PostGIS SQL, not as the original source ZIP files. Source datasets:
 
 - 国土数値情報 地価公示データ L01 2023 東京都
-- 国土数値情報 行政区域データ N03 2023 東京都
+- 国土数値情報 用途地域データ A29 2019 東京都
 - e-Stat 国勢調査 2020 小地域（町丁・字等）境界 東京都
 
 PostgreSQL entrypoint seed scripts run only when the `postgres-data` volume is created. If you need to recreate the bundled sample state from scratch, remove the existing Compose volume first.
