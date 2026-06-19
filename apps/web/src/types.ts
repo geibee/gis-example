@@ -24,6 +24,9 @@ export type Layer = {
   bbox4326?: [number, number, number, number] | null;
   rowCount: number;
   isResult: boolean;
+  resultSetId?: string | null;
+  resultSetName?: string | null;
+  sourceLayerId?: string | null;
   tileSourceId: string;
   attributes: LayerAttribute[];
   createdAt: string;
@@ -50,6 +53,7 @@ export type AnalysisJob = {
   status: "pending" | "running" | "succeeded" | "failed";
   errorMessage?: string | null;
   resultLayerId?: string | null;
+  resultSetId?: string | null;
   resultCount?: number | null;
   createdAt: string;
   startedAt?: string | null;
@@ -63,6 +67,128 @@ export type Feature = {
   geometry?: unknown;
 };
 
+export type FeatureSearchResult = {
+  layerId: string;
+  layerName: string;
+  featureId: string;
+  properties: Record<string, unknown>;
+  geometry?: unknown;
+  matchSummary?: string | null;
+  businessLinks: BusinessLinks;
+  matchedBusinessLinks: BusinessLinks;
+};
+
+export type ConditionQuery = {
+  projectId?: string;
+  targetLayerIds: string[];
+  keyword?: string;
+  conditions: ConditionQueryCondition[];
+  limit?: number;
+};
+
+export type ConditionQueryCondition =
+  | {
+      type: "attribute";
+      layerId?: string;
+      field: string;
+      operator: string;
+      value?: unknown;
+      values?: string[];
+    }
+  | {
+      type: "spatial";
+      comparisonTarget: "layer" | "business";
+      layerId?: string;
+      spatialOperator: string;
+      distanceMeters?: number;
+    }
+  | {
+      type: "business";
+      sourceTypes?: Array<"land" | "building">;
+      businessQuery?: string;
+      partyQuery?: string;
+      partyType?: string;
+      relationType?: string;
+    };
+
+export type BusinessSpatialSearchRequest = {
+  projectId?: string;
+  targetLayerIds: string[];
+  sourceTypes: Array<"land" | "building">;
+  businessQuery?: string;
+  partyQuery?: string;
+  partyType?: string;
+  relationType?: string;
+  spatialOperator?: string;
+  distanceMeters?: number;
+  limit?: number;
+};
+
+export type BusinessEntityLink = {
+  id: string;
+  label: string;
+};
+
+export type PartyRelationship = {
+  id: string;
+  projectId: string;
+  partyId: string;
+  partyName?: string | null;
+  targetType: "land" | "building";
+  targetId: string;
+  targetLabel?: string | null;
+  relationType: string;
+  note?: string | null;
+};
+
+export type Land = {
+  id: string;
+  projectId: string;
+  lotNumber: string;
+  address: string;
+  landUse?: string | null;
+  areaSqm?: number | null;
+  status: string;
+  memo?: string | null;
+  sourceLayerId?: string | null;
+  sourceFeatureId?: string | null;
+  buildings: BusinessEntityLink[];
+  relationships: PartyRelationship[];
+};
+
+export type Building = {
+  id: string;
+  projectId: string;
+  landId?: string | null;
+  landLabel?: string | null;
+  name: string;
+  buildingUse?: string | null;
+  floors?: number | null;
+  totalFloorAreaSqm?: number | null;
+  structure?: string | null;
+  status: string;
+  memo?: string | null;
+  sourceLayerId?: string | null;
+  sourceFeatureId?: string | null;
+  relationships: PartyRelationship[];
+};
+
+export type Party = {
+  id: string;
+  projectId: string;
+  name: string;
+  partyType: string;
+  contact?: string | null;
+  address?: string | null;
+  memo?: string | null;
+  relationships: PartyRelationship[];
+};
+
+export type BusinessLinks = {
+  lands: BusinessEntityLink[];
+  buildings: BusinessEntityLink[];
+};
+
 export type AttributeConditionDraft = {
   id: string;
   layerId: string;
@@ -73,6 +199,7 @@ export type AttributeConditionDraft = {
 
 export type SpatialConditionDraft = {
   id: string;
+  comparisonTarget: "layer" | "business";
   layerId: string;
   operator: string;
   distanceMeters: string;

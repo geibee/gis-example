@@ -37,6 +37,9 @@ data class LayerDto(
     val bbox4326: List<Double>? = null,
     val rowCount: Long,
     val isResult: Boolean,
+    val resultSetId: String? = null,
+    val resultSetName: String? = null,
+    val sourceLayerId: String? = null,
     val tileSourceId: String,
     val attributes: List<LayerAttributeDto> = emptyList(),
     val createdAt: String
@@ -74,15 +77,43 @@ data class SpatialConditionDto(
 )
 
 @Serializable
+data class ConditionQueryConditionDto(
+    val type: String,
+    val layerId: String? = null,
+    val field: String? = null,
+    val operator: String? = null,
+    val value: JsonElement? = null,
+    val values: List<String>? = null,
+    val comparisonTarget: String? = null,
+    val sourceTypes: List<String>? = null,
+    val businessQuery: String? = null,
+    val partyQuery: String? = null,
+    val partyType: String? = null,
+    val relationType: String? = null,
+    val spatialOperator: String? = null,
+    val distanceMeters: Double? = null
+)
+
+@Serializable
+data class ConditionQueryDto(
+    val projectId: String? = null,
+    val targetLayerIds: List<String> = emptyList(),
+    val keyword: String? = null,
+    val conditions: List<ConditionQueryConditionDto> = emptyList(),
+    val limit: Int = 100
+)
+
+@Serializable
 data class AnalysisJobRequest(
     val projectId: String? = null,
     val name: String? = null,
-    val targetLayerId: String,
+    val targetLayerId: String? = null,
     val operation: String? = null,
     val boundaryLayerId: String? = null,
     val bufferMeters: Double? = null,
     val attributeConditions: List<AttributeConditionDto> = emptyList(),
-    val spatialConditions: List<SpatialConditionDto> = emptyList()
+    val spatialConditions: List<SpatialConditionDto> = emptyList(),
+    val conditionQuery: ConditionQueryDto? = null
 )
 
 @Serializable
@@ -94,6 +125,7 @@ data class AnalysisJobDto(
     val status: String,
     val errorMessage: String? = null,
     val resultLayerId: String? = null,
+    val resultSetId: String? = null,
     val resultCount: Long? = null,
     val createdAt: String,
     val startedAt: String? = null,
@@ -109,9 +141,106 @@ data class FeatureDto(
 )
 
 @Serializable
+data class FeatureSearchResultDto(
+    val layerId: String,
+    val layerName: String,
+    val featureId: String,
+    val properties: JsonObject,
+    val geometry: JsonElement? = null,
+    val matchSummary: String? = null,
+    val businessLinks: BusinessLinksDto = BusinessLinksDto(),
+    val matchedBusinessLinks: BusinessLinksDto = BusinessLinksDto()
+)
+
+@Serializable
+data class BusinessSpatialSearchRequest(
+    val projectId: String? = null,
+    val targetLayerIds: List<String> = emptyList(),
+    val sourceTypes: List<String> = listOf("land", "building"),
+    val businessQuery: String? = null,
+    val partyQuery: String? = null,
+    val partyType: String? = null,
+    val relationType: String? = null,
+    val spatialOperator: String? = "intersects",
+    val distanceMeters: Double? = null,
+    val limit: Int = 100
+)
+
+@Serializable
 data class FeatureUpdateRequest(
     val properties: JsonObject = JsonObject(emptyMap()),
     val geometry: JsonElement? = null
+)
+
+@Serializable
+data class BusinessEntityLinkDto(
+    val id: String,
+    val label: String
+)
+
+@Serializable
+data class PartyRelationshipDto(
+    val id: String,
+    val projectId: String,
+    val partyId: String,
+    val partyName: String? = null,
+    val targetType: String,
+    val targetId: String,
+    val targetLabel: String? = null,
+    val relationType: String,
+    val note: String? = null
+)
+
+@Serializable
+data class LandDto(
+    val id: String,
+    val projectId: String,
+    val lotNumber: String,
+    val address: String,
+    val landUse: String? = null,
+    val areaSqm: Double? = null,
+    val status: String,
+    val memo: String? = null,
+    val sourceLayerId: String? = null,
+    val sourceFeatureId: String? = null,
+    val buildings: List<BusinessEntityLinkDto> = emptyList(),
+    val relationships: List<PartyRelationshipDto> = emptyList()
+)
+
+@Serializable
+data class BuildingDto(
+    val id: String,
+    val projectId: String,
+    val landId: String? = null,
+    val landLabel: String? = null,
+    val name: String,
+    val buildingUse: String? = null,
+    val floors: Int? = null,
+    val totalFloorAreaSqm: Double? = null,
+    val structure: String? = null,
+    val status: String,
+    val memo: String? = null,
+    val sourceLayerId: String? = null,
+    val sourceFeatureId: String? = null,
+    val relationships: List<PartyRelationshipDto> = emptyList()
+)
+
+@Serializable
+data class PartyDto(
+    val id: String,
+    val projectId: String,
+    val name: String,
+    val partyType: String,
+    val contact: String? = null,
+    val address: String? = null,
+    val memo: String? = null,
+    val relationships: List<PartyRelationshipDto> = emptyList()
+)
+
+@Serializable
+data class BusinessLinksDto(
+    val lands: List<BusinessEntityLinkDto> = emptyList(),
+    val buildings: List<BusinessEntityLinkDto> = emptyList()
 )
 
 @Serializable

@@ -19,6 +19,7 @@ import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
@@ -29,9 +30,9 @@ import io.ktor.http.content.forEachPart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 fun main() {
@@ -43,6 +44,7 @@ fun main() {
 
 fun Application.module() {
     val db = Database.fromEnv()
+    db.ensureBusinessSchema()
     val uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads")
     val apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/')
     val webOrigin = System.getenv("WEB_ORIGIN")
@@ -70,6 +72,7 @@ fun Application.module() {
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Patch)
+        allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Options)
         allowHeader(HttpHeaders.ContentType)
     }
@@ -106,6 +109,104 @@ fun Application.module() {
             val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
             val request = call.receive<FeatureUpdateRequest>()
             call.respond(db.updateFeature(layerId, featureId, request))
+        }
+
+        get("/api/features/search") {
+            val params = call.request.queryParameters
+            call.respond(
+                db.searchFeatures(
+                    projectId = params["projectId"],
+                    layerId = params["layerId"],
+                    q = params["q"],
+                    field = params["field"],
+                    operator = params["operator"],
+                    value = params["value"],
+                    linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                    limit = params["limit"]?.toIntOrNull() ?: 50
+                )
+            )
+        }
+
+        post("/api/features/business-spatial-search") {
+            val request = call.receive<BusinessSpatialSearchRequest>()
+            call.respond(db.searchBusinessSpatialFeatures(request))
+        }
+
+        post("/api/features/condition-search") {
+            val request = call.receive<ConditionQueryDto>()
+            call.respond(db.conditionSearchFeatures(request))
+        }
+
+        get("/api/features/{layerId}/{featureId}/business-links") {
+            val layerId = call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
+            call.respond(db.getBusinessLinks(layerId, featureId))
+        }
+
+        get("/api/lands") {
+            call.respond(db.listLands(call.request.queryParameters["projectId"], call.request.queryParameters["q"]))
+        }
+
+        get("/api/lands/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Land id is required")
+            call.respond(db.getLand(id) ?: throw ApiException(HttpStatusCode.NotFound, "Land not found"))
+        }
+
+        patch("/api/lands/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Land id is required")
+            call.respond(db.updateLand(id, call.receive<JsonObject>()))
+        }
+
+        delete("/api/lands/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Land id is required")
+            db.deleteLand(id)
+            call.respond(HttpStatusCode.NoContent)
+        }
+
+        get("/api/buildings") {
+            call.respond(
+                db.listBuildings(
+                    projectId = call.request.queryParameters["projectId"],
+                    q = call.request.queryParameters["q"],
+                    landId = call.request.queryParameters["landId"]
+                )
+            )
+        }
+
+        get("/api/buildings/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Building id is required")
+            call.respond(db.getBuilding(id) ?: throw ApiException(HttpStatusCode.NotFound, "Building not found"))
+        }
+
+        patch("/api/buildings/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Building id is required")
+            call.respond(db.updateBuilding(id, call.receive<JsonObject>()))
+        }
+
+        delete("/api/buildings/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Building id is required")
+            db.deleteBuilding(id)
+            call.respond(HttpStatusCode.NoContent)
+        }
+
+        get("/api/parties") {
+            call.respond(db.listParties(call.request.queryParameters["projectId"], call.request.queryParameters["q"]))
+        }
+
+        get("/api/parties/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Party id is required")
+            call.respond(db.getParty(id) ?: throw ApiException(HttpStatusCode.NotFound, "Party not found"))
+        }
+
+        patch("/api/parties/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Party id is required")
+            call.respond(db.updateParty(id, call.receive<JsonObject>()))
+        }
+
+        delete("/api/parties/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Party id is required")
+            db.deleteParty(id)
+            call.respond(HttpStatusCode.NoContent)
         }
 
         post("/api/import-jobs") {

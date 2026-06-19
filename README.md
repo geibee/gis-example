@@ -1,6 +1,6 @@
 # Web GIS MVP
 
-PostGIS を正本データストアにした OSS ベースの Web GIS MVP です。初期版は GIS ファイル取込、MapLibre/Martin による表示、複数レイヤを使った AND 条件抽出、結果レイヤ保存に絞っています。
+PostGIS を正本データストアにした OSS ベースの Web GIS MVP です。初期版は GIS ファイル取込、MapLibre/Martin による表示、複数レイヤを使った条件検索、結果レイヤ保存に絞っています。
 
 ## Stack
 
@@ -36,7 +36,13 @@ The Web UI is immediately usable with these Tokyo layers:
 - `坪単価200万以上の小地域`
 - `商業地域・近隣商業地域 東京`
 
-The seed data is stored as compressed PostGIS SQL, not as the original source ZIP files. Source datasets:
+The same fresh seed also includes business-domain records for the condition-search UI:
+
+- Lands: `L-0001` to `L-0003`
+- Buildings: `B-0001` to `B-0002`
+- Parties and relationships for owner, manager, and sales-party filters, including `銀座開発株式会社`
+
+The GIS seed data is stored as PostGIS SQL dumps, not as the original source ZIP files. Source datasets:
 
 - 国土数値情報 地価公示データ L01 2023 東京都
 - 国土数値情報 用途地域データ A29 2019 東京都
@@ -62,20 +68,19 @@ Supported initial formats are Shapefile zip, GML, KML, GPX, and GeoJSON. The wor
 
 ## Analysis Criteria
 
-`POST /api/analysis-jobs` accepts a target layer plus attribute and spatial conditions. Conditions are joined with AND. Non-target layer attribute conditions are evaluated inside the same layer existence predicate used for spatial filtering.
+`POST /api/features/condition-search` accepts a `ConditionQuery` and returns temporary feature matches grouped by `layerId`/`layerName` for UI review and map highlighting. `POST /api/analysis-jobs` also accepts `operation: "condition_search"` with the same `ConditionQuery`; the worker saves a result set and child result layers per source layer. Conditions are joined with AND in v1.
 
 ```json
 {
   "projectId": "00000000-0000-0000-0000-000000000000",
-  "name": "住宅かつ道路に接する筆",
-  "targetLayerId": "target-layer-uuid",
-  "attributeConditions": [
-    { "layerId": "target-layer-uuid", "field": "landuse", "operator": "=", "value": "residential" },
-    { "layerId": "road-layer-uuid", "field": "class", "operator": "IN", "values": ["primary", "secondary"] }
+  "targetLayerIds": ["a6dbb70e-1999-578f-904d-8f5c68513085"],
+  "keyword": "商業地域",
+  "conditions": [
+    { "type": "attribute", "layerId": "a6dbb70e-1999-578f-904d-8f5c68513085", "field": "zoning_name", "operator": "LIKE", "value": "商業" },
+    { "type": "spatial", "comparisonTarget": "business", "spatialOperator": "intersects" },
+    { "type": "business", "sourceTypes": ["land"], "partyQuery": "銀座開発", "relationType": "売買事業者" }
   ],
-  "spatialConditions": [
-    { "layerId": "road-layer-uuid", "operator": "intersects" }
-  ]
+  "limit": 100
 }
 ```
 

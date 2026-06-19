@@ -13,12 +13,36 @@ fun validateAnalysisRequest(db: Database, request: AnalysisJobRequest) {
     }
 
     val operation = request.operation?.takeIf { it.isNotBlank() }?.lowercase() ?: "and_filter"
-    if (operation !in setOf("and_filter", "outer_boundary")) {
+    if (operation !in setOf("and_filter", "outer_boundary", "condition_search")) {
         throw ApiException(HttpStatusCode.BadRequest, "Unsupported analysis operation: ${request.operation}")
     }
 
     val layersById = db.listLayers(projectId).associateBy { it.id }
-    val target = layersById[request.targetLayerId]
+
+    if (operation == "condition_search") {
+        val conditionQuery = request.conditionQuery
+            ?: throw ApiException(HttpStatusCode.BadRequest, "conditionQuery is required for condition_search")
+        val targetLayerIds = conditionQuery.targetLayerIds.mapNotNull { it.trim().takeIf(String::isNotEmpty) }.distinct()
+        if (targetLayerIds.isEmpty()) {
+            throw ApiException(HttpStatusCode.BadRequest, "conditionQuery.targetLayerIds is required")
+        }
+        targetLayerIds.forEach { layerId ->
+            if (!layersById.containsKey(layerId)) {
+                throw ApiException(HttpStatusCode.BadRequest, "Target layer does not exist in project: $layerId")
+            }
+        }
+        conditionQuery.conditions.forEach { condition ->
+            val layerId = condition.layerId?.trim()?.takeIf { it.isNotEmpty() }
+            if (layerId != null && !layersById.containsKey(layerId)) {
+                throw ApiException(HttpStatusCode.BadRequest, "Referenced layer does not exist in project: $layerId")
+            }
+        }
+        return
+    }
+
+    val targetLayerId = request.targetLayerId?.takeIf { it.isNotBlank() }
+        ?: throw ApiException(HttpStatusCode.BadRequest, "targetLayerId is required")
+    val target = layersById[targetLayerId]
         ?: throw ApiException(HttpStatusCode.BadRequest, "Target layer does not exist in project")
 
     if (operation == "outer_boundary") {
