@@ -1,6 +1,7 @@
 import type {
   AnalysisJob,
   Building,
+  BusinessObjectFilters,
   BusinessSpatialSearchRequest,
   BusinessLinks,
   ConditionQuery,
@@ -10,6 +11,7 @@ import type {
   Land,
   Layer,
   Party,
+  PartyRelationship,
   Project
 } from "./types";
 
@@ -41,6 +43,25 @@ function queryString(params: Record<string, string | undefined>): string {
   return value ? `?${value}` : "";
 }
 
+function businessFilterParams(filters?: BusinessObjectFilters): Record<string, string | undefined> {
+  if (!filters) return {};
+  return {
+    status: filters.status,
+    landUse: filters.landUse,
+    buildingUse: filters.buildingUse,
+    partyType: filters.partyType,
+    relationType: filters.relationType,
+    linkedOnly: filters.linkedOnly ? "true" : undefined,
+    sourceLayerId: filters.sourceLayerId,
+    bbox: filters.bbox,
+    intersectsLayerId: filters.intersectsLayerId,
+    intersectsFeatureId: filters.intersectsFeatureId,
+    distanceMeters: filters.distanceMeters,
+    targetType: filters.targetType || undefined,
+    landId: filters.landId
+  };
+}
+
 export function getProjects(): Promise<Project[]> {
   return requestJson<Project[]>("/api/projects");
 }
@@ -50,8 +71,25 @@ export function getLayers(projectId?: string): Promise<Layer[]> {
   return requestJson<Layer[]>(`/api/layers${query}`);
 }
 
+export function deleteLayer(id: string): Promise<void> {
+  return requestVoid(`/api/layers/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function deleteResultSet(id: string): Promise<void> {
+  return requestVoid(`/api/result-sets/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export function getFeature(layerId: string, featureId: string): Promise<Feature> {
   return requestJson<Feature>(`/api/layers/${layerId}/features/${encodeURIComponent(featureId)}`);
+}
+
+export function getLayerAttributeValues(layerId: string, field: string, limit = 80): Promise<string[]> {
+  return requestJson<string[]>(
+    `/api/layers/${encodeURIComponent(layerId)}/attribute-values${queryString({
+      field,
+      limit: String(limit)
+    })}`
+  );
 }
 
 export function updateFeature(layerId: string, featureId: string, body: unknown): Promise<Feature> {
@@ -108,12 +146,20 @@ export function conditionSearchFeatures(body: ConditionQuery): Promise<FeatureSe
   });
 }
 
-export function getLands(projectId?: string, q?: string): Promise<Land[]> {
-  return requestJson<Land[]>(`/api/lands${queryString({ projectId, q })}`);
+export function getLands(projectId?: string, q?: string, filters?: BusinessObjectFilters): Promise<Land[]> {
+  return requestJson<Land[]>(`/api/lands${queryString({ projectId, q, ...businessFilterParams(filters) })}`);
 }
 
 export function getLand(id: string): Promise<Land> {
   return requestJson<Land>(`/api/lands/${encodeURIComponent(id)}`);
+}
+
+export function createLand(body: unknown): Promise<Land> {
+  return requestJson<Land>("/api/lands", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
 export function updateLand(id: string, body: unknown): Promise<Land> {
@@ -128,12 +174,25 @@ export function deleteLand(id: string): Promise<void> {
   return requestVoid(`/api/lands/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export function getBuildings(projectId?: string, q?: string, landId?: string): Promise<Building[]> {
-  return requestJson<Building[]>(`/api/buildings${queryString({ projectId, q, landId })}`);
+export function getBuildings(
+  projectId?: string,
+  q?: string,
+  landId?: string,
+  filters?: BusinessObjectFilters
+): Promise<Building[]> {
+  return requestJson<Building[]>(`/api/buildings${queryString({ projectId, q, landId, ...businessFilterParams(filters) })}`);
 }
 
 export function getBuilding(id: string): Promise<Building> {
   return requestJson<Building>(`/api/buildings/${encodeURIComponent(id)}`);
+}
+
+export function createBuilding(body: unknown): Promise<Building> {
+  return requestJson<Building>("/api/buildings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
 export function updateBuilding(id: string, body: unknown): Promise<Building> {
@@ -148,12 +207,20 @@ export function deleteBuilding(id: string): Promise<void> {
   return requestVoid(`/api/buildings/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export function getParties(projectId?: string, q?: string): Promise<Party[]> {
-  return requestJson<Party[]>(`/api/parties${queryString({ projectId, q })}`);
+export function getParties(projectId?: string, q?: string, filters?: BusinessObjectFilters): Promise<Party[]> {
+  return requestJson<Party[]>(`/api/parties${queryString({ projectId, q, ...businessFilterParams(filters) })}`);
 }
 
 export function getParty(id: string): Promise<Party> {
   return requestJson<Party>(`/api/parties/${encodeURIComponent(id)}`);
+}
+
+export function createParty(body: unknown): Promise<Party> {
+  return requestJson<Party>("/api/parties", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
 export function updateParty(id: string, body: unknown): Promise<Party> {
@@ -166,6 +233,26 @@ export function updateParty(id: string, body: unknown): Promise<Party> {
 
 export function deleteParty(id: string): Promise<void> {
   return requestVoid(`/api/parties/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function createPartyRelationship(body: unknown): Promise<PartyRelationship> {
+  return requestJson<PartyRelationship>("/api/party-relationships", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function updatePartyRelationship(id: string, body: unknown): Promise<PartyRelationship> {
+  return requestJson<PartyRelationship>(`/api/party-relationships/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function deletePartyRelationship(id: string): Promise<void> {
+  return requestVoid(`/api/party-relationships/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export function createImportJob(formData: FormData): Promise<ImportJob> {

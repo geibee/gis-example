@@ -169,6 +169,12 @@ button:disabled {
   gap: 12px;
 }
 
+.sidebar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .eyebrow {
   margin: 0 0 2px;
   color: #637381;
@@ -227,12 +233,14 @@ label {
 input,
 select,
 textarea {
+  box-sizing: border-box;
   min-width: 0;
   width: 100%;
   border: 1px solid #c9d2dc;
   border-radius: 6px;
   background: #ffffff;
   color: #1f2933;
+  font-size: 13px;
 }
 
 input,
@@ -277,6 +285,7 @@ input[type="file"] {
 .danger-button,
 .notice button {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -309,6 +318,12 @@ input[type="file"] {
   background: #ffffff;
   color: #374151;
   text-decoration: none;
+}
+
+.danger-icon-button {
+  border-color: #f2b8b5;
+  background: #fff7f7;
+  color: #b42318;
 }
 
 .danger-button {
@@ -362,11 +377,10 @@ input[type="file"] {
 }
 
 .object-workspace {
-  display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .object-sidebar {
@@ -374,13 +388,22 @@ input[type="file"] {
   min-width: 0;
   flex-direction: column;
   gap: 14px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid #d3dae1;
   background: #f8fafb;
   padding: 16px;
 }
 
+.object-workspace.list-mode .object-sidebar {
+  border-right: 0;
+}
+
 .search-field > span {
   display: flex;
+  box-sizing: border-box;
+  height: 36px;
   align-items: center;
   gap: 8px;
   border: 1px solid #c9d2dc;
@@ -395,8 +418,12 @@ input[type="file"] {
 }
 
 .search-field input {
+  box-sizing: border-box;
+  height: 100%;
   border: 0;
+  border-radius: 6px;
   padding: 0;
+  font-size: 13px;
 }
 
 .zone-search-section {
@@ -607,10 +634,128 @@ input[type="file"] {
 
 .object-list {
   display: grid;
+  flex: 1 1 auto;
   gap: 7px;
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.business-table-scroll {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #d7dee6;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.business-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.business-table th,
+.business-table td {
+  border-bottom: 1px solid #e1e7ed;
+  padding: 8px 9px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 12px;
+}
+
+.business-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f3f6f8;
+  color: #4b5563;
+  font-weight: 800;
+}
+
+.business-table tr {
+  cursor: pointer;
+}
+
+.business-table tbody tr:hover {
+  background: #eef3f7;
+}
+
+.business-table tbody tr.active {
+  background: #e6f1f2;
+}
+
+.business-table td strong,
+.business-table td span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.business-table td strong {
+  color: #263238;
+  font-weight: 750;
+}
+
+.business-table td span {
+  color: #637381;
+}
+
+.business-filter-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.business-filter-panel > .subtle-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.business-filter-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border-top: 1px solid #dfe5eb;
+  padding-top: 8px;
+}
+
+.business-filter-fields input,
+.business-filter-fields select {
+  height: 32px;
+  font-size: 12px;
+}
+
+.filter-checkbox,
+.filter-summary {
+  grid-column: 1 / -1;
+}
+
+.filter-command-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: end;
+}
+
+.filter-command-row .subtle-button {
+  width: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 32px;
+  gap: 5px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.filter-command-row .icon-button {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+}
+
+.filter-summary {
+  margin: 0;
+  color: #637381;
+  font-size: 11px;
 }
 
 .object-row {
@@ -682,6 +827,19 @@ input[type="file"] {
   min-width: 0;
 }
 
+.object-title-group {
+  display: grid;
+  gap: 10px;
+}
+
+.object-back-button {
+  justify-self: start;
+  flex: 0 1 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .object-detail-header h1,
 .object-detail-header span {
   overflow-wrap: anywhere;
@@ -731,11 +889,28 @@ input[type="file"] {
 
 .object-related,
 .relationship-list,
-.business-links-panel {
+.business-links-panel,
+.source-link-panel {
   display: grid;
   gap: 8px;
   border-top: 1px solid #d8e0e8;
   padding-top: 14px;
+}
+
+.source-link-panel {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.source-link-panel h3,
+.source-link-panel p {
+  margin: 0;
+}
+
+.source-link-panel p {
+  overflow-wrap: anywhere;
+  color: #637381;
+  font-size: 12px;
 }
 
 .object-related > button {
@@ -768,6 +943,56 @@ input[type="file"] {
   min-height: 34px;
   border-bottom: 1px solid #e1e7ed;
   padding: 6px 0;
+}
+
+.relationship-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.relationship-edit-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+  gap: 8px;
+  align-items: end;
+  border: 1px solid #d7dee6;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.relationship-edit-form input,
+.relationship-edit-form select {
+  height: 32px;
+  font-size: 12px;
+}
+
+.relationship-edit-form .command-button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.relationship-row.editable {
+  grid-template-columns: minmax(92px, 0.65fr) minmax(130px, 1fr) minmax(160px, 1.2fr) auto;
+}
+
+.relationship-row button:not(.icon-button) {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #0f665f;
+  padding: 0;
+  text-align: left;
+}
+
+.relationship-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: end;
+  gap: 4px;
 }
 
 .relationship-row span,
@@ -875,7 +1100,7 @@ input[type="file"] {
 
 .layer-row {
   display: grid;
-  grid-template-columns: 22px 34px minmax(0, 1fr);
+  grid-template-columns: 22px 34px minmax(0, 1fr) 34px;
   align-items: center;
   gap: 8px;
   min-height: 42px;
@@ -921,6 +1146,11 @@ input[type="file"] {
 
 .drag-handle.disabled {
   visibility: hidden;
+}
+
+.layer-action-spacer {
+  width: 34px;
+  height: 34px;
 }
 
 .layer-meta {
@@ -1181,8 +1411,21 @@ input[type="file"] {
     grid-template-columns: 1fr;
   }
 
+  .business-filter-fields,
+  .relationship-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-command-row {
+    grid-template-columns: 1fr 1fr 34px;
+  }
+
   .relationship-row {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .relationship-row.editable {
+    grid-template-columns: 1fr;
   }
 }

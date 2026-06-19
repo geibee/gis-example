@@ -98,6 +98,26 @@ fun Application.module() {
             call.respond(db.listLayers(call.request.queryParameters["projectId"]))
         }
 
+        get("/api/layers/{id}/attribute-values") {
+            val layerId = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val field = call.request.queryParameters["field"]
+                ?: throw ApiException(HttpStatusCode.BadRequest, "Attribute field is required")
+            val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 80
+            call.respond(db.listAttributeValues(layerId, field, limit))
+        }
+
+        delete("/api/layers/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            db.deleteLayer(id)
+            call.respond(HttpStatusCode.NoContent)
+        }
+
+        delete("/api/result-sets/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Result set id is required")
+            db.deleteResultSet(id)
+            call.respond(HttpStatusCode.NoContent)
+        }
+
         get("/api/layers/{id}/features/{featureId}") {
             val layerId = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
             val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
@@ -144,7 +164,29 @@ fun Application.module() {
         }
 
         get("/api/lands") {
-            call.respond(db.listLands(call.request.queryParameters["projectId"], call.request.queryParameters["q"]))
+            val params = call.request.queryParameters
+            call.respond(
+                db.listLands(
+                    LandListQuery(
+                        projectId = params["projectId"],
+                        q = params["q"],
+                        status = params["status"],
+                        landUse = params["landUse"],
+                        partyType = params["partyType"],
+                        relationType = params["relationType"],
+                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                        sourceLayerId = params["sourceLayerId"],
+                        bbox = params["bbox"],
+                        intersectsLayerId = params["intersectsLayerId"],
+                        intersectsFeatureId = params["intersectsFeatureId"],
+                        distanceMeters = params["distanceMeters"]?.toDoubleOrNull()
+                    )
+                )
+            )
+        }
+
+        post("/api/lands") {
+            call.respond(HttpStatusCode.Created, db.createLand(call.receive<JsonObject>()))
         }
 
         get("/api/lands/{id}") {
@@ -164,13 +206,30 @@ fun Application.module() {
         }
 
         get("/api/buildings") {
+            val params = call.request.queryParameters
             call.respond(
                 db.listBuildings(
-                    projectId = call.request.queryParameters["projectId"],
-                    q = call.request.queryParameters["q"],
-                    landId = call.request.queryParameters["landId"]
+                    BuildingListQuery(
+                        projectId = params["projectId"],
+                        q = params["q"],
+                        landId = params["landId"],
+                        status = params["status"],
+                        buildingUse = params["buildingUse"],
+                        partyType = params["partyType"],
+                        relationType = params["relationType"],
+                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                        sourceLayerId = params["sourceLayerId"],
+                        bbox = params["bbox"],
+                        intersectsLayerId = params["intersectsLayerId"],
+                        intersectsFeatureId = params["intersectsFeatureId"],
+                        distanceMeters = params["distanceMeters"]?.toDoubleOrNull()
+                    )
                 )
             )
+        }
+
+        post("/api/buildings") {
+            call.respond(HttpStatusCode.Created, db.createBuilding(call.receive<JsonObject>()))
         }
 
         get("/api/buildings/{id}") {
@@ -190,7 +249,23 @@ fun Application.module() {
         }
 
         get("/api/parties") {
-            call.respond(db.listParties(call.request.queryParameters["projectId"], call.request.queryParameters["q"]))
+            val params = call.request.queryParameters
+            call.respond(
+                db.listParties(
+                    PartyListQuery(
+                        projectId = params["projectId"],
+                        q = params["q"],
+                        partyType = params["partyType"],
+                        relationType = params["relationType"],
+                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                        targetType = params["targetType"]
+                    )
+                )
+            )
+        }
+
+        post("/api/parties") {
+            call.respond(HttpStatusCode.Created, db.createParty(call.receive<JsonObject>()))
         }
 
         get("/api/parties/{id}") {
@@ -206,6 +281,21 @@ fun Application.module() {
         delete("/api/parties/{id}") {
             val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Party id is required")
             db.deleteParty(id)
+            call.respond(HttpStatusCode.NoContent)
+        }
+
+        post("/api/party-relationships") {
+            call.respond(HttpStatusCode.Created, db.createPartyRelationship(call.receive<JsonObject>()))
+        }
+
+        patch("/api/party-relationships/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Relationship id is required")
+            call.respond(db.updatePartyRelationship(id, call.receive<JsonObject>()))
+        }
+
+        delete("/api/party-relationships/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Relationship id is required")
+            db.deletePartyRelationship(id)
             call.respond(HttpStatusCode.NoContent)
         }
 

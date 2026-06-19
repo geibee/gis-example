@@ -1,5 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE SCHEMA IF NOT EXISTS app;
 CREATE SCHEMA IF NOT EXISTS gis_data;
@@ -86,6 +87,10 @@ CREATE TABLE IF NOT EXISTS app.lands (
     address text NOT NULL,
     land_use text,
     area_sqm double precision,
+    registered_owner text,
+    right_type text,
+    registration_cause text,
+    registration_accepted_on date,
     status text NOT NULL DEFAULT '調査中',
     memo text,
     source_layer_id uuid,
@@ -99,10 +104,15 @@ CREATE TABLE IF NOT EXISTS app.buildings (
     project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
     land_id text REFERENCES app.lands(id) ON DELETE SET NULL,
     name text NOT NULL,
+    building_location text,
+    house_number text,
     building_use text,
     floors integer,
     total_floor_area_sqm double precision,
     structure text,
+    registered_owner text,
+    right_type text,
+    registration_accepted_on date,
     status text NOT NULL DEFAULT '調査中',
     memo text,
     source_layer_id uuid,
@@ -148,6 +158,43 @@ CREATE INDEX IF NOT EXISTS buildings_source_feature_idx ON app.buildings(source_
 CREATE INDEX IF NOT EXISTS parties_project_search_idx ON app.parties(project_id, id);
 CREATE INDEX IF NOT EXISTS party_relationships_party_idx ON app.party_relationships(party_id);
 CREATE INDEX IF NOT EXISTS party_relationships_target_idx ON app.party_relationships(target_type, target_id);
+CREATE INDEX IF NOT EXISTS lands_search_text_trgm_idx ON app.lands USING gin (
+    lower(
+        coalesce(id, '') || ' ' ||
+        coalesce(lot_number, '') || ' ' ||
+        coalesce(address, '') || ' ' ||
+        coalesce(land_use, '') || ' ' ||
+        coalesce(status, '') || ' ' ||
+        coalesce(memo, '') || ' ' ||
+        coalesce(registered_owner, '') || ' ' ||
+        coalesce(right_type, '') || ' ' ||
+        coalesce(registration_cause, '')
+    ) gin_trgm_ops
+);
+CREATE INDEX IF NOT EXISTS buildings_search_text_trgm_idx ON app.buildings USING gin (
+    lower(
+        coalesce(id, '') || ' ' ||
+        coalesce(name, '') || ' ' ||
+        coalesce(building_location, '') || ' ' ||
+        coalesce(house_number, '') || ' ' ||
+        coalesce(building_use, '') || ' ' ||
+        coalesce(structure, '') || ' ' ||
+        coalesce(status, '') || ' ' ||
+        coalesce(memo, '') || ' ' ||
+        coalesce(registered_owner, '') || ' ' ||
+        coalesce(right_type, '')
+    ) gin_trgm_ops
+);
+CREATE INDEX IF NOT EXISTS parties_search_text_trgm_idx ON app.parties USING gin (
+    lower(
+        coalesce(id, '') || ' ' ||
+        coalesce(name, '') || ' ' ||
+        coalesce(party_type, '') || ' ' ||
+        coalesce(contact, '') || ' ' ||
+        coalesce(address, '') || ' ' ||
+        coalesce(memo, '')
+    ) gin_trgm_ops
+);
 
 INSERT INTO app.projects (id, name)
 VALUES ('00000000-0000-0000-0000-000000000000', 'Default project')

@@ -18,8 +18,49 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Types
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
+
+data class LandListQuery(
+    val projectId: String?,
+    val q: String?,
+    val status: String?,
+    val landUse: String?,
+    val partyType: String?,
+    val relationType: String?,
+    val linkedOnly: Boolean,
+    val sourceLayerId: String?,
+    val bbox: String?,
+    val intersectsLayerId: String?,
+    val intersectsFeatureId: String?,
+    val distanceMeters: Double?
+)
+
+data class BuildingListQuery(
+    val projectId: String?,
+    val q: String?,
+    val landId: String?,
+    val status: String?,
+    val buildingUse: String?,
+    val partyType: String?,
+    val relationType: String?,
+    val linkedOnly: Boolean,
+    val sourceLayerId: String?,
+    val bbox: String?,
+    val intersectsLayerId: String?,
+    val intersectsFeatureId: String?,
+    val distanceMeters: Double?
+)
+
+data class PartyListQuery(
+    val projectId: String?,
+    val q: String?,
+    val partyType: String?,
+    val relationType: String?,
+    val linkedOnly: Boolean,
+    val targetType: String?
+)
 
 class Database(private val dataSource: HikariDataSource) : AutoCloseable {
     companion object {
@@ -52,6 +93,13 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         val matchedBusinessLinks: BusinessLinksDto
     )
 
+    private data class DeletedLayerRef(
+        val id: String,
+        val schemaName: String,
+        val tableName: String,
+        val resultSetId: String?
+    )
+
     override fun close() {
         dataSource.close()
     }
@@ -61,6 +109,8 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             connection.createStatement().use { stmt ->
                 stmt.execute(
                     """
+                    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
                     CREATE TABLE IF NOT EXISTS app.lands (
                         id text PRIMARY KEY,
                         project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
@@ -68,6 +118,10 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                         address text NOT NULL,
                         land_use text,
                         area_sqm double precision,
+                        registered_owner text,
+                        right_type text,
+                        registration_cause text,
+                        registration_accepted_on date,
                         status text NOT NULL DEFAULT '調査中',
                         memo text,
                         source_layer_id uuid,
@@ -81,10 +135,15 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                         project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
                         land_id text REFERENCES app.lands(id) ON DELETE SET NULL,
                         name text NOT NULL,
+                        building_location text,
+                        house_number text,
                         building_use text,
                         floors integer,
                         total_floor_area_sqm double precision,
                         structure text,
+                        registered_owner text,
+                        right_type text,
+                        registration_accepted_on date,
                         status text NOT NULL DEFAULT '調査中',
                         memo text,
                         source_layer_id uuid,
@@ -130,6 +189,17 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                         ADD COLUMN IF NOT EXISTS source_layer_id uuid REFERENCES app.layers(id) ON DELETE SET NULL;
                     ALTER TABLE app.analysis_jobs
                         ADD COLUMN IF NOT EXISTS result_set_id uuid REFERENCES app.result_sets(id) ON DELETE SET NULL;
+                    ALTER TABLE app.lands
+                        ADD COLUMN IF NOT EXISTS registered_owner text,
+                        ADD COLUMN IF NOT EXISTS right_type text,
+                        ADD COLUMN IF NOT EXISTS registration_cause text,
+                        ADD COLUMN IF NOT EXISTS registration_accepted_on date;
+                    ALTER TABLE app.buildings
+                        ADD COLUMN IF NOT EXISTS building_location text,
+                        ADD COLUMN IF NOT EXISTS house_number text,
+                        ADD COLUMN IF NOT EXISTS registered_owner text,
+                        ADD COLUMN IF NOT EXISTS right_type text,
+                        ADD COLUMN IF NOT EXISTS registration_accepted_on date;
 
                     CREATE INDEX IF NOT EXISTS lands_project_search_idx ON app.lands(project_id, id);
                     CREATE INDEX IF NOT EXISTS lands_source_feature_idx ON app.lands(source_layer_id, source_feature_id);
@@ -142,6 +212,43 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                     CREATE INDEX IF NOT EXISTS result_sets_project_created_idx ON app.result_sets(project_id, created_at);
                     CREATE INDEX IF NOT EXISTS layers_result_set_idx ON app.layers(result_set_id, created_at);
                     CREATE INDEX IF NOT EXISTS layers_source_layer_idx ON app.layers(source_layer_id);
+                    CREATE INDEX IF NOT EXISTS lands_search_text_trgm_idx ON app.lands USING gin (
+                        lower(
+                            coalesce(id, '') || ' ' ||
+                            coalesce(lot_number, '') || ' ' ||
+                            coalesce(address, '') || ' ' ||
+                            coalesce(land_use, '') || ' ' ||
+                            coalesce(status, '') || ' ' ||
+                            coalesce(memo, '') || ' ' ||
+                            coalesce(registered_owner, '') || ' ' ||
+                            coalesce(right_type, '') || ' ' ||
+                            coalesce(registration_cause, '')
+                        ) gin_trgm_ops
+                    );
+                    CREATE INDEX IF NOT EXISTS buildings_search_text_trgm_idx ON app.buildings USING gin (
+                        lower(
+                            coalesce(id, '') || ' ' ||
+                            coalesce(name, '') || ' ' ||
+                            coalesce(building_location, '') || ' ' ||
+                            coalesce(house_number, '') || ' ' ||
+                            coalesce(building_use, '') || ' ' ||
+                            coalesce(structure, '') || ' ' ||
+                            coalesce(status, '') || ' ' ||
+                            coalesce(memo, '') || ' ' ||
+                            coalesce(registered_owner, '') || ' ' ||
+                            coalesce(right_type, '')
+                        ) gin_trgm_ops
+                    );
+                    CREATE INDEX IF NOT EXISTS parties_search_text_trgm_idx ON app.parties USING gin (
+                        lower(
+                            coalesce(id, '') || ' ' ||
+                            coalesce(name, '') || ' ' ||
+                            coalesce(party_type, '') || ' ' ||
+                            coalesce(contact, '') || ' ' ||
+                            coalesce(address, '') || ' ' ||
+                            coalesce(memo, '')
+                        ) gin_trgm_ops
+                    );
 
                     INSERT INTO app.projects (id, name)
                     VALUES ('00000000-0000-0000-0000-000000000000', 'Default project')
@@ -300,6 +407,205 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                     withAttributes(connection, listOf(rs.toLayerDto(emptyList()))).single()
                 }
             }
+        }
+    }
+
+    fun listAttributeValues(layerId: String, field: String, limit: Int): List<String> {
+        val layer = getLayer(layerId)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
+        val attribute = layer.attributes.find { it.name == field.trim() }
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Unknown attribute: $field")
+        if (attribute.name == layer.geometryColumn) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Geometry attribute values cannot be listed")
+        }
+        val boundedLimit = limit.coerceIn(1, 100)
+        val fieldRef = quoteIdent(attribute.name)
+        val sql = """
+            SELECT $fieldRef::text AS value, COUNT(*) AS frequency
+            FROM ${quoteIdent(layer.schemaName)}.${quoteIdent(layer.tableName)}
+            WHERE $fieldRef IS NOT NULL
+            GROUP BY $fieldRef::text
+            ORDER BY frequency DESC, value ASC
+            LIMIT ?
+        """.trimIndent()
+        return dataSource.connection.use { connection ->
+            connection.prepareStatement(sql).use { stmt ->
+                stmt.setInt(1, boundedLimit)
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            rs.getString("value")?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun deleteLayer(id: String) {
+        dataSource.connection.use { connection ->
+            val previousAutoCommit = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                val layer = loadDeletedLayerForUpdate(connection, id)
+                    ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
+                deleteLayerInTransaction(connection, layer)
+                layer.resultSetId?.let { deleteResultSetIfEmpty(connection, it) }
+                connection.commit()
+            } catch (exc: ApiException) {
+                connection.rollback()
+                throw exc
+            } catch (exc: SQLException) {
+                connection.rollback()
+                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Layer delete failed: ${exc.message ?: "invalid layer delete"}")
+            } finally {
+                connection.autoCommit = previousAutoCommit
+            }
+        }
+    }
+
+    fun deleteResultSet(id: String) {
+        dataSource.connection.use { connection ->
+            val previousAutoCommit = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                val resultSetExists = connection.prepareStatement(
+                    "SELECT id::text FROM app.result_sets WHERE id = ?::uuid FOR UPDATE"
+                ).use { stmt ->
+                    stmt.setString(1, id)
+                    stmt.executeQuery().use { rs ->
+                        rs.next()
+                    }
+                }
+                if (!resultSetExists) {
+                    throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Result set not found")
+                }
+
+                listDeletedLayersForResultSet(connection, id).forEach { layer ->
+                    deleteLayerInTransaction(connection, layer)
+                }
+                deleteResultSetRecord(connection, id)
+                connection.commit()
+            } catch (exc: ApiException) {
+                connection.rollback()
+                throw exc
+            } catch (exc: SQLException) {
+                connection.rollback()
+                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Result set delete failed: ${exc.message ?: "invalid result set delete"}")
+            } finally {
+                connection.autoCommit = previousAutoCommit
+            }
+        }
+    }
+
+    private fun loadDeletedLayerForUpdate(connection: Connection, id: String): DeletedLayerRef? =
+        connection.prepareStatement(
+            """
+            SELECT id::text, schema_name, table_name, result_set_id::text
+            FROM app.layers
+            WHERE id = ?::uuid
+            FOR UPDATE
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs ->
+                if (!rs.next()) {
+                    null
+                } else {
+                    rs.toDeletedLayerRef()
+                }
+            }
+        }
+
+    private fun listDeletedLayersForResultSet(connection: Connection, resultSetId: String): List<DeletedLayerRef> =
+        connection.prepareStatement(
+            """
+            SELECT id::text, schema_name, table_name, result_set_id::text
+            FROM app.layers
+            WHERE result_set_id = ?::uuid
+            ORDER BY created_at DESC
+            FOR UPDATE
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, resultSetId)
+            stmt.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) add(rs.toDeletedLayerRef())
+                }
+            }
+        }
+
+    private fun deleteLayerInTransaction(connection: Connection, layer: DeletedLayerRef) {
+        connection.prepareStatement(
+            """
+            UPDATE app.lands
+            SET source_layer_id = NULL, source_feature_id = NULL, updated_at = now()
+            WHERE source_layer_id = ?::uuid
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+        connection.prepareStatement(
+            """
+            UPDATE app.buildings
+            SET source_layer_id = NULL, source_feature_id = NULL, updated_at = now()
+            WHERE source_layer_id = ?::uuid
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+        connection.prepareStatement("UPDATE app.layers SET source_layer_id = NULL WHERE source_layer_id = ?::uuid").use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+        connection.prepareStatement("UPDATE app.import_jobs SET layer_id = NULL WHERE layer_id = ?::uuid").use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+        connection.prepareStatement("UPDATE app.analysis_jobs SET result_layer_id = NULL WHERE result_layer_id = ?::uuid").use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+
+        val deleted = connection.prepareStatement("DELETE FROM app.layers WHERE id = ?::uuid").use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+        if (deleted == 0) {
+            throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
+        }
+
+        connection.createStatement().use { stmt ->
+            stmt.execute("DROP TABLE IF EXISTS ${quoteIdent(layer.schemaName)}.${quoteIdent(layer.tableName)}")
+        }
+    }
+
+    private fun deleteResultSetIfEmpty(connection: Connection, resultSetId: String) {
+        val hasLayers = connection.prepareStatement("SELECT EXISTS (SELECT 1 FROM app.layers WHERE result_set_id = ?::uuid)").use { stmt ->
+            stmt.setString(1, resultSetId)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getBoolean(1)
+            }
+        }
+        if (!hasLayers) {
+            deleteResultSetRecord(connection, resultSetId, requireExisting = false)
+        }
+    }
+
+    private fun deleteResultSetRecord(connection: Connection, resultSetId: String, requireExisting: Boolean = true) {
+        connection.prepareStatement("UPDATE app.analysis_jobs SET result_set_id = NULL WHERE result_set_id = ?::uuid").use { stmt ->
+            stmt.setString(1, resultSetId)
+            stmt.executeUpdate()
+        }
+        val deleted = connection.prepareStatement("DELETE FROM app.result_sets WHERE id = ?::uuid").use { stmt ->
+            stmt.setString(1, resultSetId)
+            stmt.executeUpdate()
+        }
+        if (requireExisting && deleted == 0) {
+            throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Result set not found")
         }
     }
 
@@ -991,6 +1297,9 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         targetLayerIds = listOf(targetLayerId),
         sourceTypes = sourceTypes,
         businessQuery = condition?.businessQuery,
+        status = condition?.status,
+        landUse = condition?.landUse,
+        buildingUse = condition?.buildingUse,
         partyQuery = condition?.partyQuery,
         partyType = condition?.partyType,
         relationType = condition?.relationType,
@@ -1030,6 +1339,8 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                 filters,
                 landBinders
             )
+            addBusinessChoiceFilter(condition.status, "l.status", filters, landBinders)
+            addBusinessChoiceFilter(condition.landUse, "l.land_use", filters, landBinders)
             addPartyRelationshipFilter("land", "l.id", "l.project_id", businessSearchRequest(projectId, targetLayer.id, condition, listOf("land"), 1), filters, landBinders)
             clauses.add("EXISTS (SELECT 1 FROM app.lands AS l WHERE ${filters.joinToString(" AND ")})")
             binders.addAll(landBinders)
@@ -1050,6 +1361,8 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                 filters,
                 buildingBinders
             )
+            addBusinessChoiceFilter(condition.status, "b.status", filters, buildingBinders)
+            addBusinessChoiceFilter(condition.buildingUse, "b.building_use", filters, buildingBinders)
             addPartyRelationshipFilter("building", "b.id", "b.project_id", businessSearchRequest(projectId, targetLayer.id, condition, listOf("building"), 1), filters, buildingBinders)
             clauses.add(
                 """
@@ -1314,27 +1627,82 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     )
 
-    fun listLands(projectId: String?, q: String?): List<LandDto> = dataSource.connection.use { connection ->
+    fun listLands(query: LandListQuery): List<LandDto> = dataSource.connection.use { connection ->
         val filters = mutableListOf<String>()
-        val query = q?.trim()?.takeIf { it.isNotEmpty() }
-        if (!projectId.isNullOrBlank()) filters.add("project_id = ?::uuid")
-        if (query != null) {
-            filters.add("lower(concat_ws(' ', id, lot_number, address, land_use, status, memo)) LIKE lower(?)")
+        val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+        val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
+        if (!query.projectId.isNullOrBlank()) {
+            filters.add("l.project_id = ?::uuid")
+            binders.add { stmt, index -> stmt.setString(index, query.projectId) }
         }
+        if (textQuery != null) {
+            filters.add(
+                """
+                (
+                    lower(${landSearchTextSql("l")}) LIKE lower(?)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM app.party_relationships AS r
+                        JOIN app.parties AS p ON p.id = r.party_id
+                        WHERE r.project_id = l.project_id
+                          AND r.target_type = 'land'
+                          AND r.target_id = l.id
+                          AND lower(${relationshipSearchTextSql("r", "p")}) LIKE lower(?)
+                    )
+                )
+                """.trimIndent()
+            )
+            binders.add { stmt, index -> stmt.setString(index, "%$textQuery%") }
+            binders.add { stmt, index -> stmt.setString(index, "%$textQuery%") }
+        }
+        query.status?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            filters.add("l.status ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+        }
+        query.landUse?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            filters.add("l.land_use ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+        }
+        addRelationshipListFilter(
+            targetType = "land",
+            targetIdExpression = "l.id",
+            projectIdExpression = "l.project_id",
+            partyType = query.partyType,
+            relationType = query.relationType,
+            filters = filters,
+            binders = binders
+        )
+        addBusinessListSpatialFilters(
+            entityAlias = "l",
+            projectId = query.projectId,
+            linkedOnly = query.linkedOnly,
+            sourceLayerId = query.sourceLayerId,
+            bbox = query.bbox,
+            intersectsLayerId = query.intersectsLayerId,
+            intersectsFeatureId = query.intersectsFeatureId,
+            distanceMeters = query.distanceMeters,
+            filters = filters,
+            binders = binders
+        )
         val sql = """
-            SELECT id, project_id::text, lot_number, address, land_use, area_sqm, status, memo,
-                   source_layer_id::text, source_feature_id
-            FROM app.lands
+            SELECT l.id, l.project_id::text, l.lot_number, l.address, l.land_use, l.area_sqm,
+                   l.registered_owner, l.right_type, l.registration_cause, l.registration_accepted_on::text,
+                   l.status, l.memo, l.source_layer_id::text, l.source_feature_id
+            FROM app.lands AS l
             ${whereClause(filters)}
-            ORDER BY id
+            ORDER BY l.id
         """.trimIndent()
         connection.prepareStatement(sql).use { stmt ->
-            var index = 1
-            if (!projectId.isNullOrBlank()) stmt.setString(index++, projectId)
-            if (query != null) stmt.setString(index, "%$query%")
+            bindPatchValues(stmt, binders)
             stmt.executeQuery().use { rs ->
-                buildList {
+                val items = buildList {
                     while (rs.next()) add(rs.toLandDto())
+                }
+                items.map { land ->
+                    land.copy(
+                        buildings = listBuildingLinksForLand(connection, land.id),
+                        relationships = listRelationshipsForTarget(connection, "land", land.id)
+                    )
                 }
             }
         }
@@ -1343,8 +1711,9 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
     fun getLand(id: String): LandDto? = dataSource.connection.use { connection ->
         val land = connection.prepareStatement(
             """
-            SELECT id, project_id::text, lot_number, address, land_use, area_sqm, status, memo,
-                   source_layer_id::text, source_feature_id
+            SELECT id, project_id::text, lot_number, address, land_use, area_sqm,
+                   registered_owner, right_type, registration_cause, registration_accepted_on::text,
+                   status, memo, source_layer_id::text, source_feature_id
             FROM app.lands
             WHERE id = ?
             """.trimIndent()
@@ -1360,6 +1729,57 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         )
     }
 
+    fun createLand(request: JsonObject): LandDto = try {
+        dataSource.connection.use { connection ->
+            val id = readRequiredText(request, "id")
+            val projectId = readRequiredUuid(request, "projectId")
+            val lotNumber = readRequiredText(request, "lotNumber")
+            val address = readRequiredText(request, "address")
+            val landUse = readOptionalText(request, "landUse")
+            val areaSqm = readOptionalDouble(request, "areaSqm")
+            val registeredOwner = readOptionalText(request, "registeredOwner")
+            val rightType = readOptionalText(request, "rightType")
+            val registrationCause = readOptionalText(request, "registrationCause")
+            val registrationAcceptedOn = readOptionalDate(request, "registrationAcceptedOn")
+            val status = readOptionalText(request, "status") ?: "調査中"
+            val memo = readOptionalText(request, "memo")
+            val sourceLayerId = readOptionalUuid(request, "sourceLayerId")
+            val sourceFeatureId = readOptionalText(request, "sourceFeatureId")
+            connection.prepareStatement(
+                """
+                INSERT INTO app.lands (
+                    id, project_id, lot_number, address, land_use, area_sqm,
+                    registered_owner, right_type, registration_cause, registration_accepted_on,
+                    status, memo, source_layer_id, source_feature_id
+                )
+                VALUES (?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::date, ?, ?, ?::uuid, ?)
+                RETURNING id
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, id)
+                stmt.setString(2, projectId)
+                stmt.setString(3, lotNumber)
+                stmt.setString(4, address)
+                setNullableString(stmt, 5, landUse)
+                if (areaSqm == null) stmt.setNull(6, Types.DOUBLE) else stmt.setDouble(6, areaSqm)
+                setNullableString(stmt, 7, registeredOwner)
+                setNullableString(stmt, 8, rightType)
+                setNullableString(stmt, 9, registrationCause)
+                setNullableDateString(stmt, 10, registrationAcceptedOn)
+                stmt.setString(11, status)
+                setNullableString(stmt, 12, memo)
+                setNullableUuidString(stmt, 13, sourceLayerId)
+                setNullableString(stmt, 14, sourceFeatureId)
+                stmt.executeQuery().use { rs ->
+                    rs.next()
+                    getLand(rs.getString("id")) ?: error("Created land disappeared")
+                }
+            }
+        }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Land create failed: ${exc.message ?: "invalid land create"}")
+    }
+
     fun updateLand(id: String, request: JsonObject): LandDto = try {
         dataSource.connection.use { connection ->
             val setters = mutableListOf<String>()
@@ -1368,6 +1788,10 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             addTextPatch(request, "address", "address", setters, binders, required = true)
             addTextPatch(request, "landUse", "land_use", setters, binders)
             addDoublePatch(request, "areaSqm", "area_sqm", setters, binders)
+            addTextPatch(request, "registeredOwner", "registered_owner", setters, binders)
+            addTextPatch(request, "rightType", "right_type", setters, binders)
+            addTextPatch(request, "registrationCause", "registration_cause", setters, binders)
+            addDatePatch(request, "registrationAcceptedOn", "registration_accepted_on", setters, binders)
             addTextPatch(request, "status", "status", setters, binders, required = true)
             addTextPatch(request, "memo", "memo", setters, binders)
             addUuidPatch(request, "sourceLayerId", "source_layer_id", setters, binders)
@@ -1382,6 +1806,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                 SET ${setters.joinToString(", ")}, updated_at = now()
                 WHERE id = ?
                 RETURNING id, project_id::text, lot_number, address, land_use, area_sqm, status, memo,
+                          registered_owner, right_type, registration_cause, registration_accepted_on::text,
                           source_layer_id::text, source_feature_id
                 """.trimIndent()
             ).use { stmt ->
@@ -1436,31 +1861,85 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     }
 
-    fun listBuildings(projectId: String?, q: String?, landId: String?): List<BuildingDto> = dataSource.connection.use { connection ->
+    fun listBuildings(query: BuildingListQuery): List<BuildingDto> = dataSource.connection.use { connection ->
         val filters = mutableListOf<String>()
-        val query = q?.trim()?.takeIf { it.isNotEmpty() }
-        if (!projectId.isNullOrBlank()) filters.add("b.project_id = ?::uuid")
-        if (!landId.isNullOrBlank()) filters.add("b.land_id = ?")
-        if (query != null) {
-            filters.add("lower(concat_ws(' ', b.id, b.name, b.building_use, b.structure, b.status, b.memo, l.lot_number, l.address)) LIKE lower(?)")
+        val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+        val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
+        if (!query.projectId.isNullOrBlank()) {
+            filters.add("b.project_id = ?::uuid")
+            binders.add { stmt, index -> stmt.setString(index, query.projectId) }
         }
+        if (!query.landId.isNullOrBlank()) {
+            filters.add("b.land_id = ?")
+            binders.add { stmt, index -> stmt.setString(index, query.landId) }
+        }
+        if (textQuery != null) {
+            filters.add(
+                """
+                (
+                    lower(${buildingSearchTextSql("b", "l")}) LIKE lower(?)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM app.party_relationships AS r
+                        JOIN app.parties AS p ON p.id = r.party_id
+                        WHERE r.project_id = b.project_id
+                          AND r.target_type = 'building'
+                          AND r.target_id = b.id
+                          AND lower(${relationshipSearchTextSql("r", "p")}) LIKE lower(?)
+                    )
+                )
+                """.trimIndent()
+            )
+            binders.add { stmt, index -> stmt.setString(index, "%$textQuery%") }
+            binders.add { stmt, index -> stmt.setString(index, "%$textQuery%") }
+        }
+        query.status?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            filters.add("b.status ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+        }
+        query.buildingUse?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            filters.add("b.building_use ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+        }
+        addRelationshipListFilter(
+            targetType = "building",
+            targetIdExpression = "b.id",
+            projectIdExpression = "b.project_id",
+            partyType = query.partyType,
+            relationType = query.relationType,
+            filters = filters,
+            binders = binders
+        )
+        addBusinessListSpatialFilters(
+            entityAlias = "b",
+            projectId = query.projectId,
+            linkedOnly = query.linkedOnly,
+            sourceLayerId = query.sourceLayerId,
+            bbox = query.bbox,
+            intersectsLayerId = query.intersectsLayerId,
+            intersectsFeatureId = query.intersectsFeatureId,
+            distanceMeters = query.distanceMeters,
+            filters = filters,
+            binders = binders
+        )
         val sql = """
             SELECT b.id, b.project_id::text, b.land_id, concat(l.lot_number, ' · ', l.address) AS land_label,
-                   b.name, b.building_use, b.floors, b.total_floor_area_sqm, b.structure, b.status, b.memo,
-                   b.source_layer_id::text, b.source_feature_id
+                   b.name, b.building_location, b.house_number, b.building_use, b.floors,
+                   b.total_floor_area_sqm, b.structure, b.registered_owner, b.right_type,
+                   b.registration_accepted_on::text, b.status, b.memo, b.source_layer_id::text, b.source_feature_id
             FROM app.buildings AS b
             LEFT JOIN app.lands AS l ON l.id = b.land_id
             ${whereClause(filters)}
             ORDER BY b.id
         """.trimIndent()
         connection.prepareStatement(sql).use { stmt ->
-            var index = 1
-            if (!projectId.isNullOrBlank()) stmt.setString(index++, projectId)
-            if (!landId.isNullOrBlank()) stmt.setString(index++, landId)
-            if (query != null) stmt.setString(index, "%$query%")
+            bindPatchValues(stmt, binders)
             stmt.executeQuery().use { rs ->
-                buildList {
+                val items = buildList {
                     while (rs.next()) add(rs.toBuildingDto())
+                }
+                items.map { building ->
+                    building.copy(relationships = listRelationshipsForTarget(connection, "building", building.id))
                 }
             }
         }
@@ -1470,8 +1949,9 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         val building = connection.prepareStatement(
             """
             SELECT b.id, b.project_id::text, b.land_id, concat(l.lot_number, ' · ', l.address) AS land_label,
-                   b.name, b.building_use, b.floors, b.total_floor_area_sqm, b.structure, b.status, b.memo,
-                   b.source_layer_id::text, b.source_feature_id
+                   b.name, b.building_location, b.house_number, b.building_use, b.floors,
+                   b.total_floor_area_sqm, b.structure, b.registered_owner, b.right_type,
+                   b.registration_accepted_on::text, b.status, b.memo, b.source_layer_id::text, b.source_feature_id
             FROM app.buildings AS b
             LEFT JOIN app.lands AS l ON l.id = b.land_id
             WHERE b.id = ?
@@ -1485,16 +1965,79 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         building.copy(relationships = listRelationshipsForTarget(connection, "building", id))
     }
 
+    fun createBuilding(request: JsonObject): BuildingDto = try {
+        dataSource.connection.use { connection ->
+            val id = readRequiredText(request, "id")
+            val projectId = readRequiredUuid(request, "projectId")
+            val landId = readOptionalText(request, "landId")
+            val name = readRequiredText(request, "name")
+            val buildingLocation = readOptionalText(request, "buildingLocation")
+            val houseNumber = readOptionalText(request, "houseNumber")
+            val buildingUse = readOptionalText(request, "buildingUse")
+            val floors = readOptionalInt(request, "floors")
+            val totalFloorAreaSqm = readOptionalDouble(request, "totalFloorAreaSqm")
+            val structure = readOptionalText(request, "structure")
+            val registeredOwner = readOptionalText(request, "registeredOwner")
+            val rightType = readOptionalText(request, "rightType")
+            val registrationAcceptedOn = readOptionalDate(request, "registrationAcceptedOn")
+            val status = readOptionalText(request, "status") ?: "調査中"
+            val memo = readOptionalText(request, "memo")
+            val sourceLayerId = readOptionalUuid(request, "sourceLayerId")
+            val sourceFeatureId = readOptionalText(request, "sourceFeatureId")
+            connection.prepareStatement(
+                """
+                INSERT INTO app.buildings (
+                    id, project_id, land_id, name, building_location, house_number,
+                    building_use, floors, total_floor_area_sqm, structure,
+                    registered_owner, right_type, registration_accepted_on,
+                    status, memo, source_layer_id, source_feature_id
+                )
+                VALUES (?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::date, ?, ?, ?::uuid, ?)
+                RETURNING id
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, id)
+                stmt.setString(2, projectId)
+                setNullableString(stmt, 3, landId)
+                stmt.setString(4, name)
+                setNullableString(stmt, 5, buildingLocation)
+                setNullableString(stmt, 6, houseNumber)
+                setNullableString(stmt, 7, buildingUse)
+                if (floors == null) stmt.setNull(8, Types.INTEGER) else stmt.setInt(8, floors)
+                if (totalFloorAreaSqm == null) stmt.setNull(9, Types.DOUBLE) else stmt.setDouble(9, totalFloorAreaSqm)
+                setNullableString(stmt, 10, structure)
+                setNullableString(stmt, 11, registeredOwner)
+                setNullableString(stmt, 12, rightType)
+                setNullableDateString(stmt, 13, registrationAcceptedOn)
+                stmt.setString(14, status)
+                setNullableString(stmt, 15, memo)
+                setNullableUuidString(stmt, 16, sourceLayerId)
+                setNullableString(stmt, 17, sourceFeatureId)
+                stmt.executeQuery().use { rs ->
+                    rs.next()
+                    getBuilding(rs.getString("id")) ?: error("Created building disappeared")
+                }
+            }
+        }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Building create failed: ${exc.message ?: "invalid building create"}")
+    }
+
     fun updateBuilding(id: String, request: JsonObject): BuildingDto = try {
         dataSource.connection.use { connection ->
             val setters = mutableListOf<String>()
             val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
             addTextPatch(request, "landId", "land_id", setters, binders)
             addTextPatch(request, "name", "name", setters, binders, required = true)
+            addTextPatch(request, "buildingLocation", "building_location", setters, binders)
+            addTextPatch(request, "houseNumber", "house_number", setters, binders)
             addTextPatch(request, "buildingUse", "building_use", setters, binders)
             addIntPatch(request, "floors", "floors", setters, binders)
             addDoublePatch(request, "totalFloorAreaSqm", "total_floor_area_sqm", setters, binders)
             addTextPatch(request, "structure", "structure", setters, binders)
+            addTextPatch(request, "registeredOwner", "registered_owner", setters, binders)
+            addTextPatch(request, "rightType", "right_type", setters, binders)
+            addDatePatch(request, "registrationAcceptedOn", "registration_accepted_on", setters, binders)
             addTextPatch(request, "status", "status", setters, binders, required = true)
             addTextPatch(request, "memo", "memo", setters, binders)
             addUuidPatch(request, "sourceLayerId", "source_layer_id", setters, binders)
@@ -1555,27 +2098,75 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     }
 
-    fun listParties(projectId: String?, q: String?): List<PartyDto> = dataSource.connection.use { connection ->
+    fun listParties(query: PartyListQuery): List<PartyDto> = dataSource.connection.use { connection ->
         val filters = mutableListOf<String>()
-        val query = q?.trim()?.takeIf { it.isNotEmpty() }
-        if (!projectId.isNullOrBlank()) filters.add("project_id = ?::uuid")
-        if (query != null) {
-            filters.add("lower(concat_ws(' ', id, name, party_type, contact, address, memo)) LIKE lower(?)")
+        val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+        val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
+        if (!query.projectId.isNullOrBlank()) {
+            filters.add("p.project_id = ?::uuid")
+            binders.add { stmt, index -> stmt.setString(index, query.projectId) }
+        }
+        if (textQuery != null) {
+            filters.add(
+                """
+                (
+                    lower(${partySearchTextSql("p")}) LIKE lower(?)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM app.party_relationships AS r
+                        LEFT JOIN app.lands AS l ON r.target_type = 'land' AND l.id = r.target_id
+                        LEFT JOIN app.buildings AS b ON r.target_type = 'building' AND b.id = r.target_id
+                        WHERE r.party_id = p.id
+                          AND lower(${partyRelationshipTargetSearchTextSql("r", "l", "b")}) LIKE lower(?)
+                    )
+                )
+                """.trimIndent()
+            )
+            binders.add { stmt, index -> stmt.setString(index, "%$textQuery%") }
+            binders.add { stmt, index -> stmt.setString(index, "%$textQuery%") }
+        }
+        query.partyType?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            filters.add("p.party_type ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+        }
+        val relationType = query.relationType?.trim()?.takeIf { it.isNotEmpty() }
+        val targetType = query.targetType?.trim()?.takeIf { it.isNotEmpty() }
+        if (query.linkedOnly || relationType != null || targetType != null) {
+            val relationshipFilters = mutableListOf("r.party_id = p.id")
+            if (relationType != null) {
+                relationshipFilters.add("r.relation_type ILIKE ?")
+                binders.add { stmt, index -> stmt.setString(index, "%$relationType%") }
+            }
+            if (targetType != null) {
+                if (targetType !in setOf("land", "building")) {
+                    throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "targetType must be land or building")
+                }
+                relationshipFilters.add("r.target_type = ?")
+                binders.add { stmt, index -> stmt.setString(index, targetType) }
+            }
+            filters.add(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM app.party_relationships AS r
+                    WHERE ${relationshipFilters.joinToString(" AND ")}
+                )
+                """.trimIndent()
+            )
         }
         val sql = """
-            SELECT id, project_id::text, name, party_type, contact, address, memo
-            FROM app.parties
+            SELECT p.id, p.project_id::text, p.name, p.party_type, p.contact, p.address, p.memo
+            FROM app.parties AS p
             ${whereClause(filters)}
-            ORDER BY id
+            ORDER BY p.id
         """.trimIndent()
         connection.prepareStatement(sql).use { stmt ->
-            var index = 1
-            if (!projectId.isNullOrBlank()) stmt.setString(index++, projectId)
-            if (query != null) stmt.setString(index, "%$query%")
+            bindPatchValues(stmt, binders)
             stmt.executeQuery().use { rs ->
-                buildList {
+                val items = buildList {
                     while (rs.next()) add(rs.toPartyDto())
                 }
+                items.map { party -> party.copy(relationships = listRelationshipsForParty(connection, party.id)) }
             }
         }
     }
@@ -1594,6 +2185,39 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             }
         } ?: return@use null
         party.copy(relationships = listRelationshipsForParty(connection, id))
+    }
+
+    fun createParty(request: JsonObject): PartyDto = try {
+        dataSource.connection.use { connection ->
+            val id = readRequiredText(request, "id")
+            val projectId = readRequiredUuid(request, "projectId")
+            val name = readRequiredText(request, "name")
+            val partyType = readRequiredText(request, "partyType")
+            val contact = readOptionalText(request, "contact")
+            val address = readOptionalText(request, "address")
+            val memo = readOptionalText(request, "memo")
+            connection.prepareStatement(
+                """
+                INSERT INTO app.parties (id, project_id, name, party_type, contact, address, memo)
+                VALUES (?, ?::uuid, ?, ?, ?, ?, ?)
+                RETURNING id
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, id)
+                stmt.setString(2, projectId)
+                stmt.setString(3, name)
+                stmt.setString(4, partyType)
+                setNullableString(stmt, 5, contact)
+                setNullableString(stmt, 6, address)
+                setNullableString(stmt, 7, memo)
+                stmt.executeQuery().use { rs ->
+                    rs.next()
+                    getParty(rs.getString("id")) ?: error("Created party disappeared")
+                }
+            }
+        }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Party create failed: ${exc.message ?: "invalid party create"}")
     }
 
     fun updateParty(id: String, request: JsonObject): PartyDto = try {
@@ -1640,6 +2264,84 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             }
             if (deleted == 0) {
                 throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Party not found")
+            }
+        }
+    }
+
+    fun createPartyRelationship(request: JsonObject): PartyRelationshipDto = try {
+        dataSource.connection.use { connection ->
+            val projectId = readRequiredUuid(request, "projectId")
+            val partyId = readRequiredText(request, "partyId")
+            val targetType = readRequiredTargetType(request, "targetType")
+            val targetId = readRequiredText(request, "targetId")
+            val relationType = readRequiredText(request, "relationType")
+            val note = readOptionalText(request, "note")
+            validateRelationshipTarget(connection, projectId, partyId, targetType, targetId)
+            connection.prepareStatement(
+                """
+                INSERT INTO app.party_relationships (project_id, party_id, target_type, target_id, relation_type, note)
+                VALUES (?::uuid, ?, ?, ?, ?, ?)
+                RETURNING id::text
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, projectId)
+                stmt.setString(2, partyId)
+                stmt.setString(3, targetType)
+                stmt.setString(4, targetId)
+                stmt.setString(5, relationType)
+                setNullableString(stmt, 6, note)
+                stmt.executeQuery().use { rs ->
+                    rs.next()
+                    getPartyRelationship(connection, rs.getString("id")) ?: error("Created relationship disappeared")
+                }
+            }
+        }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Relationship create failed: ${exc.message ?: "invalid relationship create"}")
+    }
+
+    fun updatePartyRelationship(id: String, request: JsonObject): PartyRelationshipDto = try {
+        dataSource.connection.use { connection ->
+            val current = getPartyRelationship(connection, id)
+                ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Relationship not found")
+            val partyId = readOptionalText(request, "partyId") ?: current.partyId
+            val targetType = readOptionalTargetType(request, "targetType") ?: current.targetType
+            val targetId = readOptionalText(request, "targetId") ?: current.targetId
+            val relationType = readOptionalText(request, "relationType") ?: current.relationType
+            val note = if ("note" in request) readOptionalText(request, "note") else current.note
+            validateRelationshipTarget(connection, current.projectId, partyId, targetType, targetId)
+            connection.prepareStatement(
+                """
+                UPDATE app.party_relationships
+                SET party_id = ?, target_type = ?, target_id = ?, relation_type = ?, note = ?
+                WHERE id = ?::uuid
+                RETURNING id::text
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, partyId)
+                stmt.setString(2, targetType)
+                stmt.setString(3, targetId)
+                stmt.setString(4, relationType)
+                setNullableString(stmt, 5, note)
+                stmt.setString(6, id)
+                stmt.executeQuery().use { rs ->
+                    if (!rs.next()) throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Relationship not found")
+                    getPartyRelationship(connection, rs.getString("id")) ?: error("Updated relationship disappeared")
+                }
+            }
+        }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Relationship update failed: ${exc.message ?: "invalid relationship update"}")
+    }
+
+    fun deletePartyRelationship(id: String) {
+        dataSource.connection.use { connection ->
+            val deleted = connection.prepareStatement("DELETE FROM app.party_relationships WHERE id = ?::uuid").use { stmt ->
+                stmt.setString(1, id)
+                stmt.executeUpdate()
+            }
+            if (deleted == 0) {
+                throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Relationship not found")
             }
         }
     }
@@ -1749,6 +2451,42 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             }
         }
 
+    private fun getPartyRelationship(connection: Connection, id: String): PartyRelationshipDto? =
+        connection.prepareStatement(relationshipSelectSql("WHERE r.id = ?::uuid")).use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs ->
+                if (!rs.next()) null else rs.toPartyRelationshipDto()
+            }
+        }
+
+    private fun validateRelationshipTarget(
+        connection: Connection,
+        projectId: String,
+        partyId: String,
+        targetType: String,
+        targetId: String
+    ) {
+        val partyProject = connection.prepareStatement("SELECT project_id::text FROM app.parties WHERE id = ?").use { stmt ->
+            stmt.setString(1, partyId)
+            stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        } ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "partyId does not exist")
+        if (partyProject != projectId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Party belongs to another project")
+        }
+        val targetProjectSql = when (targetType) {
+            "land" -> "SELECT project_id::text FROM app.lands WHERE id = ?"
+            "building" -> "SELECT project_id::text FROM app.buildings WHERE id = ?"
+            else -> throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "targetType must be land or building")
+        }
+        val targetProject = connection.prepareStatement(targetProjectSql).use { stmt ->
+            stmt.setString(1, targetId)
+            stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        } ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "targetId does not exist")
+        if (targetProject != projectId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Target belongs to another project")
+        }
+    }
+
     private fun relationshipSelectSql(where: String): String = """
         SELECT r.id::text, r.project_id::text, r.party_id, p.name AS party_name,
                r.target_type, r.target_id,
@@ -1764,6 +2502,245 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         LEFT JOIN app.buildings AS b ON r.target_type = 'building' AND b.id = r.target_id
         $where
     """.trimIndent()
+
+    private fun landSearchTextSql(alias: String): String =
+        """
+        (
+            coalesce($alias.id, '') || ' ' ||
+            coalesce($alias.lot_number, '') || ' ' ||
+            coalesce($alias.address, '') || ' ' ||
+            coalesce($alias.land_use, '') || ' ' ||
+            coalesce($alias.status, '') || ' ' ||
+            coalesce($alias.memo, '') || ' ' ||
+            coalesce($alias.registered_owner, '') || ' ' ||
+            coalesce($alias.right_type, '') || ' ' ||
+            coalesce($alias.registration_cause, '') || ' ' ||
+            coalesce($alias.registration_accepted_on::text, '')
+        )
+        """.trimIndent()
+
+    private fun buildingSearchTextSql(alias: String, landAlias: String): String =
+        """
+        (
+            coalesce($alias.id, '') || ' ' ||
+            coalesce($alias.name, '') || ' ' ||
+            coalesce($alias.building_location, '') || ' ' ||
+            coalesce($alias.house_number, '') || ' ' ||
+            coalesce($alias.building_use, '') || ' ' ||
+            coalesce($alias.structure, '') || ' ' ||
+            coalesce($alias.status, '') || ' ' ||
+            coalesce($alias.memo, '') || ' ' ||
+            coalesce($alias.registered_owner, '') || ' ' ||
+            coalesce($alias.right_type, '') || ' ' ||
+            coalesce($alias.registration_accepted_on::text, '') || ' ' ||
+            coalesce($landAlias.id, '') || ' ' ||
+            coalesce($landAlias.lot_number, '') || ' ' ||
+            coalesce($landAlias.address, '')
+        )
+        """.trimIndent()
+
+    private fun partySearchTextSql(alias: String): String =
+        """
+        (
+            coalesce($alias.id, '') || ' ' ||
+            coalesce($alias.name, '') || ' ' ||
+            coalesce($alias.party_type, '') || ' ' ||
+            coalesce($alias.contact, '') || ' ' ||
+            coalesce($alias.address, '') || ' ' ||
+            coalesce($alias.memo, '')
+        )
+        """.trimIndent()
+
+    private fun relationshipSearchTextSql(relationAlias: String, partyAlias: String): String =
+        """
+        (
+            coalesce($relationAlias.relation_type, '') || ' ' ||
+            coalesce($relationAlias.note, '') || ' ' ||
+            coalesce($partyAlias.id, '') || ' ' ||
+            coalesce($partyAlias.name, '') || ' ' ||
+            coalesce($partyAlias.party_type, '') || ' ' ||
+            coalesce($partyAlias.contact, '') || ' ' ||
+            coalesce($partyAlias.address, '') || ' ' ||
+            coalesce($partyAlias.memo, '')
+        )
+        """.trimIndent()
+
+    private fun partyRelationshipTargetSearchTextSql(relationAlias: String, landAlias: String, buildingAlias: String): String =
+        """
+        (
+            coalesce($relationAlias.relation_type, '') || ' ' ||
+            coalesce($relationAlias.note, '') || ' ' ||
+            coalesce($relationAlias.target_type, '') || ' ' ||
+            coalesce($relationAlias.target_id, '') || ' ' ||
+            coalesce($landAlias.lot_number, '') || ' ' ||
+            coalesce($landAlias.address, '') || ' ' ||
+            coalesce($landAlias.registered_owner, '') || ' ' ||
+            coalesce($buildingAlias.name, '') || ' ' ||
+            coalesce($buildingAlias.building_location, '') || ' ' ||
+            coalesce($buildingAlias.house_number, '') || ' ' ||
+            coalesce($buildingAlias.registered_owner, '')
+        )
+        """.trimIndent()
+
+    private fun addRelationshipListFilter(
+        targetType: String,
+        targetIdExpression: String,
+        projectIdExpression: String,
+        partyType: String?,
+        relationType: String?,
+        filters: MutableList<String>,
+        binders: MutableList<(PreparedStatement, Int) -> Unit>
+    ) {
+        val requestedPartyType = partyType?.trim()?.takeIf { it.isNotEmpty() }
+        val requestedRelationType = relationType?.trim()?.takeIf { it.isNotEmpty() }
+        if (requestedPartyType == null && requestedRelationType == null) return
+        val relationshipFilters = mutableListOf(
+            "r.project_id = $projectIdExpression",
+            "r.target_type = '$targetType'",
+            "r.target_id = $targetIdExpression"
+        )
+        if (requestedPartyType != null) {
+            relationshipFilters.add("p.party_type ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$requestedPartyType%") }
+        }
+        if (requestedRelationType != null) {
+            relationshipFilters.add("r.relation_type ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$requestedRelationType%") }
+        }
+        filters.add(
+            """
+            EXISTS (
+                SELECT 1
+                FROM app.party_relationships AS r
+                JOIN app.parties AS p ON p.id = r.party_id
+                WHERE ${relationshipFilters.joinToString(" AND ")}
+            )
+            """.trimIndent()
+        )
+    }
+
+    private fun addBusinessListSpatialFilters(
+        entityAlias: String,
+        projectId: String?,
+        linkedOnly: Boolean,
+        sourceLayerId: String?,
+        bbox: String?,
+        intersectsLayerId: String?,
+        intersectsFeatureId: String?,
+        distanceMeters: Double?,
+        filters: MutableList<String>,
+        binders: MutableList<(PreparedStatement, Int) -> Unit>
+    ) {
+        val requestedSourceLayerId = sourceLayerId?.trim()?.takeIf { it.isNotEmpty() }
+        if (linkedOnly) {
+            filters.add("$entityAlias.source_layer_id IS NOT NULL AND $entityAlias.source_feature_id IS NOT NULL")
+        }
+        if (requestedSourceLayerId != null) {
+            filters.add("$entityAlias.source_layer_id = ?::uuid")
+            binders.add { stmt, index -> stmt.setString(index, requestedSourceLayerId) }
+        }
+
+        val bboxBounds = parseBbox(bbox)
+        val targetLayerId = intersectsLayerId?.trim()?.takeIf { it.isNotEmpty() }
+        val targetFeatureId = intersectsFeatureId?.trim()?.takeIf { it.isNotEmpty() }
+        if (bboxBounds == null && (targetLayerId == null || targetFeatureId == null)) return
+
+        val sourceLayers = resolveSpatialSourceLayers(projectId, requestedSourceLayerId)
+        val targetLayer = if (targetLayerId != null && targetFeatureId != null) {
+            getLayer(targetLayerId) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "intersectsLayerId not found")
+        } else {
+            null
+        }
+        if (projectId != null && targetLayer != null && targetLayer.projectId != projectId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "intersectsLayerId belongs to another project")
+        }
+
+        val spatialClauses = mutableListOf<String>()
+        val spatialBinders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+        for (sourceLayer in sourceLayers) {
+            val sourceTableRef = "${quoteIdent(sourceLayer.schemaName)}.${quoteIdent(sourceLayer.tableName)}"
+            val sourceFeatureIdRef = "src.${quoteIdent(sourceLayer.featureIdColumn)}"
+            val sourceGeomRef = "src.${quoteIdent(sourceLayer.geometryColumn)}"
+            val clauseBinders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+            val joins = StringBuilder()
+            var targetGeomRef: String? = null
+            if (targetLayer != null && targetFeatureId != null) {
+                val targetTableRef = "${quoteIdent(targetLayer.schemaName)}.${quoteIdent(targetLayer.tableName)}"
+                val targetFeatureIdRef = "target.${quoteIdent(targetLayer.featureIdColumn)}"
+                joins.append(" JOIN $targetTableRef AS target ON $targetFeatureIdRef::text = ?")
+                clauseBinders.add { stmt, index -> stmt.setString(index, targetFeatureId) }
+                val rawTargetGeom = "target.${quoteIdent(targetLayer.geometryColumn)}"
+                targetGeomRef = if (targetLayer.displaySrid == sourceLayer.displaySrid) {
+                    rawTargetGeom
+                } else {
+                    "ST_Transform($rawTargetGeom, ${sourceLayer.displaySrid})"
+                }
+            }
+            if (bboxBounds != null) {
+                if (joins.isNotEmpty()) joins.append('\n')
+                joins.append(
+                    """
+                    CROSS JOIN (
+                        SELECT ST_Transform(ST_MakeEnvelope(?::double precision, ?::double precision, ?::double precision, ?::double precision, 4326), ${sourceLayer.displaySrid}) AS geom
+                    ) AS bbox
+                    """.trimIndent()
+                )
+                clauseBinders.add { stmt, index -> stmt.setDouble(index, bboxBounds[0]) }
+                clauseBinders.add { stmt, index -> stmt.setDouble(index, bboxBounds[1]) }
+                clauseBinders.add { stmt, index -> stmt.setDouble(index, bboxBounds[2]) }
+                clauseBinders.add { stmt, index -> stmt.setDouble(index, bboxBounds[3]) }
+            }
+            val geometryFilters = mutableListOf(
+                "$entityAlias.source_layer_id = ?::uuid",
+                "$entityAlias.source_feature_id = $sourceFeatureIdRef::text",
+                "$sourceGeomRef IS NOT NULL"
+            )
+            clauseBinders.add { stmt, index -> stmt.setString(index, sourceLayer.id) }
+            if (bboxBounds != null) {
+                geometryFilters.add("$sourceGeomRef && bbox.geom")
+                geometryFilters.add("ST_Intersects($sourceGeomRef, bbox.geom)")
+            }
+            if (targetGeomRef != null) {
+                geometryFilters.add("target.${quoteIdent(targetLayer!!.geometryColumn)} IS NOT NULL")
+                if (distanceMeters != null && distanceMeters > 0.0) {
+                    geometryFilters.add("ST_DWithin($sourceGeomRef, $targetGeomRef, ?::double precision)")
+                    clauseBinders.add { stmt, index -> stmt.setDouble(index, distanceMeters) }
+                } else {
+                    geometryFilters.add("$sourceGeomRef && $targetGeomRef")
+                    geometryFilters.add("ST_Intersects($sourceGeomRef, $targetGeomRef)")
+                }
+            }
+            spatialClauses.add(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM $sourceTableRef AS src
+                    $joins
+                    WHERE ${geometryFilters.joinToString(" AND ")}
+                )
+                """.trimIndent()
+            )
+            spatialBinders.addAll(clauseBinders)
+        }
+        if (spatialClauses.isEmpty()) {
+            filters.add("false")
+        } else {
+            filters.add(spatialClauses.joinToString(separator = "\nOR\n", prefix = "(", postfix = ")"))
+            binders.addAll(spatialBinders)
+        }
+    }
+
+    private fun resolveSpatialSourceLayers(projectId: String?, sourceLayerId: String?): List<LayerDto> {
+        if (sourceLayerId != null) {
+            val layer = getLayer(sourceLayerId)
+                ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "sourceLayerId not found")
+            if (projectId != null && layer.projectId != projectId) {
+                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "sourceLayerId belongs to another project")
+            }
+            return listOf(layer)
+        }
+        return listLayers(projectId).filter { !it.isResult }
+    }
 
     private fun businessGeometrySql(
         sourceLayers: List<LayerDto>,
@@ -1794,6 +2771,8 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                     landFilters,
                     landBinders
                 )
+                addBusinessChoiceFilter(request.status, "l.status", landFilters, landBinders)
+                addBusinessChoiceFilter(request.landUse, "l.land_use", landFilters, landBinders)
                 addPartyRelationshipFilter("land", "l.id", "l.project_id", request, landFilters, landBinders)
                 selects.add(
                     """
@@ -1826,6 +2805,8 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                     buildingFilters,
                     buildingBinders
                 )
+                addBusinessChoiceFilter(request.status, "b.status", buildingFilters, buildingBinders)
+                addBusinessChoiceFilter(request.buildingUse, "b.building_use", buildingFilters, buildingBinders)
                 addPartyRelationshipFilter("building", "b.id", "b.project_id", request, buildingFilters, buildingBinders)
                 selects.add(
                     """
@@ -1855,6 +2836,17 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         val value = query?.trim()?.takeIf { it.isNotEmpty() } ?: return
         filters.add("lower($textExpression) LIKE lower(?)")
         binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+    }
+
+    private fun addBusinessChoiceFilter(
+        value: String?,
+        columnExpression: String,
+        filters: MutableList<String>,
+        binders: MutableList<(PreparedStatement, Int) -> Unit>
+    ) {
+        val choice = value?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        filters.add("$columnExpression ILIKE ?")
+        binders.add { stmt, index -> stmt.setString(index, choice) }
     }
 
     private fun addPartyRelationshipFilter(
@@ -1974,6 +2966,19 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     }
 
+    private fun addDatePatch(
+        request: JsonObject,
+        key: String,
+        column: String,
+        setters: MutableList<String>,
+        binders: MutableList<(PreparedStatement, Int) -> Unit>
+    ) {
+        if (key !in request) return
+        val value = readOptionalDate(request, key)
+        setters.add("${quoteIdent(column)} = ?::date")
+        binders.add { stmt, index -> setNullableDateString(stmt, index, value) }
+    }
+
     private fun addDoublePatch(
         request: JsonObject,
         key: String,
@@ -2025,6 +3030,38 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         return value?.trim()?.ifBlank { null }
     }
 
+    private fun readRequiredText(request: JsonObject, key: String): String =
+        readTextPatch(request, key, required = true)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key is required")
+
+    private fun readOptionalText(request: JsonObject, key: String): String? =
+        readTextPatch(request, key, required = false)
+
+    private fun readRequiredUuid(request: JsonObject, key: String): String =
+        readOptionalUuid(request, key)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key is required")
+
+    private fun readOptionalUuid(request: JsonObject, key: String): String? =
+        readUuidPatch(request, key)
+
+    private fun readOptionalDouble(request: JsonObject, key: String): Double? =
+        if (key in request) readDoublePatch(request, key) else null
+
+    private fun readOptionalInt(request: JsonObject, key: String): Int? =
+        if (key in request) readIntPatch(request, key) else null
+
+    private fun readRequiredTargetType(request: JsonObject, key: String): String =
+        readOptionalTargetType(request, key)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key is required")
+
+    private fun readOptionalTargetType(request: JsonObject, key: String): String? {
+        val value = readOptionalText(request, key) ?: return null
+        if (value !in setOf("land", "building")) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key must be land or building")
+        }
+        return value
+    }
+
     private fun readUuidPatch(request: JsonObject, key: String): String? {
         val value = readTextPatch(request, key, required = false) ?: return null
         try {
@@ -2063,6 +3100,44 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key must be an integer")
     }
 
+    private fun readOptionalDate(request: JsonObject, key: String): String? {
+        val value = readOptionalText(request, key) ?: return null
+        try {
+            LocalDate.parse(value)
+        } catch (exc: IllegalArgumentException) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key must be YYYY-MM-DD")
+        }
+        return value
+    }
+
+    private fun parseBbox(value: String?): DoubleArray? {
+        val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val parts = raw.split(",").map { it.trim().toDoubleOrNull() }
+        if (parts.size != 4 || parts.any { it == null }) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "bbox must be minLng,minLat,maxLng,maxLat")
+        }
+        val minLng = parts[0]!!
+        val minLat = parts[1]!!
+        val maxLng = parts[2]!!
+        val maxLat = parts[3]!!
+        if (minLng >= maxLng || minLat >= maxLat) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "bbox bounds are invalid")
+        }
+        return doubleArrayOf(minLng, minLat, maxLng, maxLat)
+    }
+
+    private fun setNullableString(stmt: PreparedStatement, index: Int, value: String?) {
+        if (value == null) stmt.setNull(index, Types.VARCHAR) else stmt.setString(index, value)
+    }
+
+    private fun setNullableUuidString(stmt: PreparedStatement, index: Int, value: String?) {
+        if (value == null) stmt.setNull(index, Types.OTHER) else stmt.setString(index, value)
+    }
+
+    private fun setNullableDateString(stmt: PreparedStatement, index: Int, value: String?) {
+        if (value == null) stmt.setNull(index, Types.DATE) else stmt.setString(index, value)
+    }
+
     private fun ResultSet.toLandDto(): LandDto = LandDto(
         id = getString("id"),
         projectId = getString("project_id"),
@@ -2070,6 +3145,10 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         address = getString("address"),
         landUse = getString("land_use"),
         areaSqm = nullableDouble("area_sqm"),
+        registeredOwner = getString("registered_owner"),
+        rightType = getString("right_type"),
+        registrationCause = getString("registration_cause"),
+        registrationAcceptedOn = getString("registration_accepted_on"),
         status = getString("status"),
         memo = getString("memo"),
         sourceLayerId = getString("source_layer_id"),
@@ -2082,10 +3161,15 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         landId = getString("land_id"),
         landLabel = getString("land_label"),
         name = getString("name"),
+        buildingLocation = getString("building_location"),
+        houseNumber = getString("house_number"),
         buildingUse = getString("building_use"),
         floors = nullableInt("floors"),
         totalFloorAreaSqm = nullableDouble("total_floor_area_sqm"),
         structure = getString("structure"),
+        registeredOwner = getString("registered_owner"),
+        rightType = getString("right_type"),
+        registrationAcceptedOn = getString("registration_accepted_on"),
         status = getString("status"),
         memo = getString("memo"),
         sourceLayerId = getString("source_layer_id"),
@@ -2154,6 +3238,13 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         tileSourceId = getString("tile_source_id"),
         attributes = attributes,
         createdAt = getString("created_at")
+    )
+
+    private fun ResultSet.toDeletedLayerRef(): DeletedLayerRef = DeletedLayerRef(
+        id = getString("id"),
+        schemaName = getString("schema_name"),
+        tableName = getString("table_name"),
+        resultSetId = getString("result_set_id")
     )
 
     private fun ResultSet.toAnalysisJobDto(): AnalysisJobDto = AnalysisJobDto(

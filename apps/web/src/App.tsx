@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 import maplibregl, { type Map as MapLibreMap, type MapLayerMouseEvent } from "maplibre-gl";
 import {
+  ArrowLeft,
   Building2,
   ExternalLink,
   Eye,
@@ -23,17 +24,25 @@ import {
 } from "lucide-react";
 import {
   createAnalysisJob,
+  createBuilding,
   createImportJob,
+  createLand,
+  createParty,
+  createPartyRelationship,
   conditionSearchFeatures,
   deleteBuilding,
   deleteLand,
+  deleteLayer,
   deleteParty,
+  deletePartyRelationship,
+  deleteResultSet,
   getAnalysisJob,
   getBuilding,
   getBuildings,
   getBusinessLinks,
   getFeature,
   getImportJob,
+  getLayerAttributeValues,
   getLand,
   getLands,
   getLayers,
@@ -43,12 +52,14 @@ import {
   updateBuilding,
   updateFeature,
   updateLand,
-  updateParty
+  updateParty,
+  updatePartyRelationship
 } from "./api";
 import type {
   AnalysisJob,
   AttributeConditionDraft,
   Building,
+  BusinessObjectFilters,
   BusinessLinks,
   ConditionQuery,
   ConditionQueryCondition,
@@ -87,6 +98,14 @@ const layerColors = ["#0f766e", "#b45309", "#2563eb", "#be123c", "#7c3aed", "#15
 const imperialPalaceCenter: [number, number] = [139.7528, 35.6852];
 const defaultMapZoom = 12.5;
 const layerViewStateStoragePrefix = "gis-example.layer-view-state.";
+const businessStatusOptions = ["調査中", "現況確認中", "交渉中", "契約準備", "契約済", "稼働中", "保留", "除外"];
+const landUseOptions = ["商業地", "業務地", "住宅地", "工業地", "公共用地", "雑種地"];
+const buildingUseOptions = ["事務所", "店舗", "住宅", "共同住宅", "倉庫", "工場", "ホテル", "駐車場", "複合用途"];
+const partyTypeOptions = ["法人", "個人", "管理会社", "行政", "金融機関", "士業", "仲介会社"];
+const rightTypeOptions = ["所有権", "借地権", "地上権", "賃借権", "区分所有権", "抵当権"];
+const registrationCauseOptions = ["売買", "合併", "設定", "相続", "贈与", "新築", "保存", "移転", "変更"];
+const buildingStructureOptions = ["S造", "RC造", "SRC造", "木造", "軽量鉄骨造", "CB造"];
+const relationTypeOptions = ["所有者", "売買事業者", "管理者", "借地権者", "賃借人", "仲介", "登記名義人", "連絡先"];
 
 type LayerViewState = {
   baseMapVisible: boolean;
@@ -107,10 +126,15 @@ type RouteSelection = {
 };
 
 type LandDraft = {
+  id: string;
   lotNumber: string;
   address: string;
   landUse: string;
   areaSqm: string;
+  registeredOwner: string;
+  rightType: string;
+  registrationCause: string;
+  registrationAcceptedOn: string;
   status: string;
   memo: string;
   sourceLayerId: string;
@@ -118,12 +142,18 @@ type LandDraft = {
 };
 
 type BuildingDraft = {
+  id: string;
   landId: string;
   name: string;
+  buildingLocation: string;
+  houseNumber: string;
   buildingUse: string;
   floors: string;
   totalFloorAreaSqm: string;
   structure: string;
+  registeredOwner: string;
+  rightType: string;
+  registrationAcceptedOn: string;
   status: string;
   memo: string;
   sourceLayerId: string;
@@ -131,11 +161,20 @@ type BuildingDraft = {
 };
 
 type PartyDraft = {
+  id: string;
   name: string;
   partyType: string;
   contact: string;
   address: string;
   memo: string;
+};
+
+type RelationshipDraft = {
+  partyId: string;
+  targetType: "land" | "building";
+  targetId: string;
+  relationType: string;
+  note: string;
 };
 
 const emptyBusinessLinks: BusinessLinks = { lands: [], buildings: [] };
@@ -159,6 +198,8 @@ export default function App() {
   const [baseMapVisible, setBaseMapVisible] = useState(true);
   const [visibleLayerIds, setVisibleLayerIds] = useState<Set<string>>(new Set());
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+  const [deletingLayerIds, setDeletingLayerIds] = useState<Set<string>>(new Set());
+  const [deletingResultSetIds, setDeletingResultSetIds] = useState<Set<string>>(new Set());
   const [selectedFeature, setSelectedFeature] = useState<Feature | null>(null);
   const [selectedFeatureLayer, setSelectedFeatureLayer] = useState<Layer | null>(null);
   const [businessLinks, setBusinessLinks] = useState<BusinessLinks>(emptyBusinessLinks);
@@ -170,6 +211,9 @@ export default function App() {
   const [zoneSpatialLayerIds, setZoneSpatialLayerIds] = useState<string[]>([]);
   const [zoneBusinessSourceType, setZoneBusinessSourceType] = useState<ZoneBusinessSourceType>("all");
   const [zoneBusinessQuery, setZoneBusinessQuery] = useState("");
+  const [zoneBusinessStatus, setZoneBusinessStatus] = useState("");
+  const [zoneLandUse, setZoneLandUse] = useState("");
+  const [zoneBuildingUse, setZoneBuildingUse] = useState("");
   const [zonePartyQuery, setZonePartyQuery] = useState("");
   const [zonePartyType, setZonePartyType] = useState("");
   const [zoneRelationType, setZoneRelationType] = useState("");
@@ -200,28 +244,46 @@ export default function App() {
   const [savingFeature, setSavingFeature] = useState(false);
 
   const [landQuery, setLandQuery] = useState("");
+  const [landFilters, setLandFilters] = useState<BusinessObjectFilters>({});
+  const [landFiltersOpen, setLandFiltersOpen] = useState(true);
   const [lands, setLands] = useState<Land[]>([]);
-  const [selectedLandId, setSelectedLandId] = useState<string | null>(null);
+  const [selectedLandId, setSelectedLandId] = useState<string | null>(() => {
+    const route = parseRoute(window.location.pathname);
+    return route.tab === "lands" ? route.id : null;
+  });
   const [selectedLand, setSelectedLand] = useState<Land | null>(null);
   const [landDraft, setLandDraft] = useState<LandDraft>(emptyLandDraft());
+  const [creatingLand, setCreatingLand] = useState(false);
   const [loadingLands, setLoadingLands] = useState(false);
   const [savingLand, setSavingLand] = useState(false);
   const [deletingLand, setDeletingLand] = useState(false);
 
   const [buildingQuery, setBuildingQuery] = useState("");
+  const [buildingFilters, setBuildingFilters] = useState<BusinessObjectFilters>({});
+  const [buildingFiltersOpen, setBuildingFiltersOpen] = useState(true);
   const [buildings, setBuildings] = useState<Building[]>([]);
-  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(() => {
+    const route = parseRoute(window.location.pathname);
+    return route.tab === "buildings" ? route.id : null;
+  });
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [buildingDraft, setBuildingDraft] = useState<BuildingDraft>(emptyBuildingDraft());
+  const [creatingBuilding, setCreatingBuilding] = useState(false);
   const [loadingBuildings, setLoadingBuildings] = useState(false);
   const [savingBuilding, setSavingBuilding] = useState(false);
   const [deletingBuilding, setDeletingBuilding] = useState(false);
 
   const [partyQuery, setPartyQuery] = useState("");
+  const [partyFilters, setPartyFilters] = useState<BusinessObjectFilters>({});
+  const [partyFiltersOpen, setPartyFiltersOpen] = useState(true);
   const [parties, setParties] = useState<Party[]>([]);
-  const [selectedPartyId, setSelectedPartyId] = useState<string | null>(null);
+  const [selectedPartyId, setSelectedPartyId] = useState<string | null>(() => {
+    const route = parseRoute(window.location.pathname);
+    return route.tab === "parties" ? route.id : null;
+  });
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
   const [partyDraft, setPartyDraft] = useState<PartyDraft>(emptyPartyDraft());
+  const [creatingParty, setCreatingParty] = useState(false);
   const [loadingParties, setLoadingParties] = useState(false);
   const [savingParty, setSavingParty] = useState(false);
   const [deletingParty, setDeletingParty] = useState(false);
@@ -237,11 +299,9 @@ export default function App() {
       if (validLayerIds.length) {
         return validLayerIds.length === current.length ? current : validLayerIds;
       }
-      const defaultLayerIds = polygonLayers.map((layer) => layer.id);
-      if (defaultLayerIds.length) return defaultLayerIds;
-      return layers[0] ? [layers[0].id] : [];
+      return defaultZoneSpatialLayerIds(layers);
     });
-  }, [layerById, layers, polygonLayers]);
+  }, [layerById, layers]);
 
   const navigateTab = useCallback((tab: BusinessTab) => {
     const path = tabPath(tab);
@@ -249,12 +309,28 @@ export default function App() {
     const nextRoute = parseRoute(path);
     setActiveTab(nextRoute.tab);
     setRouteSelection(nextRoute);
+    if (tab === "lands") {
+      setCreatingLand(false);
+      setSelectedLandId(null);
+      setSelectedLand(null);
+    }
+    if (tab === "buildings") {
+      setCreatingBuilding(false);
+      setSelectedBuildingId(null);
+      setSelectedBuilding(null);
+    }
+    if (tab === "parties") {
+      setCreatingParty(false);
+      setSelectedPartyId(null);
+      setSelectedParty(null);
+    }
   }, []);
 
   const selectLand = useCallback((id: string) => {
     const path = `/lands/${encodeURIComponent(id)}`;
     window.history.pushState(null, "", path);
     setActiveTab("lands");
+    setCreatingLand(false);
     setRouteSelection({ tab: "lands", id });
     setSelectedLandId(id);
   }, []);
@@ -263,6 +339,7 @@ export default function App() {
     const path = `/buildings/${encodeURIComponent(id)}`;
     window.history.pushState(null, "", path);
     setActiveTab("buildings");
+    setCreatingBuilding(false);
     setRouteSelection({ tab: "buildings", id });
     setSelectedBuildingId(id);
   }, []);
@@ -271,6 +348,7 @@ export default function App() {
     const path = `/parties/${encodeURIComponent(id)}`;
     window.history.pushState(null, "", path);
     setActiveTab("parties");
+    setCreatingParty(false);
     setRouteSelection({ tab: "parties", id });
     setSelectedPartyId(id);
   }, []);
@@ -290,16 +368,34 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (routeSelection.tab === "lands" && routeSelection.id) {
-      setSelectedLandId(routeSelection.id);
+    if (routeSelection.tab === "lands") {
+      if (routeSelection.id) {
+        setCreatingLand(false);
+        setSelectedLandId(routeSelection.id);
+      } else if (!creatingLand) {
+        setSelectedLandId(null);
+        setSelectedLand(null);
+      }
     }
-    if (routeSelection.tab === "buildings" && routeSelection.id) {
-      setSelectedBuildingId(routeSelection.id);
+    if (routeSelection.tab === "buildings") {
+      if (routeSelection.id) {
+        setCreatingBuilding(false);
+        setSelectedBuildingId(routeSelection.id);
+      } else if (!creatingBuilding) {
+        setSelectedBuildingId(null);
+        setSelectedBuilding(null);
+      }
     }
-    if (routeSelection.tab === "parties" && routeSelection.id) {
-      setSelectedPartyId(routeSelection.id);
+    if (routeSelection.tab === "parties") {
+      if (routeSelection.id) {
+        setCreatingParty(false);
+        setSelectedPartyId(routeSelection.id);
+      } else if (!creatingParty) {
+        setSelectedPartyId(null);
+        setSelectedParty(null);
+      }
     }
-  }, [routeSelection]);
+  }, [creatingBuilding, creatingLand, creatingParty, routeSelection]);
 
   useEffect(() => {
     if (activeTab !== "zone") return;
@@ -345,49 +441,40 @@ export default function App() {
     if (!selectedProject) return;
     setLoadingLands(true);
     try {
-      const items = await getLands(selectedProject, landQuery);
+      const items = await getLands(selectedProject, landQuery, landFilters);
       setLands(items);
-      if (activeTab === "lands" && !selectedLandId && items[0]) {
-        setSelectedLandId(items[0].id);
-      }
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingLands(false);
     }
-  }, [activeTab, landQuery, selectedLandId, selectedProject]);
+  }, [landFilters, landQuery, selectedProject]);
 
   const refreshBuildings = useCallback(async () => {
     if (!selectedProject) return;
     setLoadingBuildings(true);
     try {
-      const items = await getBuildings(selectedProject, buildingQuery);
+      const items = await getBuildings(selectedProject, buildingQuery, undefined, buildingFilters);
       setBuildings(items);
-      if (activeTab === "buildings" && !selectedBuildingId && items[0]) {
-        setSelectedBuildingId(items[0].id);
-      }
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingBuildings(false);
     }
-  }, [activeTab, buildingQuery, selectedBuildingId, selectedProject]);
+  }, [buildingFilters, buildingQuery, selectedProject]);
 
   const refreshParties = useCallback(async () => {
     if (!selectedProject) return;
     setLoadingParties(true);
     try {
-      const items = await getParties(selectedProject, partyQuery);
+      const items = await getParties(selectedProject, partyQuery, partyFilters);
       setParties(items);
-      if (activeTab === "parties" && !selectedPartyId && items[0]) {
-        setSelectedPartyId(items[0].id);
-      }
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingParties(false);
     }
-  }, [activeTab, partyQuery, selectedPartyId, selectedProject]);
+  }, [partyFilters, partyQuery, selectedProject]);
 
   useEffect(() => {
     if (!selectedProject || loadedLayerProjectId.current !== selectedProject) return;
@@ -426,7 +513,7 @@ export default function App() {
   useEffect(() => {
     if (!selectedLandId) {
       setSelectedLand(null);
-      setLandDraft(emptyLandDraft());
+      if (!creatingLand) setLandDraft(emptyLandDraft());
       return;
     }
     getLand(selectedLandId)
@@ -435,12 +522,12 @@ export default function App() {
         setLandDraft(toLandDraft(item));
       })
       .catch((error) => setNotice(errorMessage(error)));
-  }, [selectedLandId]);
+  }, [creatingLand, selectedLandId]);
 
   useEffect(() => {
     if (!selectedBuildingId) {
       setSelectedBuilding(null);
-      setBuildingDraft(emptyBuildingDraft());
+      if (!creatingBuilding) setBuildingDraft(emptyBuildingDraft());
       return;
     }
     getBuilding(selectedBuildingId)
@@ -449,12 +536,12 @@ export default function App() {
         setBuildingDraft(toBuildingDraft(item));
       })
       .catch((error) => setNotice(errorMessage(error)));
-  }, [selectedBuildingId]);
+  }, [creatingBuilding, selectedBuildingId]);
 
   useEffect(() => {
     if (!selectedPartyId) {
       setSelectedParty(null);
-      setPartyDraft(emptyPartyDraft());
+      if (!creatingParty) setPartyDraft(emptyPartyDraft());
       return;
     }
     getParty(selectedPartyId)
@@ -463,7 +550,7 @@ export default function App() {
         setPartyDraft(toPartyDraft(item));
       })
       .catch((error) => setNotice(errorMessage(error)));
-  }, [selectedPartyId]);
+  }, [creatingParty, selectedPartyId]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -496,6 +583,22 @@ export default function App() {
   useEffect(() => {
     const map = mapRef.current;
     if (!mapReady || !map) return;
+
+    const activeLayerIds = new Set(layers.map((layer) => layer.id));
+    for (const [layerId, styleLayerIds] of Object.entries(styleLayersByLayerId.current)) {
+      if (activeLayerIds.has(layerId)) continue;
+      for (const styleLayerId of styleLayerIds) {
+        if (map.getLayer(styleLayerId)) {
+          map.removeLayer(styleLayerId);
+        }
+        delete appLayerByStyleLayer.current[styleLayerId];
+      }
+      if (map.getSource(layerId)) {
+        map.removeSource(layerId);
+      }
+      delete styleLayersByLayerId.current[layerId];
+      seenLayerIds.current.delete(layerId);
+    }
 
     layers.forEach((layer, index) => {
       if (!map.getSource(layer.id)) {
@@ -748,6 +851,24 @@ export default function App() {
     }
   };
 
+  const clearZoneSearchConditions = () => {
+    setZoneSearchQuery("");
+    setZoneSpatialLayerIds(defaultZoneSpatialLayerIds(layers));
+    setAttributeConditions([]);
+    setSpatialConditions([]);
+    setZoneSearchLinkedOnly(false);
+    setZoneBusinessSourceType("all");
+    setZoneBusinessQuery("");
+    setZoneBusinessStatus("");
+    setZoneLandUse("");
+    setZoneBuildingUse("");
+    setZonePartyQuery("");
+    setZonePartyType("");
+    setZoneRelationType("");
+    setZoneSearchResults([]);
+    setAnalysisName("");
+  };
+
   const buildConditionQuery = (): ConditionQuery => {
     const targetLayerIds = zoneSpatialLayerIds.filter((id) => layerById.has(id));
     if (!targetLayerIds.length) {
@@ -770,10 +891,15 @@ export default function App() {
           distanceMeters: condition.operator === "dwithin" ? readZoneDistance(condition.operator, condition.distanceMeters) : undefined
         });
       });
+    const activeLandUse = zoneBusinessSourceType === "land" ? zoneLandUse.trim() : "";
+    const activeBuildingUse = zoneBusinessSourceType === "building" ? zoneBuildingUse.trim() : "";
     if (
       zoneSearchLinkedOnly ||
       zoneBusinessSourceType !== "all" ||
       zoneBusinessQuery.trim() ||
+      zoneBusinessStatus.trim() ||
+      activeLandUse ||
+      activeBuildingUse ||
       zonePartyQuery.trim() ||
       zonePartyType.trim() ||
       zoneRelationType.trim()
@@ -782,6 +908,9 @@ export default function App() {
         type: "business",
         sourceTypes: zoneBusinessSourceType === "all" ? ["land", "building"] : [zoneBusinessSourceType],
         businessQuery: zoneBusinessQuery.trim() || undefined,
+        status: zoneBusinessStatus.trim() || undefined,
+        landUse: activeLandUse || undefined,
+        buildingUse: activeBuildingUse || undefined,
         partyQuery: zonePartyQuery.trim() || undefined,
         partyType: zonePartyType.trim() || undefined,
         relationType: zoneRelationType.trim() || undefined
@@ -887,6 +1016,82 @@ export default function App() {
     });
   };
 
+  const removeLayersFromState = (layerIds: string[]) => {
+    const deletedLayerIds = new Set(layerIds);
+    const remainingLayers = layersRef.current.filter((layer) => !deletedLayerIds.has(layer.id));
+    layersRef.current = remainingLayers;
+    setLayers(remainingLayers);
+    setVisibleLayerIds((current) => {
+      const next = new Set(current);
+      deletedLayerIds.forEach((layerId) => next.delete(layerId));
+      return next;
+    });
+    setZoneSpatialLayerIds((current) => {
+      const remaining = current.filter((id) => !deletedLayerIds.has(id));
+      return remaining.length ? remaining : defaultZoneSpatialLayerIds(remainingLayers);
+    });
+    setAttributeConditions((current) => current.filter((condition) => !deletedLayerIds.has(condition.layerId)));
+    setSpatialConditions((current) => current.filter((condition) => !deletedLayerIds.has(condition.layerId)));
+    setZoneSearchResults((current) => current.filter((result) => !deletedLayerIds.has(result.layerId)));
+    setSelectedFeature((current) => (current && deletedLayerIds.has(current.layerId) ? null : current));
+    setSelectedFeatureLayer((current) => (current && deletedLayerIds.has(current.id) ? null : current));
+    setTargetLayerId((current) => (deletedLayerIds.has(current) ? remainingLayers[0]?.id ?? "" : current));
+    setOuterTargetLayerId((current) => (deletedLayerIds.has(current) ? remainingLayers.filter(isPolygonLayer)[0]?.id ?? "" : current));
+    setOuterBoundaryLayerId((current) =>
+      deletedLayerIds.has(current) ? remainingLayers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer))[0]?.id ?? "" : current
+    );
+  };
+
+  const removeLayerFromState = (layerId: string) => {
+    removeLayersFromState([layerId]);
+  };
+
+  const requestLayerDelete = async (layer: Layer) => {
+    if (!window.confirm(`レイヤ「${layer.name}」を削除します。実体テーブルも削除されます。よろしいですか？`)) {
+      return;
+    }
+    setDeletingLayerIds((current) => new Set([...current, layer.id]));
+    try {
+      await deleteLayer(layer.id);
+      removeLayerFromState(layer.id);
+      await refreshLayers();
+      setNotice("レイヤを削除しました");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setDeletingLayerIds((current) => {
+        const next = new Set(current);
+        next.delete(layer.id);
+        return next;
+      });
+    }
+  };
+
+  const requestResultSetDelete = async (resultSet: Extract<LayerListItem, { type: "resultSet" }>) => {
+    if (
+      !window.confirm(
+        `条件検索結果「${resultSet.name}」を削除します。配下の${resultSet.layers.length.toLocaleString()}レイヤと実体テーブルも削除されます。よろしいですか？`
+      )
+    ) {
+      return;
+    }
+    setDeletingResultSetIds((current) => new Set([...current, resultSet.id]));
+    try {
+      await deleteResultSet(resultSet.id);
+      removeLayersFromState(resultSet.layers.map((layer) => layer.id));
+      await refreshLayers();
+      setNotice("条件検索結果を削除しました");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setDeletingResultSetIds((current) => {
+        const next = new Set(current);
+        next.delete(resultSet.id);
+        return next;
+      });
+    }
+  };
+
   const startLayerDrag = (event: DragEvent<HTMLDivElement>, layerId: string) => {
     setDraggingLayerId(layerId);
     event.dataTransfer.effectAllowed = "move";
@@ -935,29 +1140,99 @@ export default function App() {
     ]);
   };
 
+  const beginCreateLand = () => {
+    setCreatingLand(true);
+    setSelectedLandId(null);
+    setSelectedLand(null);
+    setLandDraft(newLandDraft());
+    window.history.pushState(null, "", "/lands");
+    setRouteSelection({ tab: "lands", id: null });
+  };
+
+  const beginCreateBuilding = () => {
+    setCreatingBuilding(true);
+    setSelectedBuildingId(null);
+    setSelectedBuilding(null);
+    setBuildingDraft(newBuildingDraft());
+    window.history.pushState(null, "", "/buildings");
+    setRouteSelection({ tab: "buildings", id: null });
+  };
+
+  const beginCreateParty = () => {
+    setCreatingParty(true);
+    setSelectedPartyId(null);
+    setSelectedParty(null);
+    setPartyDraft(newPartyDraft());
+    window.history.pushState(null, "", "/parties");
+    setRouteSelection({ tab: "parties", id: null });
+  };
+
+  const cancelCreateLand = () => {
+    setCreatingLand(false);
+    setSelectedLandId(null);
+    setSelectedLand(null);
+    setLandDraft(emptyLandDraft());
+    window.history.pushState(null, "", "/lands");
+    setRouteSelection({ tab: "lands", id: null });
+  };
+
+  const cancelCreateBuilding = () => {
+    setCreatingBuilding(false);
+    setSelectedBuildingId(null);
+    setSelectedBuilding(null);
+    setBuildingDraft(emptyBuildingDraft());
+    window.history.pushState(null, "", "/buildings");
+    setRouteSelection({ tab: "buildings", id: null });
+  };
+
+  const cancelCreateParty = () => {
+    setCreatingParty(false);
+    setSelectedPartyId(null);
+    setSelectedParty(null);
+    setPartyDraft(emptyPartyDraft());
+    window.history.pushState(null, "", "/parties");
+    setRouteSelection({ tab: "parties", id: null });
+  };
+
   const saveLand = async () => {
-    if (!selectedLand) return;
     if (!landDraft.lotNumber.trim() || !landDraft.address.trim() || !landDraft.status.trim()) {
       setNotice("地番、所在地、ステータスは必須です");
       return;
     }
+    if (creatingLand && !landDraft.id.trim()) {
+      setNotice("IDは必須です");
+      return;
+    }
     try {
       setSavingLand(true);
-      const item = await updateLand(selectedLand.id, {
+      const payload = {
+        ...(creatingLand ? { id: landDraft.id.trim(), projectId: selectedProject } : {}),
         lotNumber: landDraft.lotNumber,
         address: landDraft.address,
         landUse: nullableString(landDraft.landUse),
         areaSqm: nullableNumber(landDraft.areaSqm, "面積"),
+        registeredOwner: nullableString(landDraft.registeredOwner),
+        rightType: nullableString(landDraft.rightType),
+        registrationCause: nullableString(landDraft.registrationCause),
+        registrationAcceptedOn: nullableString(landDraft.registrationAcceptedOn),
         status: landDraft.status,
         memo: nullableString(landDraft.memo),
         sourceLayerId: nullableString(landDraft.sourceLayerId),
         sourceFeatureId: nullableString(landDraft.sourceFeatureId)
-      });
+      };
+      const item = creatingLand ? await createLand(payload) : selectedLand ? await updateLand(selectedLand.id, payload) : null;
+      if (!item) return;
+      if (creatingLand) {
+        window.history.pushState(null, "", `/lands/${encodeURIComponent(item.id)}`);
+        setRouteSelection({ tab: "lands", id: item.id });
+      }
+      setCreatingLand(false);
+      setSelectedLandId(item.id);
       setSelectedLand(item);
       setLandDraft(toLandDraft(item));
       void refreshLands();
       void refreshBuildings();
-      setNotice("土地を保存しました");
+      setNotice(creatingLand ? "土地を作成しました" : "土地を保存しました");
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -985,30 +1260,51 @@ export default function App() {
   };
 
   const saveBuilding = async () => {
-    if (!selectedBuilding) return;
     if (!buildingDraft.name.trim() || !buildingDraft.status.trim()) {
       setNotice("建物名、ステータスは必須です");
       return;
     }
+    if (creatingBuilding && !buildingDraft.id.trim()) {
+      setNotice("IDは必須です");
+      return;
+    }
     try {
       setSavingBuilding(true);
-      const item = await updateBuilding(selectedBuilding.id, {
+      const payload = {
+        ...(creatingBuilding ? { id: buildingDraft.id.trim(), projectId: selectedProject } : {}),
         landId: nullableString(buildingDraft.landId),
         name: buildingDraft.name,
+        buildingLocation: nullableString(buildingDraft.buildingLocation),
+        houseNumber: nullableString(buildingDraft.houseNumber),
         buildingUse: nullableString(buildingDraft.buildingUse),
         floors: nullableInteger(buildingDraft.floors, "階数"),
         totalFloorAreaSqm: nullableNumber(buildingDraft.totalFloorAreaSqm, "延床面積"),
         structure: nullableString(buildingDraft.structure),
+        registeredOwner: nullableString(buildingDraft.registeredOwner),
+        rightType: nullableString(buildingDraft.rightType),
+        registrationAcceptedOn: nullableString(buildingDraft.registrationAcceptedOn),
         status: buildingDraft.status,
         memo: nullableString(buildingDraft.memo),
         sourceLayerId: nullableString(buildingDraft.sourceLayerId),
         sourceFeatureId: nullableString(buildingDraft.sourceFeatureId)
-      });
+      };
+      const item = creatingBuilding
+        ? await createBuilding(payload)
+        : selectedBuilding
+          ? await updateBuilding(selectedBuilding.id, payload)
+          : null;
+      if (!item) return;
+      if (creatingBuilding) {
+        window.history.pushState(null, "", `/buildings/${encodeURIComponent(item.id)}`);
+        setRouteSelection({ tab: "buildings", id: item.id });
+      }
+      setCreatingBuilding(false);
+      setSelectedBuildingId(item.id);
       setSelectedBuilding(item);
       setBuildingDraft(toBuildingDraft(item));
       void refreshBuildings();
       if (selectedLandId) void getLand(selectedLandId).then(setSelectedLand).catch((error) => setNotice(errorMessage(error)));
-      setNotice("建物を保存しました");
+      setNotice(creatingBuilding ? "建物を作成しました" : "建物を保存しました");
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -1036,24 +1332,36 @@ export default function App() {
   };
 
   const saveParty = async () => {
-    if (!selectedParty) return;
     if (!partyDraft.name.trim() || !partyDraft.partyType.trim()) {
       setNotice("名称、種別は必須です");
       return;
     }
+    if (creatingParty && !partyDraft.id.trim()) {
+      setNotice("IDは必須です");
+      return;
+    }
     try {
       setSavingParty(true);
-      const item = await updateParty(selectedParty.id, {
+      const payload = {
+        ...(creatingParty ? { id: partyDraft.id.trim(), projectId: selectedProject } : {}),
         name: partyDraft.name,
         partyType: partyDraft.partyType,
         contact: nullableString(partyDraft.contact),
         address: nullableString(partyDraft.address),
         memo: nullableString(partyDraft.memo)
-      });
+      };
+      const item = creatingParty ? await createParty(payload) : selectedParty ? await updateParty(selectedParty.id, payload) : null;
+      if (!item) return;
+      if (creatingParty) {
+        window.history.pushState(null, "", `/parties/${encodeURIComponent(item.id)}`);
+        setRouteSelection({ tab: "parties", id: item.id });
+      }
+      setCreatingParty(false);
+      setSelectedPartyId(item.id);
       setSelectedParty(item);
       setPartyDraft(toPartyDraft(item));
       void refreshParties();
-      setNotice("関係者を保存しました");
+      setNotice(creatingParty ? "関係者を作成しました" : "関係者を保存しました");
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -1076,6 +1384,114 @@ export default function App() {
       setNotice(errorMessage(error));
     } finally {
       setDeletingParty(false);
+    }
+  };
+
+  const refreshSelectedObjects = async () => {
+    await Promise.all([
+      selectedLandId ? getLand(selectedLandId).then(setSelectedLand) : Promise.resolve(),
+      selectedBuildingId ? getBuilding(selectedBuildingId).then(setSelectedBuilding) : Promise.resolve(),
+      selectedPartyId ? getParty(selectedPartyId).then(setSelectedParty) : Promise.resolve()
+    ]);
+    void refreshLands();
+    void refreshBuildings();
+    void refreshParties();
+  };
+
+  const saveRelationship = async (relationshipId: string | null, draft: RelationshipDraft) => {
+    if (!draft.partyId || !draft.targetId || !draft.relationType.trim()) {
+      setNotice("関係者、対象、関係種別は必須です");
+      return;
+    }
+    try {
+      const payload = {
+        projectId: selectedProject,
+        partyId: draft.partyId,
+        targetType: draft.targetType,
+        targetId: draft.targetId,
+        relationType: draft.relationType,
+        note: nullableString(draft.note)
+      };
+      if (relationshipId) {
+        await updatePartyRelationship(relationshipId, payload);
+      } else {
+        await createPartyRelationship(payload);
+      }
+      await refreshSelectedObjects();
+      setNotice(relationshipId ? "関係を更新しました" : "関係を追加しました");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    }
+  };
+
+  const removeRelationship = async (relationshipId: string) => {
+    if (!window.confirm("この関係を削除しますか")) return;
+    try {
+      await deletePartyRelationship(relationshipId);
+      await refreshSelectedObjects();
+      setNotice("関係を削除しました");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    }
+  };
+
+  const useMapBoundsFilter = (setter: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>) => {
+    const bounds = mapRef.current?.getBounds();
+    if (!bounds) {
+      setNotice("地図がまだ準備できていません");
+      return;
+    }
+    const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
+      .map((value) => value.toFixed(6))
+      .join(",");
+    setter((current) => ({ ...current, bbox }));
+  };
+
+  const useSelectedFeatureFilter = (setter: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>) => {
+    if (!selectedFeature || !selectedFeatureLayer) {
+      setNotice("先に地図上の地物を選択してください");
+      return;
+    }
+    setter((current) => ({
+      ...current,
+      intersectsLayerId: selectedFeature.layerId,
+      intersectsFeatureId: selectedFeature.featureId
+    }));
+  };
+
+  const openSourceFeature = async (sourceLayerId?: string | null, sourceFeatureId?: string | null) => {
+    if (!sourceLayerId || !sourceFeatureId) {
+      setNotice("GISリンクがありません");
+      return;
+    }
+    try {
+      const feature = await getFeature(sourceLayerId, sourceFeatureId);
+      const layer = layerById.get(sourceLayerId) ?? (await getLayers(selectedProject)).find((item) => item.id === sourceLayerId) ?? null;
+      setSelectedFeature(feature);
+      setSelectedFeatureLayer(layer);
+      if (layer) {
+        setVisibleLayerIds((current) => new Set([...current, layer.id]));
+        setZoneSpatialLayerIds([layer.id]);
+        setZoneSearchResults([
+          {
+            layerId: feature.layerId,
+            layerName: layer.name,
+            featureId: feature.featureId,
+            properties: feature.properties,
+            geometry: feature.geometry,
+            businessLinks: emptyBusinessLinks,
+            matchedBusinessLinks: emptyBusinessLinks,
+            matchSummary: "GISリンク"
+          }
+        ]);
+      }
+      navigateTab("zone");
+      window.setTimeout(() => {
+        mapRef.current?.resize();
+        focusGeometry(mapRef.current, feature.geometry);
+      }, 80);
+    } catch (error) {
+      setNotice(errorMessage(error));
     }
   };
 
@@ -1139,6 +1555,9 @@ export default function App() {
         <ZoneSearchPanel
           layers={layers}
           layerById={layerById}
+          lands={lands}
+          buildings={buildings}
+          parties={parties}
           resultName={analysisName}
           setResultName={setAnalysisName}
           query={zoneSearchQuery}
@@ -1159,6 +1578,12 @@ export default function App() {
           setBusinessSourceType={setZoneBusinessSourceType}
           businessQuery={zoneBusinessQuery}
           setBusinessQuery={setZoneBusinessQuery}
+          businessStatus={zoneBusinessStatus}
+          setBusinessStatus={setZoneBusinessStatus}
+          landUse={zoneLandUse}
+          setLandUse={setZoneLandUse}
+          buildingUse={zoneBuildingUse}
+          setBuildingUse={setZoneBuildingUse}
           partyQuery={zonePartyQuery}
           setPartyQuery={setZonePartyQuery}
           partyType={zonePartyType}
@@ -1171,6 +1596,7 @@ export default function App() {
           selectedFeature={selectedFeature}
           onSearch={() => void submitZoneSearch()}
           onSave={() => void saveConditionSearchResult()}
+          onClear={clearZoneSearchConditions}
           onSelect={(result) => void openZoneSearchResult(result)}
         />
 
@@ -1226,11 +1652,13 @@ export default function App() {
                 </strong>
                 <span>ベース地図</span>
               </div>
+              <span className="layer-action-spacer" aria-hidden="true" />
             </div>
             {layerListItems.map((item) => {
               if (item.type === "resultSet") {
                 const childIds = item.layers.map((layer) => layer.id);
                 const allVisible = childIds.every((layerId) => visibleLayerIds.has(layerId));
+                const deletingResultSet = deletingResultSetIds.has(item.id);
                 return (
                   <div className="layer-result-group" key={item.id}>
                     <div className="layer-row layer-group-row">
@@ -1242,6 +1670,15 @@ export default function App() {
                         <strong>{item.name}</strong>
                         <span>条件検索結果 · {item.layers.length.toLocaleString()}レイヤ</span>
                       </div>
+                      <button
+                        className="icon-button danger-icon-button"
+                        type="button"
+                        onClick={() => void requestResultSetDelete(item)}
+                        disabled={deletingResultSet}
+                        title="条件検索結果を削除"
+                      >
+                        {deletingResultSet ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                      </button>
                     </div>
                     {item.layers.map((layer) => (
                       <div className="layer-row child-layer-row" key={layer.id}>
@@ -1255,6 +1692,15 @@ export default function App() {
                             {layer.geometryType} · {layer.rowCount.toLocaleString()}件
                           </span>
                         </div>
+                        <button
+                          className="icon-button danger-icon-button"
+                          type="button"
+                          onClick={() => void requestLayerDelete(layer)}
+                          disabled={deletingResultSet || deletingLayerIds.has(layer.id)}
+                          title="レイヤ削除"
+                        >
+                          {deletingResultSet || deletingLayerIds.has(layer.id) ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1283,6 +1729,15 @@ export default function App() {
                       {layer.geometryType} · {layer.rowCount.toLocaleString()}件{layer.isResult ? " · 結果" : ""}
                     </span>
                   </div>
+                  <button
+                    className="icon-button danger-icon-button"
+                    type="button"
+                    onClick={() => void requestLayerDelete(layer)}
+                    disabled={deletingLayerIds.has(layer.id)}
+                    title="レイヤ削除"
+                  >
+                    {deletingLayerIds.has(layer.id) ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                  </button>
                 </div>
               );
             })}
@@ -1411,18 +1866,38 @@ export default function App() {
           <LandWorkspace
             query={landQuery}
             setQuery={setLandQuery}
+            filters={landFilters}
+            setFilters={setLandFilters}
+            filtersOpen={landFiltersOpen}
+            setFiltersOpen={setLandFiltersOpen}
             items={lands}
+            selectedId={selectedLandId}
             selected={selectedLand}
             draft={landDraft}
             setDraft={setLandDraft}
+            creating={creatingLand}
             loading={loadingLands}
             saving={savingLand}
             deleting={deletingLand}
             onRefresh={() => void refreshLands()}
             onSelect={selectLand}
+            onCreate={beginCreateLand}
+            onCancelCreate={cancelCreateLand}
+            onBackToList={() => navigateTab("lands")}
             onSave={() => void saveLand()}
             onDelete={() => void removeLand()}
             onOpenBuilding={selectBuilding}
+            onOpenParty={selectParty}
+            onSaveRelationship={(relationshipId, relationshipDraft) => void saveRelationship(relationshipId, relationshipDraft)}
+            onDeleteRelationship={(relationshipId) => void removeRelationship(relationshipId)}
+            onUseMapBounds={() => useMapBoundsFilter(setLandFilters)}
+            onUseSelectedFeature={() => useSelectedFeatureFilter(setLandFilters)}
+            onOpenSourceFeature={(layerId, featureId) => void openSourceFeature(layerId, featureId)}
+            layers={layers}
+            parties={parties}
+            buildings={buildings}
+            selectedFeature={selectedFeature}
+            selectedFeatureLayer={selectedFeatureLayer}
             selectedProject={selectedProject}
             projects={projects}
             onProjectChange={setSelectedProject}
@@ -1433,19 +1908,38 @@ export default function App() {
           <BuildingWorkspace
             query={buildingQuery}
             setQuery={setBuildingQuery}
+            filters={buildingFilters}
+            setFilters={setBuildingFilters}
+            filtersOpen={buildingFiltersOpen}
+            setFiltersOpen={setBuildingFiltersOpen}
             items={buildings}
             lands={lands}
+            selectedId={selectedBuildingId}
             selected={selectedBuilding}
             draft={buildingDraft}
             setDraft={setBuildingDraft}
+            creating={creatingBuilding}
             loading={loadingBuildings}
             saving={savingBuilding}
             deleting={deletingBuilding}
             onRefresh={() => void refreshBuildings()}
             onSelect={selectBuilding}
+            onCreate={beginCreateBuilding}
+            onCancelCreate={cancelCreateBuilding}
+            onBackToList={() => navigateTab("buildings")}
             onSave={() => void saveBuilding()}
             onDelete={() => void removeBuilding()}
             onOpenLand={selectLand}
+            onOpenParty={selectParty}
+            onSaveRelationship={(relationshipId, relationshipDraft) => void saveRelationship(relationshipId, relationshipDraft)}
+            onDeleteRelationship={(relationshipId) => void removeRelationship(relationshipId)}
+            onUseMapBounds={() => useMapBoundsFilter(setBuildingFilters)}
+            onUseSelectedFeature={() => useSelectedFeatureFilter(setBuildingFilters)}
+            onOpenSourceFeature={(layerId, featureId) => void openSourceFeature(layerId, featureId)}
+            layers={layers}
+            parties={parties}
+            selectedFeature={selectedFeature}
+            selectedFeatureLayer={selectedFeatureLayer}
             selectedProject={selectedProject}
             projects={projects}
             onProjectChange={setSelectedProject}
@@ -1456,17 +1950,32 @@ export default function App() {
           <PartyWorkspace
             query={partyQuery}
             setQuery={setPartyQuery}
+            filters={partyFilters}
+            setFilters={setPartyFilters}
+            filtersOpen={partyFiltersOpen}
+            setFiltersOpen={setPartyFiltersOpen}
             items={parties}
+            lands={lands}
+            buildings={buildings}
+            selectedId={selectedPartyId}
             selected={selectedParty}
             draft={partyDraft}
             setDraft={setPartyDraft}
+            creating={creatingParty}
             loading={loadingParties}
             saving={savingParty}
             deleting={deletingParty}
             onRefresh={() => void refreshParties()}
             onSelect={selectParty}
+            onCreate={beginCreateParty}
+            onCancelCreate={cancelCreateParty}
+            onBackToList={() => navigateTab("parties")}
             onSave={() => void saveParty()}
             onDelete={() => void removeParty()}
+            onOpenLand={selectLand}
+            onOpenBuilding={selectBuilding}
+            onSaveRelationship={(relationshipId, relationshipDraft) => void saveRelationship(relationshipId, relationshipDraft)}
+            onDeleteRelationship={(relationshipId) => void removeRelationship(relationshipId)}
             selectedProject={selectedProject}
             projects={projects}
             onProjectChange={setSelectedProject}
@@ -1501,13 +2010,56 @@ function ConditionEditor({
   spatialConditions: SpatialConditionDraft[];
   setSpatialConditions: React.Dispatch<React.SetStateAction<SpatialConditionDraft[]>>;
 }) {
+  const [attributeValueOptions, setAttributeValueOptions] = useState<Record<string, string[]>>({});
+  const attributeValueLookups = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          attributeConditions
+            .filter((condition) => condition.layerId && condition.field && condition.operator !== "IS NULL")
+            .map((condition) => [
+              attributeValueOptionKey(condition.layerId, condition.field),
+              { key: attributeValueOptionKey(condition.layerId, condition.field), layerId: condition.layerId, field: condition.field }
+            ])
+        ).values()
+      ),
+    [attributeConditions]
+  );
+
+  useEffect(() => {
+    const pendingLookups = attributeValueLookups.filter((lookup) => !(lookup.key in attributeValueOptions));
+    if (!pendingLookups.length) return;
+    let cancelled = false;
+    pendingLookups.forEach((lookup) => {
+      void getLayerAttributeValues(lookup.layerId, lookup.field)
+        .then((values) => {
+          if (cancelled) return;
+          setAttributeValueOptions((current) => (lookup.key in current ? current : { ...current, [lookup.key]: values }));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setAttributeValueOptions((current) => (lookup.key in current ? current : { ...current, [lookup.key]: [] }));
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attributeValueLookups, attributeValueOptions]);
+
   const updateAttribute = (id: string, patch: Partial<AttributeConditionDraft>) => {
     setAttributeConditions((current) =>
       current.map((condition) => {
         if (condition.id !== id) return condition;
         const next = { ...condition, ...patch };
-        if (patch.layerId) {
+        if (patch.layerId !== undefined) {
           next.field = layerById.get(patch.layerId)?.attributes[0]?.name ?? "";
+          next.value = "";
+        }
+        if (patch.field !== undefined) {
+          next.value = "";
+        }
+        if (patch.operator === "IS NULL") {
+          next.value = "";
         }
         return next;
       })
@@ -1518,6 +2070,9 @@ function ConditionEditor({
     <div className="conditions">
       {attributeConditions.map((condition) => {
         const fields = layerById.get(condition.layerId)?.attributes ?? [];
+        const valueOptions = attributeValueOptions[attributeValueOptionKey(condition.layerId, condition.field)] ?? [];
+        const exactValueOperator = condition.operator === "=" || condition.operator === "!=";
+        const listId = `attribute-values-${condition.id}`;
         return (
           <div className="condition-row" key={condition.id}>
             <select value={condition.layerId} onChange={(event) => updateAttribute(condition.id, { layerId: event.target.value })}>
@@ -1541,11 +2096,25 @@ function ConditionEditor({
                 </option>
               ))}
             </select>
-            <input
-              value={condition.value}
-              onChange={(event) => updateAttribute(condition.id, { value: event.target.value })}
-              disabled={condition.operator === "IS NULL"}
-            />
+            {condition.operator === "IS NULL" ? (
+              <input value="" disabled placeholder="値なし" />
+            ) : exactValueOperator && valueOptions.length ? (
+              <ChoiceSelect value={condition.value} onChange={(value) => updateAttribute(condition.id, { value })} options={valueOptions} emptyLabel="値を選択" />
+            ) : (
+              <>
+                <input
+                  value={condition.value}
+                  onChange={(event) => updateAttribute(condition.id, { value: event.target.value })}
+                  list={listId}
+                  placeholder={condition.operator === "IN" ? "候補をカンマ区切り" : undefined}
+                />
+                <datalist id={listId}>
+                  {valueOptions.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
+              </>
+            )}
             <button
               className="icon-button"
               type="button"
@@ -1638,6 +2207,9 @@ function ConditionEditor({
 function ZoneSearchPanel({
   layers,
   layerById,
+  lands,
+  buildings,
+  parties,
   resultName,
   setResultName,
   query,
@@ -1658,6 +2230,12 @@ function ZoneSearchPanel({
   setBusinessSourceType,
   businessQuery,
   setBusinessQuery,
+  businessStatus,
+  setBusinessStatus,
+  landUse,
+  setLandUse,
+  buildingUse,
+  setBuildingUse,
   partyQuery,
   setPartyQuery,
   partyType,
@@ -1670,10 +2248,14 @@ function ZoneSearchPanel({
   selectedFeature,
   onSearch,
   onSave,
+  onClear,
   onSelect
 }: {
   layers: Layer[];
   layerById: Map<string, Layer>;
+  lands: Land[];
+  buildings: Building[];
+  parties: Party[];
   resultName: string;
   setResultName: (value: string) => void;
   query: string;
@@ -1694,6 +2276,12 @@ function ZoneSearchPanel({
   setBusinessSourceType: (value: ZoneBusinessSourceType) => void;
   businessQuery: string;
   setBusinessQuery: (value: string) => void;
+  businessStatus: string;
+  setBusinessStatus: (value: string) => void;
+  landUse: string;
+  setLandUse: (value: string) => void;
+  buildingUse: string;
+  setBuildingUse: (value: string) => void;
   partyQuery: string;
   setPartyQuery: (value: string) => void;
   partyType: string;
@@ -1706,6 +2294,7 @@ function ZoneSearchPanel({
   selectedFeature: Feature | null;
   onSearch: () => void;
   onSave: () => void;
+  onClear: () => void;
   onSelect: (result: FeatureSearchResult) => void;
 }) {
   const groupedResults = groupFeatureResults(results);
@@ -1720,6 +2309,54 @@ function ZoneSearchPanel({
     onSearch();
   };
   const searchDisabled = loading || !spatialLayerIds.length;
+  const statusChoices = useMemo(
+    () => mergeChoiceOptions(businessStatusOptions, lands.map((land) => land.status), buildings.map((building) => building.status), businessStatus),
+    [buildings, businessStatus, lands]
+  );
+  const landUseChoices = useMemo(
+    () => mergeChoiceOptions(landUseOptions, lands.map((land) => land.landUse), landUse),
+    [landUse, lands]
+  );
+  const buildingUseChoices = useMemo(
+    () => mergeChoiceOptions(buildingUseOptions, buildings.map((building) => building.buildingUse), buildingUse),
+    [buildingUse, buildings]
+  );
+  const partyNameChoices = useMemo(
+    () => mergeChoiceOptions([], parties.map((party) => party.name), partyQuery),
+    [parties, partyQuery]
+  );
+  const partyTypeChoices = useMemo(
+    () => mergeChoiceOptions(partyTypeOptions, parties.map((party) => party.partyType), partyType),
+    [parties, partyType]
+  );
+  const relationTypeChoices = useMemo(
+    () => relationshipTypeChoices(lands, buildings, parties),
+    [buildings, lands, parties]
+  );
+  const businessKeywordChoices = useMemo(() => {
+    const landChoices =
+      businessSourceType === "building"
+        ? []
+        : lands.flatMap((land) => [land.id, land.lotNumber, land.address, land.landUse, land.status]);
+    const buildingChoices =
+      businessSourceType === "land"
+        ? []
+        : buildings.flatMap((building) => [
+            building.id,
+            building.name,
+            building.landLabel,
+            building.buildingLocation,
+            building.buildingUse,
+            building.structure,
+            building.status
+          ]);
+    return mergeChoiceOptions([], landChoices, buildingChoices, businessQuery).slice(0, 120);
+  }, [buildings, businessQuery, businessSourceType, lands]);
+  const handleBusinessSourceTypeChange = (value: ZoneBusinessSourceType) => {
+    setBusinessSourceType(value);
+    if (value !== "land") setLandUse("");
+    if (value !== "building") setBuildingUse("");
+  };
 
   return (
     <section className="panel-section zone-search-section">
@@ -1759,6 +2396,10 @@ function ZoneSearchPanel({
           <button className="subtle-button" type="button" onClick={() => setBuilderOpen(!builderOpen)}>
             <Plus size={15} />
             条件を追加
+          </button>
+          <button className="subtle-button" type="button" onClick={onClear}>
+            <X size={15} />
+            条件クリア
           </button>
           <button className="command-button" type="submit" disabled={searchDisabled}>
             {loading ? <Loader2 className="spin" size={15} /> : <Search size={15} />}
@@ -1803,33 +2444,58 @@ function ZoneSearchPanel({
                 業務対象
                 <select
                   value={businessSourceType}
-                  onChange={(event) => setBusinessSourceType(event.target.value as ZoneBusinessSourceType)}
+                  onChange={(event) => handleBusinessSourceTypeChange(event.target.value as ZoneBusinessSourceType)}
                 >
                   <option value="all">土地または建物</option>
                   <option value="land">土地</option>
                   <option value="building">建物</option>
                 </select>
               </label>
+              <label>
+                ステータス
+                <ChoiceSelect value={businessStatus} onChange={setBusinessStatus} options={statusChoices} />
+              </label>
+              {businessSourceType === "land" ? (
+                <label>
+                  土地用途
+                  <ChoiceSelect value={landUse} onChange={setLandUse} options={landUseChoices} />
+                </label>
+              ) : null}
+              {businessSourceType === "building" ? (
+                <label>
+                  建物用途
+                  <ChoiceSelect value={buildingUse} onChange={setBuildingUse} options={buildingUseChoices} />
+                </label>
+              ) : null}
               <label className="search-field">
                 業務キーワード
                 <span>
                   <Search size={15} />
-                  <input value={businessQuery} onChange={(event) => setBusinessQuery(event.target.value)} />
+                  <input
+                    value={businessQuery}
+                    onChange={(event) => setBusinessQuery(event.target.value)}
+                    list="zone-business-keyword-options"
+                  />
                 </span>
+                <datalist id="zone-business-keyword-options">
+                  {businessKeywordChoices.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
               </label>
             </div>
             <div className="zone-condition-grid business-party-grid">
               <label>
                 事業者
-                <input value={partyQuery} onChange={(event) => setPartyQuery(event.target.value)} />
+                <ChoiceSelect value={partyQuery} onChange={setPartyQuery} options={partyNameChoices} />
               </label>
               <label>
                 種別
-                <input value={partyType} onChange={(event) => setPartyType(event.target.value)} />
+                <ChoiceSelect value={partyType} onChange={setPartyType} options={partyTypeChoices} />
               </label>
               <label>
                 関係
-                <input value={relationType} onChange={(event) => setRelationType(event.target.value)} />
+                <ChoiceSelect value={relationType} onChange={setRelationType} options={relationTypeChoices} />
               </label>
             </div>
           </div>
@@ -2011,107 +2677,272 @@ function BusinessLinksPanel({ links, loading }: { links: BusinessLinks; loading:
   );
 }
 
+function ChoiceSelect({
+  value,
+  onChange,
+  options,
+  emptyLabel = "すべて"
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  emptyLabel?: string | null;
+}) {
+  const normalizedOptions = mergeChoiceOptions(options, value);
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value)}>
+      {emptyLabel !== null ? <option value="">{emptyLabel}</option> : null}
+      {normalizedOptions.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function LandWorkspace({
   query,
   setQuery,
+  filters,
+  setFilters,
+  filtersOpen,
+  setFiltersOpen,
   items,
+  selectedId,
   selected,
   draft,
   setDraft,
+  creating,
   loading,
   saving,
   deleting,
   onRefresh,
   onSelect,
+  onCreate,
+  onCancelCreate,
+  onBackToList,
   onSave,
   onDelete,
   onOpenBuilding,
+  onOpenParty,
+  onSaveRelationship,
+  onDeleteRelationship,
+  onUseMapBounds,
+  onUseSelectedFeature,
+  onOpenSourceFeature,
+  layers,
+  parties,
+  buildings,
+  selectedFeature,
+  selectedFeatureLayer,
   selectedProject,
   projects,
   onProjectChange
 }: {
   query: string;
   setQuery: (value: string) => void;
+  filters: BusinessObjectFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>;
+  filtersOpen: boolean;
+  setFiltersOpen: (value: boolean) => void;
   items: Land[];
+  selectedId: string | null;
   selected: Land | null;
   draft: LandDraft;
   setDraft: React.Dispatch<React.SetStateAction<LandDraft>>;
+  creating: boolean;
   loading: boolean;
   saving: boolean;
   deleting: boolean;
   onRefresh: () => void;
   onSelect: (id: string) => void;
+  onCreate: () => void;
+  onCancelCreate: () => void;
+  onBackToList: () => void;
   onSave: () => void;
   onDelete: () => void;
   onOpenBuilding: (id: string) => void;
+  onOpenParty: (id: string) => void;
+  onSaveRelationship: (relationshipId: string | null, draft: RelationshipDraft) => void;
+  onDeleteRelationship: (relationshipId: string) => void;
+  onUseMapBounds: () => void;
+  onUseSelectedFeature: () => void;
+  onOpenSourceFeature: (layerId?: string | null, featureId?: string | null) => void;
+  layers: Layer[];
+  parties: Party[];
+  buildings: Building[];
+  selectedFeature: Feature | null;
+  selectedFeatureLayer: Layer | null;
   selectedProject: string;
   projects: Project[];
   onProjectChange: (id: string) => void;
 }) {
+  const detailOpen = creating || Boolean(selectedId);
+  const hasDetailContent = creating || Boolean(selected);
+  const statusChoices = mergeChoiceOptions(businessStatusOptions, items.map((land) => land.status), draft.status);
+  const landUseChoices = mergeChoiceOptions(landUseOptions, items.map((land) => land.landUse), draft.landUse);
+  const rightTypeChoices = mergeChoiceOptions(rightTypeOptions, items.map((land) => land.rightType), draft.rightType);
+  const registrationCauseChoices = mergeChoiceOptions(
+    registrationCauseOptions,
+    items.map((land) => land.registrationCause),
+    draft.registrationCause
+  );
+  const partyTypeChoices = mergeChoiceOptions(partyTypeOptions, parties.map((party) => party.partyType));
+  const relationChoices = relationshipTypeChoices(items, buildings, parties);
   return (
-    <div className="object-workspace">
+    <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
+      {!detailOpen ? (
       <ObjectSidebar
         title="土地"
         query={query}
         setQuery={setQuery}
         loading={loading}
         onRefresh={onRefresh}
+        onCreate={onCreate}
+        filterContent={
+          <BusinessFilterPanel
+            kind="land"
+            filters={filters}
+            setFilters={setFilters}
+            open={filtersOpen}
+            setOpen={setFiltersOpen}
+            layers={layers}
+            selectedFeature={selectedFeature}
+            selectedFeatureLayer={selectedFeatureLayer}
+            onUseMapBounds={onUseMapBounds}
+            onUseSelectedFeature={onUseSelectedFeature}
+            statusOptions={statusChoices}
+            useOptions={landUseChoices}
+            partyTypeOptions={partyTypeChoices}
+            relationTypeOptions={relationChoices}
+          />
+        }
         selectedProject={selectedProject}
         projects={projects}
         onProjectChange={onProjectChange}
       >
-        {items.map((land) => (
-          <button
-            className={`object-row${selected?.id === land.id ? " active" : ""}`}
-            key={land.id}
-            type="button"
-            onClick={() => onSelect(land.id)}
-          >
-            <strong>{land.id}</strong>
-            <span>{land.lotNumber}</span>
-            <em>{land.address}</em>
-          </button>
-        ))}
+        <div className="business-table-scroll">
+          <table className="business-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>所在地 / 地番</th>
+                <th>用途</th>
+                <th>地積</th>
+                <th>ステータス</th>
+                <th>関係者</th>
+                <th>GIS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((land) => (
+                <tr key={land.id} onClick={() => onSelect(land.id)}>
+                  <td>{land.id}</td>
+                  <td>
+                    <strong>{land.address}</strong>
+                    <span>{land.lotNumber}</span>
+                  </td>
+                  <td>{land.landUse ?? ""}</td>
+                  <td>{formatArea(land.areaSqm)}</td>
+                  <td>{land.status}</td>
+                  <td>{relationshipSummary(land.relationships)}</td>
+                  <td>{gisLinkSummary(land.sourceLayerId, land.sourceFeatureId)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {!items.length ? <p className="empty-state">土地はありません</p> : null}
       </ObjectSidebar>
+      ) : null}
 
+      {detailOpen ? (
       <section className="object-detail">
-        {selected ? (
+        {hasDetailContent ? (
           <>
             <ObjectDetailHeader
-              id={selected.id}
-              title={selected.lotNumber}
-              subtitle={selected.address}
-              status={selected.status}
-              href={`/lands/${encodeURIComponent(selected.id)}`}
+              id={creating ? draft.id || "新規土地" : selected?.id ?? ""}
+              title={draft.lotNumber || "土地"}
+              subtitle={draft.address}
+              status={draft.status}
+              href={selected ? `/lands/${encodeURIComponent(selected.id)}` : undefined}
+              onBack={creating ? onCancelCreate : onBackToList}
             />
             <div className="object-form">
+              <label>
+                ID
+                <input value={draft.id} disabled={!creating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
+              </label>
               <label>
                 地番
                 <input value={draft.lotNumber} onChange={(event) => setDraft((current) => ({ ...current, lotNumber: event.target.value }))} />
               </label>
-              <label>
+              <label className="wide-field">
                 所在地
                 <input value={draft.address} onChange={(event) => setDraft((current) => ({ ...current, address: event.target.value }))} />
               </label>
               <label>
-                用途
-                <input value={draft.landUse} onChange={(event) => setDraft((current) => ({ ...current, landUse: event.target.value }))} />
+                地目/用途
+                <ChoiceSelect
+                  value={draft.landUse}
+                  onChange={(value) => setDraft((current) => ({ ...current, landUse: value }))}
+                  options={landUseChoices}
+                  emptyLabel="選択"
+                />
               </label>
               <label>
-                面積(m2)
+                地積(m2)
                 <input value={draft.areaSqm} onChange={(event) => setDraft((current) => ({ ...current, areaSqm: event.target.value }))} inputMode="decimal" />
               </label>
               <label>
+                登記名義人
+                <input value={draft.registeredOwner} onChange={(event) => setDraft((current) => ({ ...current, registeredOwner: event.target.value }))} />
+              </label>
+              <label>
+                権利種別
+                <ChoiceSelect
+                  value={draft.rightType}
+                  onChange={(value) => setDraft((current) => ({ ...current, rightType: value }))}
+                  options={rightTypeChoices}
+                  emptyLabel="選択"
+                />
+              </label>
+              <label>
+                登記原因
+                <ChoiceSelect
+                  value={draft.registrationCause}
+                  onChange={(value) => setDraft((current) => ({ ...current, registrationCause: value }))}
+                  options={registrationCauseChoices}
+                  emptyLabel="選択"
+                />
+              </label>
+              <label>
+                受付日
+                <input type="date" value={draft.registrationAcceptedOn} onChange={(event) => setDraft((current) => ({ ...current, registrationAcceptedOn: event.target.value }))} />
+              </label>
+              <label>
                 ステータス
-                <input value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))} />
+                <ChoiceSelect
+                  value={draft.status}
+                  onChange={(value) => setDraft((current) => ({ ...current, status: value }))}
+                  options={statusChoices}
+                  emptyLabel="選択"
+                />
               </label>
               <label>
-                source layer
-                <input value={draft.sourceLayerId} onChange={(event) => setDraft((current) => ({ ...current, sourceLayerId: event.target.value }))} />
+                GISレイヤ
+                <select value={draft.sourceLayerId} onChange={(event) => setDraft((current) => ({ ...current, sourceLayerId: event.target.value }))}>
+                  <option value="">未設定</option>
+                  {layers.map((layer) => (
+                    <option key={layer.id} value={layer.id}>
+                      {layer.name}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
-                source feature
+                GIS地物ID
                 <input value={draft.sourceFeatureId} onChange={(event) => setDraft((current) => ({ ...current, sourceFeatureId: event.target.value }))} />
               </label>
               <label className="wide-field">
@@ -2120,25 +2951,51 @@ function LandWorkspace({
               </label>
             </div>
 
-            <div className="object-related">
-              <h3>建物</h3>
-              {selected.buildings.map((building) => (
-                <button key={building.id} type="button" onClick={() => onOpenBuilding(building.id)}>
-                  <Building2 size={15} />
-                  <strong>{building.id}</strong>
-                  <span>{building.label}</span>
-                </button>
-              ))}
-              {!selected.buildings.length ? <p className="empty-state compact">紐づく建物はありません</p> : null}
-            </div>
+            <SourceLinkPanel layers={layers} layerId={draft.sourceLayerId} featureId={draft.sourceFeatureId} onOpen={onOpenSourceFeature} />
 
-            <RelationshipList relationships={selected.relationships} />
-            <ObjectActions saving={saving} deleting={deleting} onSave={onSave} onDelete={onDelete} />
+            {selected ? (
+              <div className="object-related">
+                <h3>建物</h3>
+                {selected.buildings.map((building) => (
+                  <button key={building.id} type="button" onClick={() => onOpenBuilding(building.id)}>
+                    <Building2 size={15} />
+                    <strong>{building.id}</strong>
+                    <span>{building.label}</span>
+                  </button>
+                ))}
+                {!selected.buildings.length ? <p className="empty-state compact">紐づく建物はありません</p> : null}
+              </div>
+            ) : null}
+
+            {selected ? (
+              <RelationshipEditor
+                relationships={selected.relationships}
+                parties={parties}
+                lands={items}
+                buildings={buildings}
+                fixedTarget={{ targetType: "land", targetId: selected.id }}
+                onOpenParty={onOpenParty}
+                onOpenLand={() => undefined}
+                onOpenBuilding={onOpenBuilding}
+                onSave={onSaveRelationship}
+                onDelete={onDeleteRelationship}
+                relationOptions={relationChoices}
+              />
+            ) : null}
+            <ObjectActions
+              saving={saving}
+              deleting={deleting}
+              onSave={onSave}
+              onDelete={onDelete}
+              onCancel={onCancelCreate}
+              creating={creating}
+            />
           </>
         ) : (
-          <p className="empty-state">土地を選択してください</p>
+          <p className="empty-state">土地を読み込み中です</p>
         )}
       </section>
+      ) : null}
     </div>
   );
 }
@@ -2146,80 +3003,174 @@ function LandWorkspace({
 function BuildingWorkspace({
   query,
   setQuery,
+  filters,
+  setFilters,
+  filtersOpen,
+  setFiltersOpen,
   items,
   lands,
+  selectedId,
   selected,
   draft,
   setDraft,
+  creating,
   loading,
   saving,
   deleting,
   onRefresh,
   onSelect,
+  onCreate,
+  onCancelCreate,
+  onBackToList,
   onSave,
   onDelete,
   onOpenLand,
+  onOpenParty,
+  onSaveRelationship,
+  onDeleteRelationship,
+  onUseMapBounds,
+  onUseSelectedFeature,
+  onOpenSourceFeature,
+  layers,
+  parties,
+  selectedFeature,
+  selectedFeatureLayer,
   selectedProject,
   projects,
   onProjectChange
 }: {
   query: string;
   setQuery: (value: string) => void;
+  filters: BusinessObjectFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>;
+  filtersOpen: boolean;
+  setFiltersOpen: (value: boolean) => void;
   items: Building[];
   lands: Land[];
+  selectedId: string | null;
   selected: Building | null;
   draft: BuildingDraft;
   setDraft: React.Dispatch<React.SetStateAction<BuildingDraft>>;
+  creating: boolean;
   loading: boolean;
   saving: boolean;
   deleting: boolean;
   onRefresh: () => void;
   onSelect: (id: string) => void;
+  onCreate: () => void;
+  onCancelCreate: () => void;
+  onBackToList: () => void;
   onSave: () => void;
   onDelete: () => void;
   onOpenLand: (id: string) => void;
+  onOpenParty: (id: string) => void;
+  onSaveRelationship: (relationshipId: string | null, draft: RelationshipDraft) => void;
+  onDeleteRelationship: (relationshipId: string) => void;
+  onUseMapBounds: () => void;
+  onUseSelectedFeature: () => void;
+  onOpenSourceFeature: (layerId?: string | null, featureId?: string | null) => void;
+  layers: Layer[];
+  parties: Party[];
+  selectedFeature: Feature | null;
+  selectedFeatureLayer: Layer | null;
   selectedProject: string;
   projects: Project[];
   onProjectChange: (id: string) => void;
 }) {
+  const detailOpen = creating || Boolean(selectedId);
+  const hasDetailContent = creating || Boolean(selected);
+  const statusChoices = mergeChoiceOptions(businessStatusOptions, items.map((building) => building.status), draft.status);
+  const buildingUseChoices = mergeChoiceOptions(buildingUseOptions, items.map((building) => building.buildingUse), draft.buildingUse);
+  const structureChoices = mergeChoiceOptions(buildingStructureOptions, items.map((building) => building.structure), draft.structure);
+  const rightTypeChoices = mergeChoiceOptions(rightTypeOptions, items.map((building) => building.rightType), draft.rightType);
+  const partyTypeChoices = mergeChoiceOptions(partyTypeOptions, parties.map((party) => party.partyType));
+  const relationChoices = relationshipTypeChoices(items, lands, parties);
   return (
-    <div className="object-workspace">
+    <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
+      {!detailOpen ? (
       <ObjectSidebar
         title="建物"
         query={query}
         setQuery={setQuery}
         loading={loading}
         onRefresh={onRefresh}
+        onCreate={onCreate}
+        filterContent={
+          <BusinessFilterPanel
+            kind="building"
+            filters={filters}
+            setFilters={setFilters}
+            open={filtersOpen}
+            setOpen={setFiltersOpen}
+            layers={layers}
+            selectedFeature={selectedFeature}
+            selectedFeatureLayer={selectedFeatureLayer}
+            onUseMapBounds={onUseMapBounds}
+            onUseSelectedFeature={onUseSelectedFeature}
+            statusOptions={statusChoices}
+            useOptions={buildingUseChoices}
+            partyTypeOptions={partyTypeChoices}
+            relationTypeOptions={relationChoices}
+          />
+        }
         selectedProject={selectedProject}
         projects={projects}
         onProjectChange={onProjectChange}
       >
-        {items.map((building) => (
-          <button
-            className={`object-row${selected?.id === building.id ? " active" : ""}`}
-            key={building.id}
-            type="button"
-            onClick={() => onSelect(building.id)}
-          >
-            <strong>{building.id}</strong>
-            <span>{building.name}</span>
-            <em>{building.landLabel ?? "土地未設定"}</em>
-          </button>
-        ))}
+        <div className="business-table-scroll">
+          <table className="business-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>土地</th>
+                <th>用途/構造</th>
+                <th>階数</th>
+                <th>延床</th>
+                <th>関係者</th>
+                <th>GIS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((building) => (
+                <tr key={building.id} onClick={() => onSelect(building.id)}>
+                  <td>{building.id}</td>
+                  <td>
+                    <strong>{building.name}</strong>
+                    <span>{building.houseNumber ?? building.buildingLocation ?? ""}</span>
+                  </td>
+                  <td>{building.landLabel ?? "未設定"}</td>
+                  <td>{[building.buildingUse, building.structure].filter(Boolean).join(" / ")}</td>
+                  <td>{building.floors ?? ""}</td>
+                  <td>{formatArea(building.totalFloorAreaSqm)}</td>
+                  <td>{relationshipSummary(building.relationships)}</td>
+                  <td>{gisLinkSummary(building.sourceLayerId, building.sourceFeatureId)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {!items.length ? <p className="empty-state">建物はありません</p> : null}
       </ObjectSidebar>
+      ) : null}
 
+      {detailOpen ? (
       <section className="object-detail">
-        {selected ? (
+        {hasDetailContent ? (
           <>
             <ObjectDetailHeader
-              id={selected.id}
-              title={selected.name}
-              subtitle={selected.landLabel ?? "土地未設定"}
-              status={selected.status}
-              href={`/buildings/${encodeURIComponent(selected.id)}`}
+              id={creating ? draft.id || "新規建物" : selected?.id ?? ""}
+              title={draft.name || "建物"}
+              subtitle={selected?.landLabel ?? draft.buildingLocation}
+              status={draft.status}
+              href={selected ? `/buildings/${encodeURIComponent(selected.id)}` : undefined}
+              onBack={creating ? onCancelCreate : onBackToList}
             />
             <div className="object-form">
+              <label>
+                ID
+                <input value={draft.id} disabled={!creating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
+              </label>
               <label>
                 土地ID
                 <select value={draft.landId} onChange={(event) => setDraft((current) => ({ ...current, landId: event.target.value }))}>
@@ -2236,8 +3187,30 @@ function BuildingWorkspace({
                 <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
               </label>
               <label>
+                所在
+                <input value={draft.buildingLocation} onChange={(event) => setDraft((current) => ({ ...current, buildingLocation: event.target.value }))} />
+              </label>
+              <label>
+                家屋番号相当
+                <input value={draft.houseNumber} onChange={(event) => setDraft((current) => ({ ...current, houseNumber: event.target.value }))} />
+              </label>
+              <label>
                 用途
-                <input value={draft.buildingUse} onChange={(event) => setDraft((current) => ({ ...current, buildingUse: event.target.value }))} />
+                <ChoiceSelect
+                  value={draft.buildingUse}
+                  onChange={(value) => setDraft((current) => ({ ...current, buildingUse: value }))}
+                  options={buildingUseChoices}
+                  emptyLabel="選択"
+                />
+              </label>
+              <label>
+                構造
+                <ChoiceSelect
+                  value={draft.structure}
+                  onChange={(value) => setDraft((current) => ({ ...current, structure: value }))}
+                  options={structureChoices}
+                  emptyLabel="選択"
+                />
               </label>
               <label>
                 階数
@@ -2248,19 +3221,44 @@ function BuildingWorkspace({
                 <input value={draft.totalFloorAreaSqm} onChange={(event) => setDraft((current) => ({ ...current, totalFloorAreaSqm: event.target.value }))} inputMode="decimal" />
               </label>
               <label>
-                構造
-                <input value={draft.structure} onChange={(event) => setDraft((current) => ({ ...current, structure: event.target.value }))} />
+                登記名義人
+                <input value={draft.registeredOwner} onChange={(event) => setDraft((current) => ({ ...current, registeredOwner: event.target.value }))} />
+              </label>
+              <label>
+                権利種別
+                <ChoiceSelect
+                  value={draft.rightType}
+                  onChange={(value) => setDraft((current) => ({ ...current, rightType: value }))}
+                  options={rightTypeChoices}
+                  emptyLabel="選択"
+                />
+              </label>
+              <label>
+                受付日
+                <input type="date" value={draft.registrationAcceptedOn} onChange={(event) => setDraft((current) => ({ ...current, registrationAcceptedOn: event.target.value }))} />
               </label>
               <label>
                 ステータス
-                <input value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))} />
+                <ChoiceSelect
+                  value={draft.status}
+                  onChange={(value) => setDraft((current) => ({ ...current, status: value }))}
+                  options={statusChoices}
+                  emptyLabel="選択"
+                />
               </label>
               <label>
-                source layer
-                <input value={draft.sourceLayerId} onChange={(event) => setDraft((current) => ({ ...current, sourceLayerId: event.target.value }))} />
+                GISレイヤ
+                <select value={draft.sourceLayerId} onChange={(event) => setDraft((current) => ({ ...current, sourceLayerId: event.target.value }))}>
+                  <option value="">未設定</option>
+                  {layers.map((layer) => (
+                    <option key={layer.id} value={layer.id}>
+                      {layer.name}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
-                source feature
+                GIS地物ID
                 <input value={draft.sourceFeatureId} onChange={(event) => setDraft((current) => ({ ...current, sourceFeatureId: event.target.value }))} />
               </label>
               <label className="wide-field">
@@ -2268,7 +3266,8 @@ function BuildingWorkspace({
                 <textarea value={draft.memo} onChange={(event) => setDraft((current) => ({ ...current, memo: event.target.value }))} />
               </label>
             </div>
-            {selected.landId ? (
+            <SourceLinkPanel layers={layers} layerId={draft.sourceLayerId} featureId={draft.sourceFeatureId} onOpen={onOpenSourceFeature} />
+            {selected?.landId ? (
               <div className="object-related">
                 <h3>土地</h3>
                 <button type="button" onClick={() => selected.landId && onOpenLand(selected.landId)}>
@@ -2278,13 +3277,35 @@ function BuildingWorkspace({
                 </button>
               </div>
             ) : null}
-            <RelationshipList relationships={selected.relationships} />
-            <ObjectActions saving={saving} deleting={deleting} onSave={onSave} onDelete={onDelete} />
+            {selected ? (
+              <RelationshipEditor
+                relationships={selected.relationships}
+                parties={parties}
+                lands={lands}
+                buildings={items}
+                fixedTarget={{ targetType: "building", targetId: selected.id }}
+                onOpenParty={onOpenParty}
+                onOpenLand={onOpenLand}
+                onOpenBuilding={() => undefined}
+                onSave={onSaveRelationship}
+                onDelete={onDeleteRelationship}
+                relationOptions={relationChoices}
+              />
+            ) : null}
+            <ObjectActions
+              saving={saving}
+              deleting={deleting}
+              onSave={onSave}
+              onDelete={onDelete}
+              onCancel={onCancelCreate}
+              creating={creating}
+            />
           </>
         ) : (
-          <p className="empty-state">建物を選択してください</p>
+          <p className="empty-state">建物を読み込み中です</p>
         )}
       </section>
+      ) : null}
     </div>
   );
 }
@@ -2292,88 +3313,165 @@ function BuildingWorkspace({
 function PartyWorkspace({
   query,
   setQuery,
+  filters,
+  setFilters,
+  filtersOpen,
+  setFiltersOpen,
   items,
+  lands,
+  buildings,
+  selectedId,
   selected,
   draft,
   setDraft,
+  creating,
   loading,
   saving,
   deleting,
   onRefresh,
   onSelect,
+  onCreate,
+  onCancelCreate,
+  onBackToList,
   onSave,
   onDelete,
+  onOpenLand,
+  onOpenBuilding,
+  onSaveRelationship,
+  onDeleteRelationship,
   selectedProject,
   projects,
   onProjectChange
 }: {
   query: string;
   setQuery: (value: string) => void;
+  filters: BusinessObjectFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>;
+  filtersOpen: boolean;
+  setFiltersOpen: (value: boolean) => void;
   items: Party[];
+  lands: Land[];
+  buildings: Building[];
+  selectedId: string | null;
   selected: Party | null;
   draft: PartyDraft;
   setDraft: React.Dispatch<React.SetStateAction<PartyDraft>>;
+  creating: boolean;
   loading: boolean;
   saving: boolean;
   deleting: boolean;
   onRefresh: () => void;
   onSelect: (id: string) => void;
+  onCreate: () => void;
+  onCancelCreate: () => void;
+  onBackToList: () => void;
   onSave: () => void;
   onDelete: () => void;
+  onOpenLand: (id: string) => void;
+  onOpenBuilding: (id: string) => void;
+  onSaveRelationship: (relationshipId: string | null, draft: RelationshipDraft) => void;
+  onDeleteRelationship: (relationshipId: string) => void;
   selectedProject: string;
   projects: Project[];
   onProjectChange: (id: string) => void;
 }) {
+  const detailOpen = creating || Boolean(selectedId);
+  const hasDetailContent = creating || Boolean(selected);
+  const partyTypeChoices = mergeChoiceOptions(partyTypeOptions, items.map((party) => party.partyType), draft.partyType);
+  const relationChoices = relationshipTypeChoices(items, lands, buildings);
   return (
-    <div className="object-workspace">
+    <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
+      {!detailOpen ? (
       <ObjectSidebar
         title="関係者"
         query={query}
         setQuery={setQuery}
         loading={loading}
         onRefresh={onRefresh}
+        onCreate={onCreate}
+        filterContent={
+          <BusinessFilterPanel
+            kind="party"
+            filters={filters}
+            setFilters={setFilters}
+            open={filtersOpen}
+            setOpen={setFiltersOpen}
+            layers={[]}
+            selectedFeature={null}
+            selectedFeatureLayer={null}
+            partyTypeOptions={partyTypeChoices}
+            relationTypeOptions={relationChoices}
+          />
+        }
         selectedProject={selectedProject}
         projects={projects}
         onProjectChange={onProjectChange}
       >
-        {items.map((party) => (
-          <button
-            className={`object-row${selected?.id === party.id ? " active" : ""}`}
-            key={party.id}
-            type="button"
-            onClick={() => onSelect(party.id)}
-          >
-            <strong>{party.id}</strong>
-            <span>{party.name}</span>
-            <em>{party.partyType}</em>
-          </button>
-        ))}
+        <div className="business-table-scroll">
+          <table className="business-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>種別</th>
+                <th>住所/連絡先</th>
+                <th>関係数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((party) => (
+                <tr key={party.id} onClick={() => onSelect(party.id)}>
+                  <td>{party.id}</td>
+                  <td>{party.name}</td>
+                  <td>{party.partyType}</td>
+                  <td>
+                    <strong>{party.address ?? ""}</strong>
+                    <span>{party.contact ?? ""}</span>
+                  </td>
+                  <td>{party.relationships.length}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {!items.length ? <p className="empty-state">関係者はありません</p> : null}
       </ObjectSidebar>
+      ) : null}
 
+      {detailOpen ? (
       <section className="object-detail">
-        {selected ? (
+        {hasDetailContent ? (
           <>
             <ObjectDetailHeader
-              id={selected.id}
-              title={selected.name}
-              subtitle={selected.partyType}
-              href={`/parties/${encodeURIComponent(selected.id)}`}
+              id={creating ? draft.id || "新規関係者" : selected?.id ?? ""}
+              title={draft.name || "関係者"}
+              subtitle={draft.partyType}
+              href={selected ? `/parties/${encodeURIComponent(selected.id)}` : undefined}
+              onBack={creating ? onCancelCreate : onBackToList}
             />
             <div className="object-form">
+              <label>
+                ID
+                <input value={draft.id} disabled={!creating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
+              </label>
               <label>
                 名称
                 <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
               </label>
               <label>
                 種別
-                <input value={draft.partyType} onChange={(event) => setDraft((current) => ({ ...current, partyType: event.target.value }))} />
+                <ChoiceSelect
+                  value={draft.partyType}
+                  onChange={(value) => setDraft((current) => ({ ...current, partyType: value }))}
+                  options={partyTypeChoices}
+                  emptyLabel="選択"
+                />
               </label>
               <label>
                 連絡先
                 <input value={draft.contact} onChange={(event) => setDraft((current) => ({ ...current, contact: event.target.value }))} />
               </label>
-              <label>
+              <label className="wide-field">
                 住所
                 <input value={draft.address} onChange={(event) => setDraft((current) => ({ ...current, address: event.target.value }))} />
               </label>
@@ -2382,13 +3480,35 @@ function PartyWorkspace({
                 <textarea value={draft.memo} onChange={(event) => setDraft((current) => ({ ...current, memo: event.target.value }))} />
               </label>
             </div>
-            <RelationshipList relationships={selected.relationships} />
-            <ObjectActions saving={saving} deleting={deleting} onSave={onSave} onDelete={onDelete} />
+            {selected ? (
+              <RelationshipEditor
+                relationships={selected.relationships}
+                parties={items}
+                lands={lands}
+                buildings={buildings}
+                fixedPartyId={selected.id}
+                onOpenParty={onSelect}
+                onOpenLand={onOpenLand}
+                onOpenBuilding={onOpenBuilding}
+                onSave={onSaveRelationship}
+                onDelete={onDeleteRelationship}
+                relationOptions={relationChoices}
+              />
+            ) : null}
+            <ObjectActions
+              saving={saving}
+              deleting={deleting}
+              onSave={onSave}
+              onDelete={onDelete}
+              onCancel={onCancelCreate}
+              creating={creating}
+            />
           </>
         ) : (
-          <p className="empty-state">関係者を選択してください</p>
+          <p className="empty-state">関係者を読み込み中です</p>
         )}
       </section>
+      ) : null}
     </div>
   );
 }
@@ -2399,6 +3519,8 @@ function ObjectSidebar({
   setQuery,
   loading,
   onRefresh,
+  onCreate,
+  filterContent,
   selectedProject,
   projects,
   onProjectChange,
@@ -2409,6 +3531,8 @@ function ObjectSidebar({
   setQuery: (value: string) => void;
   loading: boolean;
   onRefresh: () => void;
+  onCreate: () => void;
+  filterContent?: React.ReactNode;
   selectedProject: string;
   projects: Project[];
   onProjectChange: (id: string) => void;
@@ -2421,9 +3545,14 @@ function ObjectSidebar({
           <p className="eyebrow">Business Object</p>
           <h1>{title}</h1>
         </div>
-        <button className="icon-button" type="button" onClick={onRefresh} title="更新">
-          {loading ? <Loader2 className="spin" size={18} /> : <RefreshCcw size={18} />}
-        </button>
+        <div className="sidebar-actions">
+          <button className="icon-button" type="button" onClick={onCreate} title="新規作成">
+            <Plus size={18} />
+          </button>
+          <button className="icon-button" type="button" onClick={onRefresh} title="更新">
+            {loading ? <Loader2 className="spin" size={18} /> : <RefreshCcw size={18} />}
+          </button>
+        </div>
       </header>
       <label>
         プロジェクト
@@ -2436,14 +3565,397 @@ function ObjectSidebar({
         </select>
       </label>
       <label className="search-field">
-        検索
+        キーワード検索
         <span>
           <Search size={15} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="ID、所在地、地番、名称、関係者名"
+          />
         </span>
       </label>
+      {filterContent}
       <div className="object-list">{children}</div>
     </aside>
+  );
+}
+
+function BusinessFilterPanel({
+  kind,
+  filters,
+  setFilters,
+  open,
+  setOpen,
+  layers,
+  selectedFeature,
+  selectedFeatureLayer,
+  onUseMapBounds,
+  onUseSelectedFeature,
+  statusOptions = businessStatusOptions,
+  useOptions = [],
+  partyTypeOptions: partyTypeChoices = partyTypeOptions,
+  relationTypeOptions: relationChoices = relationTypeOptions
+}: {
+  kind: "land" | "building" | "party";
+  filters: BusinessObjectFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>;
+  open: boolean;
+  setOpen: (value: boolean) => void;
+  layers: Layer[];
+  selectedFeature: Feature | null;
+  selectedFeatureLayer: Layer | null;
+  onUseMapBounds?: () => void;
+  onUseSelectedFeature?: () => void;
+  statusOptions?: string[];
+  useOptions?: string[];
+  partyTypeOptions?: string[];
+  relationTypeOptions?: string[];
+}) {
+  const update = (key: keyof BusinessObjectFilters, value: string | boolean | undefined) => {
+    setFilters((current) => ({ ...current, [key]: value === "" ? undefined : value }));
+  };
+  const resetSpatial = () => {
+    setFilters((current) => ({
+      ...current,
+      bbox: undefined,
+      intersectsLayerId: undefined,
+      intersectsFeatureId: undefined,
+      distanceMeters: undefined
+    }));
+  };
+  const hasSpatialFilter = Boolean(filters.bbox || filters.intersectsLayerId || filters.intersectsFeatureId);
+  return (
+    <div className="business-filter-panel">
+      <button className="subtle-button" type="button" onClick={() => setOpen(!open)}>
+        <Search size={14} />
+        {open ? "詳細条件を閉じる" : "詳細条件を表示"}
+      </button>
+      {open ? (
+        <div className="business-filter-fields">
+          {kind !== "party" ? (
+            <>
+              <label>
+                ステータス
+                <ChoiceSelect
+                  value={filters.status ?? ""}
+                  onChange={(value) => update("status", value)}
+                  options={statusOptions}
+                />
+              </label>
+              <label>
+                {kind === "land" ? "地目/用途" : "用途"}
+                <ChoiceSelect
+                  value={kind === "land" ? filters.landUse ?? "" : filters.buildingUse ?? ""}
+                  onChange={(value) => update(kind === "land" ? "landUse" : "buildingUse", value)}
+                  options={useOptions}
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                種別
+                <ChoiceSelect
+                  value={filters.partyType ?? ""}
+                  onChange={(value) => update("partyType", value)}
+                  options={partyTypeChoices}
+                />
+              </label>
+              <label>
+                対象
+                <select value={filters.targetType ?? ""} onChange={(event) => update("targetType", event.target.value as BusinessObjectFilters["targetType"])}>
+                  <option value="">土地/建物</option>
+                  <option value="land">土地</option>
+                  <option value="building">建物</option>
+                </select>
+              </label>
+            </>
+          )}
+          {kind !== "party" ? (
+            <label>
+              関係者種別
+              <ChoiceSelect
+                value={filters.partyType ?? ""}
+                onChange={(value) => update("partyType", value)}
+                options={partyTypeChoices}
+              />
+            </label>
+          ) : null}
+          <label>
+            関係種別
+            <ChoiceSelect
+              value={filters.relationType ?? ""}
+              onChange={(value) => update("relationType", value)}
+              options={relationChoices}
+            />
+          </label>
+          <label className="checkbox-field filter-checkbox">
+            <input
+              type="checkbox"
+              checked={filters.linkedOnly ?? false}
+              onChange={(event) => update("linkedOnly", event.target.checked)}
+            />
+            <span>{kind === "party" ? "関係ありのみ" : "GISリンクありのみ"}</span>
+          </label>
+          {kind !== "party" ? (
+            <>
+              <label>
+                GISレイヤ
+                <select value={filters.sourceLayerId ?? ""} onChange={(event) => update("sourceLayerId", event.target.value)}>
+                  <option value="">すべて</option>
+                  {layers.map((layer) => (
+                    <option key={layer.id} value={layer.id}>
+                      {layer.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="filter-command-row">
+                <button className="subtle-button" type="button" onClick={onUseMapBounds}>
+                  <MapIcon size={14} />
+                  表示範囲
+                </button>
+                <button className="subtle-button" type="button" onClick={onUseSelectedFeature}>
+                  <Layers size={14} />
+                  選択地物
+                </button>
+                {hasSpatialFilter ? (
+                  <button className="icon-button" type="button" onClick={resetSpatial} title="空間条件を解除">
+                    <X size={14} />
+                  </button>
+                ) : null}
+              </div>
+              <label>
+                近接距離(m)
+                <input
+                  value={filters.distanceMeters ?? ""}
+                  onChange={(event) => update("distanceMeters", event.target.value)}
+                  inputMode="decimal"
+                />
+              </label>
+              <p className="filter-summary">
+                {filters.bbox ? "表示範囲指定中" : "表示範囲なし"}
+                {filters.intersectsFeatureId
+                  ? ` / ${selectedFeatureLayer?.name ?? filters.intersectsLayerId} #${selectedFeature?.featureId ?? filters.intersectsFeatureId}`
+                  : " / 選択地物なし"}
+              </p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SourceLinkPanel({
+  layers,
+  layerId,
+  featureId,
+  onOpen
+}: {
+  layers: Layer[];
+  layerId: string;
+  featureId: string;
+  onOpen: (layerId?: string | null, featureId?: string | null) => void;
+}) {
+  const layerName = layers.find((layer) => layer.id === layerId)?.name ?? layerId;
+  const linked = Boolean(layerId && featureId);
+  return (
+    <div className="source-link-panel">
+      <div>
+        <h3>GISリンク</h3>
+        <p>{linked ? `${layerName} #${featureId}` : "GIS地物は未設定です"}</p>
+      </div>
+      <button className="subtle-button" type="button" onClick={() => onOpen(layerId, featureId)} disabled={!linked}>
+        <MapIcon size={15} />
+        地図で表示
+      </button>
+    </div>
+  );
+}
+
+function RelationshipEditor({
+  relationships,
+  parties,
+  lands,
+  buildings,
+  fixedTarget,
+  fixedPartyId,
+  onOpenParty,
+  onOpenLand,
+  onOpenBuilding,
+  onSave,
+  onDelete,
+  relationOptions = relationTypeOptions
+}: {
+  relationships: PartyRelationship[];
+  parties: Party[];
+  lands: Land[];
+  buildings: Building[];
+  fixedTarget?: { targetType: "land" | "building"; targetId: string };
+  fixedPartyId?: string;
+  onOpenParty: (id: string) => void;
+  onOpenLand: (id: string) => void;
+  onOpenBuilding: (id: string) => void;
+  onSave: (relationshipId: string | null, draft: RelationshipDraft) => void;
+  onDelete: (relationshipId: string) => void;
+  relationOptions?: string[];
+}) {
+  const fixedTargetType = fixedTarget?.targetType;
+  const fixedTargetId = fixedTarget?.targetId;
+  const defaultTargetType = fixedTargetType ?? "land";
+  const defaultTargetId = fixedTargetId ?? lands[0]?.id ?? buildings[0]?.id ?? "";
+  const defaultPartyId = fixedPartyId ?? parties[0]?.id ?? "";
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<RelationshipDraft>({
+    partyId: defaultPartyId,
+    targetType: defaultTargetType,
+    targetId: defaultTargetId,
+    relationType: "",
+    note: ""
+  });
+
+  useEffect(() => {
+    if (editingId) return;
+    setDraft((current) => ({
+      ...current,
+      partyId: fixedPartyId ?? (current.partyId || parties[0]?.id || ""),
+      targetType: fixedTargetType ?? current.targetType,
+      targetId: fixedTargetId ?? (current.targetId || lands[0]?.id || buildings[0]?.id || "")
+    }));
+  }, [buildings, editingId, fixedPartyId, fixedTargetId, fixedTargetType, lands, parties]);
+
+  const targetOptions = draft.targetType === "land" ? lands : buildings;
+  const startEdit = (relationship: PartyRelationship) => {
+    setEditingId(relationship.id);
+    setDraft({
+      partyId: relationship.partyId,
+      targetType: relationship.targetType,
+      targetId: relationship.targetId,
+      relationType: relationship.relationType,
+      note: relationship.note ?? ""
+    });
+  };
+  const resetDraft = () => {
+    setEditingId(null);
+    setDraft({
+      partyId: defaultPartyId,
+      targetType: defaultTargetType,
+      targetId: defaultTargetId,
+      relationType: "",
+      note: ""
+    });
+  };
+  const submit = () => {
+    onSave(editingId, draft);
+    resetDraft();
+  };
+
+  return (
+    <div className="relationship-list">
+      <div className="relationship-heading">
+        <h3>関係</h3>
+        {editingId ? (
+          <button className="subtle-button" type="button" onClick={resetDraft}>
+            <X size={14} />
+            編集解除
+          </button>
+        ) : null}
+      </div>
+      <div className="relationship-edit-form">
+        {!fixedPartyId ? (
+          <label>
+            関係者
+            <select value={draft.partyId} onChange={(event) => setDraft((current) => ({ ...current, partyId: event.target.value }))}>
+              <option value="">選択</option>
+              {parties.map((party) => (
+                <option key={party.id} value={party.id}>
+                  {party.id} {party.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {!fixedTarget ? (
+          <>
+            <label>
+              対象
+              <select
+                value={draft.targetType}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    targetType: event.target.value as "land" | "building",
+                    targetId: event.target.value === "land" ? lands[0]?.id ?? "" : buildings[0]?.id ?? ""
+                  }))
+                }
+              >
+                <option value="land">土地</option>
+                <option value="building">建物</option>
+              </select>
+            </label>
+            <label>
+              対象ID
+              <select value={draft.targetId} onChange={(event) => setDraft((current) => ({ ...current, targetId: event.target.value }))}>
+                <option value="">選択</option>
+                {targetOptions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.id} {"lotNumber" in item ? item.lotNumber : item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        ) : null}
+        <label>
+          関係種別
+          <ChoiceSelect
+            value={draft.relationType}
+            onChange={(value) => setDraft((current) => ({ ...current, relationType: value }))}
+            options={mergeChoiceOptions(relationOptions, relationships.map((relationship) => relationship.relationType))}
+            emptyLabel="選択"
+          />
+        </label>
+        <label>
+          備考
+          <input value={draft.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} />
+        </label>
+        <button className="command-button" type="button" onClick={submit}>
+          <Save size={14} />
+          {editingId ? "更新" : "追加"}
+        </button>
+      </div>
+      {relationships.map((relationship) => {
+        return (
+          <div className="relationship-row editable" key={relationship.id}>
+            <span>{relationship.relationType}</span>
+            <button type="button" onClick={() => onOpenParty(relationship.partyId)}>
+              {relationship.partyName ?? relationship.partyId}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                relationship.targetType === "land" ? onOpenLand(relationship.targetId) : onOpenBuilding(relationship.targetId)
+              }
+            >
+              {relationship.targetId}
+              {relationship.targetLabel ? ` · ${relationship.targetLabel}` : ""}
+            </button>
+            {relationship.note ? <em>{relationship.note}</em> : null}
+            <div className="relationship-actions">
+              <button className="icon-button" type="button" onClick={() => startEdit(relationship)} title="編集">
+                <Pencil size={14} />
+              </button>
+              <button className="icon-button" type="button" onClick={() => onDelete(relationship.id)} title="削除">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {!relationships.length ? <p className="empty-state compact">関係はありません</p> : null}
+    </div>
   );
 }
 
@@ -2452,26 +3964,38 @@ function ObjectDetailHeader({
   title,
   subtitle,
   status,
-  href
+  href,
+  onBack
 }: {
   id: string;
   title: string;
   subtitle?: string | null;
   status?: string | null;
-  href: string;
+  href?: string;
+  onBack?: () => void;
 }) {
   return (
     <header className="object-detail-header">
-      <div>
-        <p className="eyebrow">{id}</p>
-        <h1>{title}</h1>
-        {subtitle ? <span>{subtitle}</span> : null}
+      <div className="object-title-group">
+        {onBack ? (
+          <button className="subtle-button object-back-button" type="button" onClick={onBack}>
+            <ArrowLeft size={15} />
+            一覧へ戻る
+          </button>
+        ) : null}
+        <div>
+          <p className="eyebrow">{id}</p>
+          <h1>{title}</h1>
+          {subtitle ? <span>{subtitle}</span> : null}
+        </div>
       </div>
       <div className="object-header-actions">
         {status ? <strong>{status}</strong> : null}
-        <a className="icon-button" href={href} target="_blank" rel="noreferrer" title="別タブで開く">
-          <ExternalLink size={16} />
-        </a>
+        {href ? (
+          <a className="icon-button" href={href} target="_blank" rel="noreferrer" title="別タブで開く">
+            <ExternalLink size={16} />
+          </a>
+        ) : null}
       </div>
     </header>
   );
@@ -2509,22 +4033,34 @@ function ObjectActions({
   saving,
   deleting,
   onSave,
-  onDelete
+  onDelete,
+  onCancel,
+  creating = false
 }: {
   saving: boolean;
   deleting: boolean;
   onSave: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
+  onCancel?: () => void;
+  creating?: boolean;
 }) {
   return (
     <div className="object-actions">
-      <button className="danger-button" type="button" onClick={onDelete} disabled={deleting || saving}>
-        {deleting ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-        削除
-      </button>
+      {creating && onCancel ? (
+        <button className="subtle-button" type="button" onClick={onCancel} disabled={saving}>
+          <X size={15} />
+          キャンセル
+        </button>
+      ) : null}
+      {!creating && onDelete ? (
+        <button className="danger-button" type="button" onClick={onDelete} disabled={deleting || saving}>
+          {deleting ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+          削除
+        </button>
+      ) : null}
       <button className="command-button" type="button" onClick={onSave} disabled={saving || deleting}>
         {saving ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
-        保存
+        {creating ? "作成" : "保存"}
       </button>
     </div>
   );
@@ -2861,6 +4397,22 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
+function formatArea(value?: number | null): string {
+  return value === null || value === undefined ? "" : value.toLocaleString();
+}
+
+function relationshipSummary(relationships: PartyRelationship[]): string {
+  if (!relationships.length) return "";
+  return relationships
+    .slice(0, 2)
+    .map((relationship) => `${relationship.relationType}:${relationship.partyName ?? relationship.partyId}`)
+    .join(" / ");
+}
+
+function gisLinkSummary(layerId?: string | null, featureId?: string | null): string {
+  return layerId && featureId ? "あり" : "";
+}
+
 function featureResultSummary(result: FeatureSearchResult): string {
   const entries = Object.entries(result.properties)
     .filter(([, value]) => value !== null && value !== undefined && formatValue(value) !== "")
@@ -2900,6 +4452,37 @@ function groupFeatureResults(results: FeatureSearchResult[]) {
   return [...groups.values()];
 }
 
+function mergeChoiceOptions(
+  defaults: string[],
+  ...sources: Array<string | null | undefined | Array<string | null | undefined>>
+): string[] {
+  const values = new Set<string>();
+  const add = (value: string | null | undefined) => {
+    const trimmed = value?.trim();
+    if (trimmed) values.add(trimmed);
+  };
+  defaults.forEach(add);
+  sources.forEach((source) => {
+    if (Array.isArray(source)) {
+      source.forEach(add);
+    } else {
+      add(source);
+    }
+  });
+  return [...values];
+}
+
+function attributeValueOptionKey(layerId: string, field: string): string {
+  return `${layerId}\u001f${field}`;
+}
+
+function relationshipTypeChoices(...groups: Array<Array<{ relationships: PartyRelationship[] }>>): string[] {
+  return mergeChoiceOptions(
+    relationTypeOptions,
+    groups.flatMap((group) => group.flatMap((item) => item.relationships.map((relationship) => relationship.relationType)))
+  );
+}
+
 function formatEditorValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "object") return JSON.stringify(value);
@@ -2908,6 +4491,12 @@ function formatEditorValue(value: unknown): string {
 
 function editableFeatureAttributes(layer: Layer) {
   return layer.attributes.filter((attribute) => attribute.name !== layer.featureIdColumn && attribute.name !== layer.geometryColumn);
+}
+
+function defaultZoneSpatialLayerIds(layers: Layer[]): string[] {
+  const polygonLayerIds = layers.filter(isPolygonLayer).map((layer) => layer.id);
+  if (polygonLayerIds.length) return polygonLayerIds;
+  return layers[0] ? [layers[0].id] : [];
 }
 
 function isPolygonLayer(layer: Layer): boolean {
@@ -3004,10 +4593,15 @@ function tabPath(tab: BusinessTab): string {
 
 function emptyLandDraft(): LandDraft {
   return {
+    id: "",
     lotNumber: "",
     address: "",
     landUse: "",
     areaSqm: "",
+    registeredOwner: "",
+    rightType: "",
+    registrationCause: "",
+    registrationAcceptedOn: "",
     status: "",
     memo: "",
     sourceLayerId: "",
@@ -3017,12 +4611,18 @@ function emptyLandDraft(): LandDraft {
 
 function emptyBuildingDraft(): BuildingDraft {
   return {
+    id: "",
     landId: "",
     name: "",
+    buildingLocation: "",
+    houseNumber: "",
     buildingUse: "",
     floors: "",
     totalFloorAreaSqm: "",
     structure: "",
+    registeredOwner: "",
+    rightType: "",
+    registrationAcceptedOn: "",
     status: "",
     memo: "",
     sourceLayerId: "",
@@ -3032,6 +4632,7 @@ function emptyBuildingDraft(): BuildingDraft {
 
 function emptyPartyDraft(): PartyDraft {
   return {
+    id: "",
     name: "",
     partyType: "",
     contact: "",
@@ -3040,12 +4641,29 @@ function emptyPartyDraft(): PartyDraft {
   };
 }
 
+function newLandDraft(): LandDraft {
+  return { ...emptyLandDraft(), status: "調査中" };
+}
+
+function newBuildingDraft(): BuildingDraft {
+  return { ...emptyBuildingDraft(), status: "調査中" };
+}
+
+function newPartyDraft(): PartyDraft {
+  return { ...emptyPartyDraft(), partyType: "法人" };
+}
+
 function toLandDraft(land: Land): LandDraft {
   return {
+    id: land.id,
     lotNumber: land.lotNumber,
     address: land.address,
     landUse: land.landUse ?? "",
     areaSqm: land.areaSqm === null || land.areaSqm === undefined ? "" : String(land.areaSqm),
+    registeredOwner: land.registeredOwner ?? "",
+    rightType: land.rightType ?? "",
+    registrationCause: land.registrationCause ?? "",
+    registrationAcceptedOn: land.registrationAcceptedOn ?? "",
     status: land.status,
     memo: land.memo ?? "",
     sourceLayerId: land.sourceLayerId ?? "",
@@ -3055,13 +4673,19 @@ function toLandDraft(land: Land): LandDraft {
 
 function toBuildingDraft(building: Building): BuildingDraft {
   return {
+    id: building.id,
     landId: building.landId ?? "",
     name: building.name,
+    buildingLocation: building.buildingLocation ?? "",
+    houseNumber: building.houseNumber ?? "",
     buildingUse: building.buildingUse ?? "",
     floors: building.floors === null || building.floors === undefined ? "" : String(building.floors),
     totalFloorAreaSqm:
       building.totalFloorAreaSqm === null || building.totalFloorAreaSqm === undefined ? "" : String(building.totalFloorAreaSqm),
     structure: building.structure ?? "",
+    registeredOwner: building.registeredOwner ?? "",
+    rightType: building.rightType ?? "",
+    registrationAcceptedOn: building.registrationAcceptedOn ?? "",
     status: building.status,
     memo: building.memo ?? "",
     sourceLayerId: building.sourceLayerId ?? "",
@@ -3071,6 +4695,7 @@ function toBuildingDraft(building: Building): BuildingDraft {
 
 function toPartyDraft(party: Party): PartyDraft {
   return {
+    id: party.id,
     name: party.name,
     partyType: party.partyType,
     contact: party.contact ?? "",

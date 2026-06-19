@@ -106,6 +106,9 @@ export type ConditionQueryCondition =
       type: "business";
       sourceTypes?: Array<"land" | "building">;
       businessQuery?: string;
+      status?: string;
+      landUse?: string;
+      buildingUse?: string;
       partyQuery?: string;
       partyType?: string;
       relationType?: string;
@@ -116,6 +119,9 @@ export type BusinessSpatialSearchRequest = {
   targetLayerIds: string[];
   sourceTypes: Array<"land" | "building">;
   businessQuery?: string;
+  status?: string;
+  landUse?: string;
+  buildingUse?: string;
   partyQuery?: string;
   partyType?: string;
   relationType?: string;
@@ -141,6 +147,22 @@ export type PartyRelationship = {
   note?: string | null;
 };
 
+export type BusinessObjectFilters = {
+  status?: string;
+  landUse?: string;
+  buildingUse?: string;
+  partyType?: string;
+  relationType?: string;
+  linkedOnly?: boolean;
+  sourceLayerId?: string;
+  bbox?: string;
+  intersectsLayerId?: string;
+  intersectsFeatureId?: string;
+  distanceMeters?: string;
+  targetType?: "land" | "building" | "";
+  landId?: string;
+};
+
 export type Land = {
   id: string;
   projectId: string;
@@ -148,6 +170,10 @@ export type Land = {
   address: string;
   landUse?: string | null;
   areaSqm?: number | null;
+  registeredOwner?: string | null;
+  rightType?: string | null;
+  registrationCause?: string | null;
+  registrationAcceptedOn?: string | null;
   status: string;
   memo?: string | null;
   sourceLayerId?: string | null;
@@ -162,10 +188,15 @@ export type Building = {
   landId?: string | null;
   landLabel?: string | null;
   name: string;
+  buildingLocation?: string | null;
+  houseNumber?: string | null;
   buildingUse?: string | null;
   floors?: number | null;
   totalFloorAreaSqm?: number | null;
   structure?: string | null;
+  registeredOwner?: string | null;
+  rightType?: string | null;
+  registrationAcceptedOn?: string | null;
   status: string;
   memo?: string | null;
   sourceLayerId?: string | null;
