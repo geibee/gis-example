@@ -29,6 +29,9 @@ import {
   createLand,
   createParty,
   createPartyRelationship,
+  createZone,
+  createZoneLayerFromFacilities,
+  createZoneLayerFromImport,
   conditionSearchFeatures,
   deleteBuilding,
   deleteLand,
@@ -36,6 +39,7 @@ import {
   deleteParty,
   deletePartyRelationship,
   deleteResultSet,
+  deleteZone,
   getAnalysisJob,
   getBuilding,
   getBuildings,
@@ -49,11 +53,15 @@ import {
   getParties,
   getParty,
   getProjects,
+  getZone,
+  getZones,
+  searchFeatures,
   updateBuilding,
   updateFeature,
   updateLand,
   updateParty,
-  updatePartyRelationship
+  updatePartyRelationship,
+  updateZone
 } from "./api";
 import type {
   AnalysisJob,
@@ -71,7 +79,8 @@ import type {
   Party,
   PartyRelationship,
   Project,
-  SpatialConditionDraft
+  SpatialConditionDraft,
+  Zone
 } from "./types";
 
 const baseStyle = {
@@ -98,7 +107,10 @@ const layerColors = ["#0f766e", "#b45309", "#2563eb", "#be123c", "#7c3aed", "#15
 const imperialPalaceCenter: [number, number] = [139.7528, 35.6852];
 const defaultMapZoom = 12.5;
 const layerViewStateStoragePrefix = "gis-example.layer-view-state.";
+const businessMapHighlightLimit = 80;
 const businessStatusOptions = ["調査中", "現況確認中", "交渉中", "契約準備", "契約済", "稼働中", "保留", "除外"];
+const zoneTypeOptions = ["重点調査", "商業調査", "再開発候補", "保全", "除外候補"];
+const zoneStatusOptions = ["有効", "確認中", "見直し", "停止", "完了"];
 const landUseOptions = ["商業地", "業務地", "住宅地", "工業地", "公共用地", "雑種地"];
 const buildingUseOptions = ["事務所", "店舗", "住宅", "共同住宅", "倉庫", "工場", "ホテル", "駐車場", "複合用途"];
 const partyTypeOptions = ["法人", "個人", "管理会社", "行政", "金融機関", "士業", "仲介会社"];
@@ -141,6 +153,39 @@ type LandDraft = {
   sourceFeatureId: string;
 };
 
+type ZoneDraft = {
+  id: string;
+  name: string;
+  zoneType: string;
+  status: string;
+  memo: string;
+  zoneLayerId: string;
+  zoneFeatureId: string;
+};
+
+type BusinessMapTarget = {
+  layerId: string;
+  layerName: string;
+  featureId: string;
+  matchSummary: string;
+  businessLinks: BusinessLinks;
+  matchedBusinessLinks: BusinessLinks;
+};
+
+type BusinessMapTargetContext = {
+  tab: BusinessTab;
+  zones: Zone[];
+  lands: Land[];
+  buildings: Building[];
+  parties: Party[];
+  layerById: Map<string, Layer>;
+};
+
+type BusinessListSearchCriteria = {
+  query: string;
+  filters: BusinessObjectFilters;
+};
+
 type BuildingDraft = {
   id: string;
   landId: string;
@@ -179,6 +224,29 @@ type RelationshipDraft = {
 
 const emptyBusinessLinks: BusinessLinks = { lands: [], buildings: [] };
 
+function emptyBusinessListSearchCriteria(): BusinessListSearchCriteria {
+  return { query: "", filters: {} };
+}
+
+function toBusinessListSearchCriteria(query: string, filters: BusinessObjectFilters): BusinessListSearchCriteria {
+  return { query: query.trim(), filters: { ...filters } };
+}
+
+function normalizeZoneLayerFilter(filters: BusinessObjectFilters, zoneLayers: Layer[]): BusinessObjectFilters {
+  const selectedLayerId = filters.zoneLayerId?.trim();
+  if (selectedLayerId && zoneLayers.some((layer) => layer.id === selectedLayerId)) {
+    return filters;
+  }
+  if (zoneLayers[0]) {
+    if (filters.zoneLayerId === zoneLayers[0].id) return filters;
+    return { ...filters, zoneLayerId: zoneLayers[0].id };
+  }
+  if (!selectedLayerId) return filters;
+  const nextFilters = { ...filters };
+  delete nextFilters.zoneLayerId;
+  return nextFilters;
+}
+
 export default function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -206,6 +274,24 @@ export default function App() {
   const [loadingBusinessLinks, setLoadingBusinessLinks] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingLayers, setLoadingLayers] = useState(false);
+  const [mapSupportOpen, setMapSupportOpen] = useState(true);
+
+  const [zoneQuery, setZoneQuery] = useState("");
+  const [zoneFilters, setZoneFilters] = useState<BusinessObjectFilters>({});
+  const [zoneSearchCriteria, setZoneSearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
+  const [zoneFiltersOpen, setZoneFiltersOpen] = useState(true);
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(() => {
+    const route = parseRoute(window.location.pathname);
+    return route.tab === "zone" ? route.id : null;
+  });
+  const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
+  const [zoneDraft, setZoneDraft] = useState<ZoneDraft>(emptyZoneDraft());
+  const [creatingZone, setCreatingZone] = useState(false);
+  const [loadingZones, setLoadingZones] = useState(false);
+  const [savingZone, setSavingZone] = useState(false);
+  const [deletingZone, setDeletingZone] = useState(false);
+
   const [zoneSearchQuery, setZoneSearchQuery] = useState("");
   const [zoneSearchLinkedOnly, setZoneSearchLinkedOnly] = useState(false);
   const [zoneSpatialLayerIds, setZoneSpatialLayerIds] = useState<string[]>([]);
@@ -218,6 +304,9 @@ export default function App() {
   const [zonePartyType, setZonePartyType] = useState("");
   const [zoneRelationType, setZoneRelationType] = useState("");
   const [zoneSearchResults, setZoneSearchResults] = useState<FeatureSearchResult[]>([]);
+  const [listMapHighlightResults, setListMapHighlightResults] = useState<FeatureSearchResult[]>([]);
+  const [manualMapHighlightResults, setManualMapHighlightResults] = useState<FeatureSearchResult[] | null>(null);
+  const mapHighlightResults = manualMapHighlightResults ?? listMapHighlightResults;
   const [loadingZoneSearch, setLoadingZoneSearch] = useState(false);
   const [conditionBuilderOpen, setConditionBuilderOpen] = useState(false);
   const [savingConditionSearch, setSavingConditionSearch] = useState(false);
@@ -225,6 +314,7 @@ export default function App() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadFormat, setUploadFormat] = useState("geojson");
   const [uploadSrid, setUploadSrid] = useState("4326");
+  const [uploadAsZoneLayer, setUploadAsZoneLayer] = useState(false);
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
 
   const [analysisName, setAnalysisName] = useState("");
@@ -237,6 +327,12 @@ export default function App() {
   const [outerTargetLayerId, setOuterTargetLayerId] = useState("");
   const [outerBoundaryLayerId, setOuterBoundaryLayerId] = useState("");
   const [outerBoundaryBufferMeters, setOuterBoundaryBufferMeters] = useState("1000");
+  const [facilityZoneName, setFacilityZoneName] = useState("");
+  const [facilityZoneLayerId, setFacilityZoneLayerId] = useState("");
+  const [facilityZoneBufferMeters, setFacilityZoneBufferMeters] = useState("1000");
+  const [facilityZoneDistanceMeters, setFacilityZoneDistanceMeters] = useState("");
+  const [facilityZoneSourceType, setFacilityZoneSourceType] = useState<ZoneBusinessSourceType>("all");
+  const [creatingFacilityZone, setCreatingFacilityZone] = useState(false);
 
   const [featureEditOpen, setFeatureEditOpen] = useState(false);
   const [featurePropertyDraft, setFeaturePropertyDraft] = useState<Record<string, string>>({});
@@ -245,6 +341,7 @@ export default function App() {
 
   const [landQuery, setLandQuery] = useState("");
   const [landFilters, setLandFilters] = useState<BusinessObjectFilters>({});
+  const [landSearchCriteria, setLandSearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
   const [landFiltersOpen, setLandFiltersOpen] = useState(true);
   const [lands, setLands] = useState<Land[]>([]);
   const [selectedLandId, setSelectedLandId] = useState<string | null>(() => {
@@ -260,6 +357,7 @@ export default function App() {
 
   const [buildingQuery, setBuildingQuery] = useState("");
   const [buildingFilters, setBuildingFilters] = useState<BusinessObjectFilters>({});
+  const [buildingSearchCriteria, setBuildingSearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
   const [buildingFiltersOpen, setBuildingFiltersOpen] = useState(true);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(() => {
@@ -275,6 +373,7 @@ export default function App() {
 
   const [partyQuery, setPartyQuery] = useState("");
   const [partyFilters, setPartyFilters] = useState<BusinessObjectFilters>({});
+  const [partySearchCriteria, setPartySearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
   const [partyFiltersOpen, setPartyFiltersOpen] = useState(true);
   const [parties, setParties] = useState<Party[]>([]);
   const [selectedPartyId, setSelectedPartyId] = useState<string | null>(() => {
@@ -290,8 +389,18 @@ export default function App() {
 
   const layerById = useMemo(() => new Map(layers.map((layer) => [layer.id, layer])), [layers]);
   const layerListItems = useMemo(() => groupLayerListItems(layers), [layers]);
+  const zoneLayers = useMemo(() => layers.filter(isZoneLayer), [layers]);
   const polygonLayers = useMemo(() => layers.filter(isPolygonLayer), [layers]);
+  const pointLayers = useMemo(() => layers.filter(isPointLayer), [layers]);
   const boundaryCandidateLayers = useMemo(() => layers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer)), [layers]);
+
+  useEffect(() => {
+    setZoneFilters((current) => normalizeZoneLayerFilter(current, zoneLayers));
+    setZoneSearchCriteria((current) => {
+      const nextFilters = normalizeZoneLayerFilter(current.filters, zoneLayers);
+      return nextFilters === current.filters ? current : { ...current, filters: nextFilters };
+    });
+  }, [zoneLayers]);
 
   useEffect(() => {
     setZoneSpatialLayerIds((current) => {
@@ -309,6 +418,11 @@ export default function App() {
     const nextRoute = parseRoute(path);
     setActiveTab(nextRoute.tab);
     setRouteSelection(nextRoute);
+    if (tab === "zone") {
+      setCreatingZone(false);
+      setSelectedZoneId(null);
+      setSelectedZone(null);
+    }
     if (tab === "lands") {
       setCreatingLand(false);
       setSelectedLandId(null);
@@ -326,12 +440,27 @@ export default function App() {
     }
   }, []);
 
+  const selectZone = useCallback((id: string) => {
+    const path = `/zones/${encodeURIComponent(id)}`;
+    window.history.pushState(null, "", path);
+    setActiveTab("zone");
+    setCreatingZone(false);
+    setListMapHighlightResults([]);
+    setManualMapHighlightResults(null);
+    setRouteSelection({ tab: "zone", id });
+    setSelectedZone(null);
+    setSelectedZoneId(id);
+  }, []);
+
   const selectLand = useCallback((id: string) => {
     const path = `/lands/${encodeURIComponent(id)}`;
     window.history.pushState(null, "", path);
     setActiveTab("lands");
     setCreatingLand(false);
+    setListMapHighlightResults([]);
+    setManualMapHighlightResults(null);
     setRouteSelection({ tab: "lands", id });
+    setSelectedLand(null);
     setSelectedLandId(id);
   }, []);
 
@@ -340,7 +469,10 @@ export default function App() {
     window.history.pushState(null, "", path);
     setActiveTab("buildings");
     setCreatingBuilding(false);
+    setListMapHighlightResults([]);
+    setManualMapHighlightResults(null);
     setRouteSelection({ tab: "buildings", id });
+    setSelectedBuilding(null);
     setSelectedBuildingId(id);
   }, []);
 
@@ -349,7 +481,10 @@ export default function App() {
     window.history.pushState(null, "", path);
     setActiveTab("parties");
     setCreatingParty(false);
+    setListMapHighlightResults([]);
+    setManualMapHighlightResults(null);
     setRouteSelection({ tab: "parties", id });
+    setSelectedParty(null);
     setSelectedPartyId(id);
   }, []);
 
@@ -368,6 +503,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (routeSelection.tab === "zone") {
+      if (routeSelection.id) {
+        setCreatingZone(false);
+        setSelectedZoneId(routeSelection.id);
+      } else if (!creatingZone) {
+        setSelectedZoneId(null);
+        setSelectedZone(null);
+      }
+    }
     if (routeSelection.tab === "lands") {
       if (routeSelection.id) {
         setCreatingLand(false);
@@ -395,12 +539,11 @@ export default function App() {
         setSelectedParty(null);
       }
     }
-  }, [creatingBuilding, creatingLand, creatingParty, routeSelection]);
+  }, [creatingBuilding, creatingLand, creatingParty, creatingZone, routeSelection]);
 
   useEffect(() => {
-    if (activeTab !== "zone") return;
     window.setTimeout(() => mapRef.current?.resize(), 0);
-  }, [activeTab]);
+  }, [activeTab, mapSupportOpen]);
 
   const refreshLayers = useCallback(async () => {
     if (!selectedProject) return;
@@ -412,6 +555,7 @@ export default function App() {
       const previousLayerIds = new Set(previousLayers.map((layer) => layer.id));
       const orderedLayers = orderLayers(nextLayers, savedViewState?.layerOrder ?? previousLayers.map((layer) => layer.id));
       const nextPolygonLayers = nextLayers.filter(isPolygonLayer);
+      const nextPointLayers = nextLayers.filter(isPointLayer);
       const nextBoundaryCandidateLayers = nextLayers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer));
       loadedLayerProjectId.current = selectedProject;
       if (typeof savedViewState?.baseMapVisible === "boolean") {
@@ -430,51 +574,83 @@ export default function App() {
       if (!nextBoundaryCandidateLayers.some((layer) => layer.id === outerBoundaryLayerId)) {
         setOuterBoundaryLayerId(nextBoundaryCandidateLayers[0]?.id ?? "");
       }
+      if (!nextPointLayers.some((layer) => layer.id === facilityZoneLayerId)) {
+        setFacilityZoneLayerId(nextPointLayers[0]?.id ?? "");
+      }
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingLayers(false);
     }
-  }, [outerBoundaryLayerId, outerTargetLayerId, selectedProject, targetLayerId]);
+  }, [facilityZoneLayerId, outerBoundaryLayerId, outerTargetLayerId, selectedProject, targetLayerId]);
+
+  const refreshZones = useCallback(async () => {
+    if (!selectedProject) return;
+    setLoadingZones(true);
+    try {
+      const items = await getZones(selectedProject, zoneSearchCriteria.query, zoneSearchCriteria.filters);
+      setZones(items);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setLoadingZones(false);
+    }
+  }, [selectedProject, zoneSearchCriteria]);
 
   const refreshLands = useCallback(async () => {
     if (!selectedProject) return;
     setLoadingLands(true);
     try {
-      const items = await getLands(selectedProject, landQuery, landFilters);
+      const items = await getLands(selectedProject, landSearchCriteria.query, landSearchCriteria.filters);
       setLands(items);
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingLands(false);
     }
-  }, [landFilters, landQuery, selectedProject]);
+  }, [landSearchCriteria, selectedProject]);
 
   const refreshBuildings = useCallback(async () => {
     if (!selectedProject) return;
     setLoadingBuildings(true);
     try {
-      const items = await getBuildings(selectedProject, buildingQuery, undefined, buildingFilters);
+      const items = await getBuildings(selectedProject, buildingSearchCriteria.query, undefined, buildingSearchCriteria.filters);
       setBuildings(items);
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingBuildings(false);
     }
-  }, [buildingFilters, buildingQuery, selectedProject]);
+  }, [buildingSearchCriteria, selectedProject]);
 
   const refreshParties = useCallback(async () => {
     if (!selectedProject) return;
     setLoadingParties(true);
     try {
-      const items = await getParties(selectedProject, partyQuery, partyFilters);
+      const items = await getParties(selectedProject, partySearchCriteria.query, partySearchCriteria.filters);
       setParties(items);
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingParties(false);
     }
-  }, [partyFilters, partyQuery, selectedProject]);
+  }, [partySearchCriteria, selectedProject]);
+
+  const submitZoneListSearch = useCallback(() => {
+    setZoneSearchCriteria(toBusinessListSearchCriteria(zoneQuery, zoneFilters));
+  }, [zoneFilters, zoneQuery]);
+
+  const submitLandListSearch = useCallback(() => {
+    setLandSearchCriteria(toBusinessListSearchCriteria(landQuery, landFilters));
+  }, [landFilters, landQuery]);
+
+  const submitBuildingListSearch = useCallback(() => {
+    setBuildingSearchCriteria(toBusinessListSearchCriteria(buildingQuery, buildingFilters));
+  }, [buildingFilters, buildingQuery]);
+
+  const submitPartyListSearch = useCallback(() => {
+    setPartySearchCriteria(toBusinessListSearchCriteria(partyQuery, partyFilters));
+  }, [partyFilters, partyQuery]);
 
   useEffect(() => {
     if (!selectedProject || loadedLayerProjectId.current !== selectedProject) return;
@@ -499,6 +675,10 @@ export default function App() {
   }, [refreshLayers]);
 
   useEffect(() => {
+    void refreshZones();
+  }, [refreshZones]);
+
+  useEffect(() => {
     void refreshLands();
   }, [refreshLands]);
 
@@ -509,6 +689,20 @@ export default function App() {
   useEffect(() => {
     void refreshParties();
   }, [refreshParties]);
+
+  useEffect(() => {
+    if (!selectedZoneId) {
+      setSelectedZone(null);
+      if (!creatingZone) setZoneDraft(emptyZoneDraft());
+      return;
+    }
+    getZone(selectedZoneId)
+      .then((item) => {
+        setSelectedZone(item);
+        setZoneDraft(toZoneDraft(item));
+      })
+      .catch((error) => setNotice(errorMessage(error)));
+  }, [creatingZone, selectedZoneId]);
 
   useEffect(() => {
     if (!selectedLandId) {
@@ -622,13 +816,116 @@ export default function App() {
       }
     });
     syncMapLayerOrder(map, layers, styleLayersByLayerId.current);
-  }, [layers, mapReady, visibleLayerIds]);
+    syncConditionSearchHighlight(map, mapHighlightResults);
+  }, [layers, mapHighlightResults, mapReady, visibleLayerIds]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!mapReady || !map) return;
-    syncConditionSearchHighlight(map, zoneSearchResults);
-  }, [mapReady, zoneSearchResults]);
+    syncConditionSearchHighlight(map, mapHighlightResults);
+  }, [mapHighlightResults, mapReady]);
+
+  useEffect(() => {
+    setManualMapHighlightResults(null);
+  }, [
+    activeTab,
+    selectedProject,
+    zoneSearchCriteria,
+    selectedZoneId,
+    landSearchCriteria,
+    selectedLandId,
+    buildingSearchCriteria,
+    selectedBuildingId,
+    partySearchCriteria,
+    selectedPartyId
+  ]);
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setListMapHighlightResults([]);
+      setManualMapHighlightResults(null);
+      return;
+    }
+    let active = true;
+    const syncBusinessListResults = async () => {
+      const highlightZones =
+        activeTab === "zone" ? (selectedZone && selectedZone.id === selectedZoneId ? [selectedZone] : selectedZoneId ? [] : zones) : zones;
+      const highlightLands =
+        activeTab === "lands" ? (selectedLand && selectedLand.id === selectedLandId ? [selectedLand] : selectedLandId ? [] : lands) : lands;
+      const highlightBuildings =
+        activeTab === "buildings"
+          ? selectedBuilding && selectedBuilding.id === selectedBuildingId
+            ? [selectedBuilding]
+            : selectedBuildingId
+              ? []
+              : buildings
+          : buildings;
+      const highlightParties =
+        activeTab === "parties" ? (selectedParty && selectedParty.id === selectedPartyId ? [selectedParty] : selectedPartyId ? [] : parties) : parties;
+      const targets = uniqueBusinessMapTargets(
+        await buildBusinessMapTargets({
+          tab: activeTab,
+          zones: highlightZones,
+          lands: highlightLands,
+          buildings: highlightBuildings,
+          parties: highlightParties,
+          layerById
+        })
+      ).slice(0, businessMapHighlightLimit);
+      if (!active) return;
+      if (!targets.length) {
+        setListMapHighlightResults([]);
+        return;
+      }
+      const settled = await Promise.allSettled(
+        targets.map(async (target) => {
+          const feature = await getFeature(target.layerId, target.featureId);
+          return {
+            layerId: feature.layerId,
+            layerName: target.layerName,
+            featureId: feature.featureId,
+            properties: feature.properties,
+            geometry: feature.geometry,
+            matchSummary: target.matchSummary,
+            businessLinks: target.businessLinks,
+            matchedBusinessLinks: target.matchedBusinessLinks
+          } satisfies FeatureSearchResult;
+        })
+      );
+      if (!active) return;
+      const results = settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+      setListMapHighlightResults(results);
+      if (!results.length) return;
+      setVisibleLayerIds((current) => new Set([...current, ...results.map((result) => result.layerId)]));
+      if (mapReady) {
+        window.setTimeout(() => {
+          mapRef.current?.resize();
+          focusFeatureResults(mapRef.current, results);
+        }, 80);
+      }
+    };
+    void syncBusinessListResults();
+    return () => {
+      active = false;
+    };
+  }, [
+    activeTab,
+    buildings,
+    lands,
+    layerById,
+    mapReady,
+    parties,
+    selectedBuilding,
+    selectedBuildingId,
+    selectedLand,
+    selectedLandId,
+    selectedParty,
+    selectedPartyId,
+    selectedProject,
+    selectedZone,
+    selectedZoneId,
+    zones
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -739,6 +1036,7 @@ export default function App() {
     formData.set("projectId", selectedProject);
     formData.set("format", uploadFormat);
     if (uploadSrid.trim()) formData.set("sourceSrid", uploadSrid.trim());
+    if (uploadAsZoneLayer) formData.set("layerRole", "zone");
     formData.set("file", uploadFile);
     try {
       const job = await createImportJob(formData);
@@ -757,6 +1055,7 @@ export default function App() {
         if (job.status === "succeeded" || job.status === "failed") {
           window.clearInterval(timer);
           void refreshLayers();
+          void refreshZones();
         }
       } catch (error) {
         window.clearInterval(timer);
@@ -816,12 +1115,66 @@ export default function App() {
     }
   };
 
+  const convertLayerToZoneLayer = async (layer: Layer) => {
+    if (!selectedProject) return;
+    try {
+      const result = await createZoneLayerFromImport({
+        projectId: selectedProject,
+        layerId: layer.id
+      });
+      await refreshLayers();
+      await refreshZones();
+      setZoneFilters((current) => ({ ...current, zoneLayerId: result.layer.id }));
+      setVisibleLayerIds((current) => new Set([...current, result.layer.id]));
+      setNotice(`区域レイヤ化しました（${result.zonesCreated.toLocaleString()}件作成）`);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    }
+  };
+
+  const submitFacilityZoneLayer = async () => {
+    if (!selectedProject || !facilityZoneLayerId) return;
+    const bufferMeters = Number(facilityZoneBufferMeters || "1000");
+    if (!Number.isFinite(bufferMeters) || bufferMeters <= 0) {
+      setNotice("外縁距離は正の数値で入力してください");
+      return;
+    }
+    const distanceMeters = facilityZoneDistanceMeters.trim() ? Number(facilityZoneDistanceMeters) : null;
+    if (distanceMeters !== null && (!Number.isFinite(distanceMeters) || distanceMeters < 0)) {
+      setNotice("施設抽出距離は0以上の数値で入力してください");
+      return;
+    }
+    const sourceTypes: Array<"land" | "building"> =
+      facilityZoneSourceType === "all" ? ["land", "building"] : [facilityZoneSourceType];
+    try {
+      setCreatingFacilityZone(true);
+      const result = await createZoneLayerFromFacilities({
+        projectId: selectedProject,
+        facilityLayerId: facilityZoneLayerId,
+        name: nullableString(facilityZoneName),
+        bufferMeters,
+        facilityDistanceMeters: distanceMeters,
+        sourceTypes
+      });
+      await refreshLayers();
+      await refreshZones();
+      setZoneFilters((current) => ({ ...current, zoneLayerId: result.layer.id }));
+      setVisibleLayerIds((current) => new Set([...current, result.layer.id]));
+      setNotice(`施設起点区域を生成しました（${result.zonesCreated.toLocaleString()}件作成）`);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setCreatingFacilityZone(false);
+    }
+  };
+
   const submitZoneSearch = async () => {
     if (!selectedProject) return;
     setLoadingZoneSearch(true);
     try {
       const results = await conditionSearchFeatures(buildConditionQuery());
       setZoneSearchResults(results);
+      setManualMapHighlightResults(results);
       if (!results.length) setNotice("検索結果はありません");
     } catch (error) {
       setNotice(errorMessage(error));
@@ -866,6 +1219,7 @@ export default function App() {
     setZonePartyType("");
     setZoneRelationType("");
     setZoneSearchResults([]);
+    setManualMapHighlightResults(null);
     setAnalysisName("");
   };
 
@@ -1033,6 +1387,10 @@ export default function App() {
     setAttributeConditions((current) => current.filter((condition) => !deletedLayerIds.has(condition.layerId)));
     setSpatialConditions((current) => current.filter((condition) => !deletedLayerIds.has(condition.layerId)));
     setZoneSearchResults((current) => current.filter((result) => !deletedLayerIds.has(result.layerId)));
+    setListMapHighlightResults((current) => current.filter((result) => !deletedLayerIds.has(result.layerId)));
+    setManualMapHighlightResults((current) =>
+      current ? current.filter((result) => !deletedLayerIds.has(result.layerId)) : current
+    );
     setSelectedFeature((current) => (current && deletedLayerIds.has(current.layerId) ? null : current));
     setSelectedFeatureLayer((current) => (current && deletedLayerIds.has(current.id) ? null : current));
     setTargetLayerId((current) => (deletedLayerIds.has(current) ? remainingLayers[0]?.id ?? "" : current));
@@ -1140,6 +1498,15 @@ export default function App() {
     ]);
   };
 
+  const beginCreateZone = () => {
+    setCreatingZone(true);
+    setSelectedZoneId(null);
+    setSelectedZone(null);
+    setZoneDraft(newZoneDraft(selectedFeature, selectedFeatureLayer, zoneLayers[0]));
+    window.history.pushState(null, "", "/zones");
+    setRouteSelection({ tab: "zone", id: null });
+  };
+
   const beginCreateLand = () => {
     setCreatingLand(true);
     setSelectedLandId(null);
@@ -1167,6 +1534,15 @@ export default function App() {
     setRouteSelection({ tab: "parties", id: null });
   };
 
+  const cancelCreateZone = () => {
+    setCreatingZone(false);
+    setSelectedZoneId(null);
+    setSelectedZone(null);
+    setZoneDraft(emptyZoneDraft());
+    window.history.pushState(null, "", "/zones");
+    setRouteSelection({ tab: "zone", id: null });
+  };
+
   const cancelCreateLand = () => {
     setCreatingLand(false);
     setSelectedLandId(null);
@@ -1192,6 +1568,69 @@ export default function App() {
     setPartyDraft(emptyPartyDraft());
     window.history.pushState(null, "", "/parties");
     setRouteSelection({ tab: "parties", id: null });
+  };
+
+  const saveZone = async () => {
+    if (!zoneDraft.name.trim() || !zoneDraft.status.trim()) {
+      setNotice("区域名、ステータスは必須です");
+      return;
+    }
+    if (creatingZone && !zoneDraft.id.trim()) {
+      setNotice("IDは必須です");
+      return;
+    }
+    if (!(zoneDraft.zoneLayerId ?? "").trim() || !(zoneDraft.zoneFeatureId ?? "").trim()) {
+      setNotice("区域レイヤと地物IDは必須です");
+      return;
+    }
+    try {
+      setSavingZone(true);
+      const payload = {
+        ...(creatingZone ? { id: zoneDraft.id.trim(), projectId: selectedProject } : {}),
+        name: zoneDraft.name,
+        zoneType: nullableString(zoneDraft.zoneType),
+        status: zoneDraft.status,
+        memo: nullableString(zoneDraft.memo),
+        zoneLayerId: zoneDraft.zoneLayerId ?? "",
+        zoneFeatureId: zoneDraft.zoneFeatureId ?? "",
+        sourceLayerId: zoneDraft.zoneLayerId ?? "",
+        sourceFeatureId: zoneDraft.zoneFeatureId ?? ""
+      };
+      const item = creatingZone ? await createZone(payload) : selectedZone ? await updateZone(selectedZone.id, payload) : null;
+      if (!item) return;
+      if (creatingZone) {
+        window.history.pushState(null, "", `/zones/${encodeURIComponent(item.id)}`);
+        setRouteSelection({ tab: "zone", id: item.id });
+      }
+      setCreatingZone(false);
+      setSelectedZoneId(item.id);
+      setSelectedZone(item);
+      setZoneDraft(toZoneDraft(item));
+      void refreshZones();
+      setNotice(creatingZone ? "区域を作成しました" : "区域を保存しました");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSavingZone(false);
+    }
+  };
+
+  const removeZone = async () => {
+    if (!selectedZone || !window.confirm(`${selectedZone.id} を削除しますか`)) return;
+    try {
+      setDeletingZone(true);
+      await deleteZone(selectedZone.id);
+      setSelectedZoneId(null);
+      setSelectedZone(null);
+      window.history.pushState(null, "", "/zones");
+      setRouteSelection({ tab: "zone", id: null });
+      await refreshZones();
+      setNotice("区域を削除しました");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setDeletingZone(false);
+    }
   };
 
   const saveLand = async () => {
@@ -1232,6 +1671,7 @@ export default function App() {
       setLandDraft(toLandDraft(item));
       void refreshLands();
       void refreshBuildings();
+      void refreshZones();
       setNotice(creatingLand ? "土地を作成しました" : "土地を保存しました");
     } catch (error) {
       setNotice(errorMessage(error));
@@ -1251,6 +1691,7 @@ export default function App() {
       setRouteSelection({ tab: "lands", id: null });
       await refreshLands();
       await refreshBuildings();
+      await refreshZones();
       setNotice("土地を削除しました");
     } catch (error) {
       setNotice(errorMessage(error));
@@ -1303,6 +1744,7 @@ export default function App() {
       setSelectedBuilding(item);
       setBuildingDraft(toBuildingDraft(item));
       void refreshBuildings();
+      void refreshZones();
       if (selectedLandId) void getLand(selectedLandId).then(setSelectedLand).catch((error) => setNotice(errorMessage(error)));
       setNotice(creatingBuilding ? "建物を作成しました" : "建物を保存しました");
     } catch (error) {
@@ -1322,6 +1764,7 @@ export default function App() {
       window.history.pushState(null, "", "/buildings");
       setRouteSelection({ tab: "buildings", id: null });
       await refreshBuildings();
+      await refreshZones();
       if (selectedLandId) await getLand(selectedLandId).then(setSelectedLand);
       setNotice("建物を削除しました");
     } catch (error) {
@@ -1389,10 +1832,12 @@ export default function App() {
 
   const refreshSelectedObjects = async () => {
     await Promise.all([
+      selectedZoneId ? getZone(selectedZoneId).then(setSelectedZone) : Promise.resolve(),
       selectedLandId ? getLand(selectedLandId).then(setSelectedLand) : Promise.resolve(),
       selectedBuildingId ? getBuilding(selectedBuildingId).then(setSelectedBuilding) : Promise.resolve(),
       selectedPartyId ? getParty(selectedPartyId).then(setSelectedParty) : Promise.resolve()
     ]);
+    void refreshZones();
     void refreshLands();
     void refreshBuildings();
     void refreshParties();
@@ -1469,10 +1914,11 @@ export default function App() {
       const layer = layerById.get(sourceLayerId) ?? (await getLayers(selectedProject)).find((item) => item.id === sourceLayerId) ?? null;
       setSelectedFeature(feature);
       setSelectedFeatureLayer(layer);
+      setMapSupportOpen(true);
       if (layer) {
         setVisibleLayerIds((current) => new Set([...current, layer.id]));
         setZoneSpatialLayerIds([layer.id]);
-        setZoneSearchResults([
+        setManualMapHighlightResults([
           {
             layerId: feature.layerId,
             layerName: layer.name,
@@ -1485,10 +1931,85 @@ export default function App() {
           }
         ]);
       }
-      navigateTab("zone");
       window.setTimeout(() => {
         mapRef.current?.resize();
         focusGeometry(mapRef.current, feature.geometry);
+      }, 80);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    }
+  };
+
+  const openZoneOnMap = async (zone: Zone) => {
+    try {
+      setMapSupportOpen(true);
+      const zoneLayerId = zone.zoneLayerId ?? zone.sourceLayerId;
+      const zoneFeatureId = zone.zoneFeatureId ?? zone.sourceFeatureId;
+      const layer = layerById.get(zoneLayerId) ?? (await getLayers(selectedProject)).find((item) => item.id === zoneLayerId) ?? null;
+      const zoneFeature = await getFeature(zoneLayerId, zoneFeatureId);
+      setSelectedFeature(zoneFeature);
+      setSelectedFeatureLayer(layer);
+      if (layer) {
+        setVisibleLayerIds((current) => new Set([...current, layer.id]));
+        setZoneSpatialLayerIds([layer.id]);
+      }
+
+      const zoneDetail = (zone.lands?.length || zone.buildings?.length) ? zone : await getZone(zone.id);
+      const containedLands = zoneDetail.lands ?? [];
+      const containedBuildings = zoneDetail.buildings ?? [];
+      const linkedResults: Array<FeatureSearchResult | null> = await Promise.all([
+        ...containedLands.map(async (link) => {
+          const land = await getLand(link.id);
+          if (!land.sourceLayerId || !land.sourceFeatureId) return null;
+          const landLayer = layerById.get(land.sourceLayerId);
+          const feature = await getFeature(land.sourceLayerId, land.sourceFeatureId);
+          return {
+            layerId: feature.layerId,
+            layerName: landLayer?.name ?? "土地",
+            featureId: feature.featureId,
+            properties: feature.properties,
+            geometry: feature.geometry,
+            businessLinks: { lands: [link], buildings: [] },
+            matchedBusinessLinks: emptyBusinessLinks,
+            matchSummary: "区域内の土地"
+          } satisfies FeatureSearchResult;
+        }),
+        ...containedBuildings.map(async (link) => {
+          const building = await getBuilding(link.id);
+          if (!building.sourceLayerId || !building.sourceFeatureId) return null;
+          const buildingLayer = layerById.get(building.sourceLayerId);
+          const feature = await getFeature(building.sourceLayerId, building.sourceFeatureId);
+          return {
+            layerId: feature.layerId,
+            layerName: buildingLayer?.name ?? "建物",
+            featureId: feature.featureId,
+            properties: feature.properties,
+            geometry: feature.geometry,
+            businessLinks: { lands: [], buildings: [link] },
+            matchedBusinessLinks: emptyBusinessLinks,
+            matchSummary: "区域内の建物"
+          } satisfies FeatureSearchResult;
+        })
+      ]);
+      setManualMapHighlightResults([
+        {
+          layerId: zoneFeature.layerId,
+          layerName: layer?.name ?? "区域",
+          featureId: zoneFeature.featureId,
+          properties: zoneFeature.properties,
+          geometry: zoneFeature.geometry,
+          businessLinks: {
+            lands: containedLands,
+            buildings: containedBuildings
+          },
+          matchedBusinessLinks: emptyBusinessLinks,
+          matchSummary: "選択区域"
+        },
+        ...linkedResults.filter((result): result is FeatureSearchResult => Boolean(result))
+      ]);
+      window.setTimeout(() => {
+        mapRef.current?.resize();
+        focusGeometry(mapRef.current, zoneFeature.geometry);
       }, 80);
     } catch (error) {
       setNotice(errorMessage(error));
@@ -1523,343 +2044,110 @@ export default function App() {
             関係者
           </button>
         </nav>
+        <button className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
+          {mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
+          {mapSupportOpen ? "地図を隠す" : "地図を表示"}
+        </button>
       </header>
 
-      <main className="business-workspace">
+      <main className={`business-workspace${mapSupportOpen ? " map-open" : " map-closed"}`}>
+        <div className="workspace-tabs">
         <section className={`tab-pane zone-tab${activeTab === "zone" ? " active" : ""}`} aria-hidden={activeTab !== "zone"}>
-          <div className="app-shell">
-            <aside className="left-panel">
-        <header className="panel-header">
-          <div>
-            <p className="eyebrow">PostGIS Web GIS</p>
-            <h1>レイヤ操作</h1>
-          </div>
-          <button className="icon-button" type="button" onClick={() => void refreshLayers()} title="レイヤ更新">
-            <RefreshCcw size={18} />
-          </button>
-        </header>
-
-        <section className="panel-section">
-          <label>
-            プロジェクト
-            <select value={selectedProject} onChange={(event) => setSelectedProject(event.target.value)}>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </section>
-
-        <ZoneSearchPanel
-          layers={layers}
-          layerById={layerById}
-          lands={lands}
-          buildings={buildings}
-          parties={parties}
-          resultName={analysisName}
-          setResultName={setAnalysisName}
-          query={zoneSearchQuery}
-          setQuery={setZoneSearchQuery}
-          builderOpen={conditionBuilderOpen}
-          setBuilderOpen={setConditionBuilderOpen}
-          attributeConditions={attributeConditions}
-          setAttributeConditions={setAttributeConditions}
-          spatialConditions={spatialConditions}
-          setSpatialConditions={setSpatialConditions}
-          onAddAttribute={addAttributeCondition}
-          onAddSpatial={addSpatialCondition}
-          linkedOnly={zoneSearchLinkedOnly}
-          setLinkedOnly={setZoneSearchLinkedOnly}
-          spatialLayerIds={zoneSpatialLayerIds}
-          setSpatialLayerIds={setZoneSpatialLayerIds}
-          businessSourceType={zoneBusinessSourceType}
-          setBusinessSourceType={setZoneBusinessSourceType}
-          businessQuery={zoneBusinessQuery}
-          setBusinessQuery={setZoneBusinessQuery}
-          businessStatus={zoneBusinessStatus}
-          setBusinessStatus={setZoneBusinessStatus}
-          landUse={zoneLandUse}
-          setLandUse={setZoneLandUse}
-          buildingUse={zoneBuildingUse}
-          setBuildingUse={setZoneBuildingUse}
-          partyQuery={zonePartyQuery}
-          setPartyQuery={setZonePartyQuery}
-          partyType={zonePartyType}
-          setPartyType={setZonePartyType}
-          relationType={zoneRelationType}
-          setRelationType={setZoneRelationType}
-          loading={loadingZoneSearch}
-          saving={savingConditionSearch}
-          results={zoneSearchResults}
-          selectedFeature={selectedFeature}
-          onSearch={() => void submitZoneSearch()}
-          onSave={() => void saveConditionSearchResult()}
-          onClear={clearZoneSearchConditions}
-          onSelect={(result) => void openZoneSearchResult(result)}
-        />
-
-        <section className="panel-section">
-          <div className="section-title">
-            <Upload size={16} />
-            <h2>取込</h2>
-          </div>
-          <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
-          <div className="inline-fields">
-            <label>
-              形式
-              <select value={uploadFormat} onChange={(event) => setUploadFormat(event.target.value)}>
-                <option value="geojson">GeoJSON</option>
-                <option value="shapefile">Shapefile zip</option>
-                <option value="gml">GML</option>
-                <option value="kml">KML</option>
-                <option value="gpx">GPX</option>
-              </select>
-            </label>
-            <label>
-              SRID
-              <input value={uploadSrid} onChange={(event) => setUploadSrid(event.target.value)} inputMode="numeric" />
-            </label>
-          </div>
-          <button className="command-button" type="button" onClick={() => void submitUpload()} disabled={!uploadFile}>
-            <Upload size={16} />
-            取込開始
-          </button>
-        </section>
-
-        <section className="panel-section layer-list-section">
-          <div className="section-title">
-            <Layers size={16} />
-            <h2>レイヤ</h2>
-            {loadingLayers ? <Loader2 className="spin muted-icon" size={15} /> : null}
-          </div>
-          <div className="layer-list">
-            <div className="layer-row base-layer">
-              <span className="drag-handle disabled" aria-hidden="true" />
-              <button
-                className="icon-button"
-                type="button"
-                onClick={() => setBaseMapVisible((visible) => !visible)}
-                title="ベース地図表示切替"
-              >
-                {baseMapVisible ? <Eye size={17} /> : <EyeOff size={17} />}
-              </button>
-              <div className="layer-meta">
-                <strong>
-                  <MapIcon size={14} />
-                  OpenStreetMap
-                </strong>
-                <span>ベース地図</span>
-              </div>
-              <span className="layer-action-spacer" aria-hidden="true" />
-            </div>
-            {layerListItems.map((item) => {
-              if (item.type === "resultSet") {
-                const childIds = item.layers.map((layer) => layer.id);
-                const allVisible = childIds.every((layerId) => visibleLayerIds.has(layerId));
-                const deletingResultSet = deletingResultSetIds.has(item.id);
-                return (
-                  <div className="layer-result-group" key={item.id}>
-                    <div className="layer-row layer-group-row">
-                      <span className="drag-handle disabled" aria-hidden="true" />
-                      <button className="icon-button" type="button" onClick={() => toggleLayerGroup(childIds)} title="まとめて表示切替">
-                        {allVisible ? <Eye size={17} /> : <EyeOff size={17} />}
-                      </button>
-                      <div className="layer-meta">
-                        <strong>{item.name}</strong>
-                        <span>条件検索結果 · {item.layers.length.toLocaleString()}レイヤ</span>
-                      </div>
-                      <button
-                        className="icon-button danger-icon-button"
-                        type="button"
-                        onClick={() => void requestResultSetDelete(item)}
-                        disabled={deletingResultSet}
-                        title="条件検索結果を削除"
-                      >
-                        {deletingResultSet ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
-                      </button>
-                    </div>
-                    {item.layers.map((layer) => (
-                      <div className="layer-row child-layer-row" key={layer.id}>
-                        <span className="drag-handle disabled" aria-hidden="true" />
-                        <button className="icon-button" type="button" onClick={() => toggleLayer(layer.id)} title="表示切替">
-                          {visibleLayerIds.has(layer.id) ? <Eye size={17} /> : <EyeOff size={17} />}
-                        </button>
-                        <div className="layer-meta">
-                          <strong>{layer.name}</strong>
-                          <span>
-                            {layer.geometryType} · {layer.rowCount.toLocaleString()}件
-                          </span>
-                        </div>
-                        <button
-                          className="icon-button danger-icon-button"
-                          type="button"
-                          onClick={() => void requestLayerDelete(layer)}
-                          disabled={deletingResultSet || deletingLayerIds.has(layer.id)}
-                          title="レイヤ削除"
-                        >
-                          {deletingResultSet || deletingLayerIds.has(layer.id) ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                );
+          <ZoneWorkspace
+            query={zoneQuery}
+            setQuery={setZoneQuery}
+            filters={zoneFilters}
+            setFilters={setZoneFilters}
+            filtersOpen={zoneFiltersOpen}
+            setFiltersOpen={setZoneFiltersOpen}
+            items={zones}
+            selectedId={selectedZoneId}
+            selected={selectedZone}
+            draft={zoneDraft}
+            setDraft={setZoneDraft}
+            creating={creatingZone}
+            loading={loadingZones}
+            saving={savingZone}
+            deleting={deletingZone}
+            onRefresh={() => void refreshZones()}
+            onSearch={submitZoneListSearch}
+            onSelect={selectZone}
+            onCreate={beginCreateZone}
+            onCancelCreate={cancelCreateZone}
+            onBackToList={() => navigateTab("zone")}
+            onSave={() => void saveZone()}
+            onDelete={() => void removeZone()}
+            onOpenLand={selectLand}
+            onOpenBuilding={selectBuilding}
+            onShowOnMap={(zone) => void openZoneOnMap(zone)}
+            onOpenSourceFeature={(layerId, featureId) => void openSourceFeature(layerId, featureId)}
+            onUseSelectedFeature={() => {
+              if (!selectedFeature || !selectedFeatureLayer || !canUseSelectedFeatureAsZoneFeature(selectedFeature, selectedFeatureLayer)) {
+                setNotice("先に地図上の区域レイヤ地物を選択してください");
+                return;
               }
-              const layer = item.layer;
-              return (
-                <div
-                  className={`layer-row${draggingLayerId === layer.id ? " dragging" : ""}`}
-                  key={layer.id}
-                  draggable
-                  onDragEnd={() => setDraggingLayerId(null)}
-                  onDragOver={dragLayerOver}
-                  onDragStart={(event) => startLayerDrag(event, layer.id)}
-                  onDrop={(event) => dropLayer(event, layer.id)}
-                >
-                  <span className="drag-handle" title="ドラッグして並べ替え" aria-label="ドラッグして並べ替え">
-                    <GripVertical size={16} />
-                  </span>
-                  <button className="icon-button" type="button" onClick={() => toggleLayer(layer.id)} title="表示切替">
-                    {visibleLayerIds.has(layer.id) ? <Eye size={17} /> : <EyeOff size={17} />}
-                  </button>
-                  <div className="layer-meta">
-                    <strong>{layer.name}</strong>
-                    <span>
-                      {layer.geometryType} · {layer.rowCount.toLocaleString()}件{layer.isResult ? " · 結果" : ""}
-                    </span>
-                  </div>
-                  <button
-                    className="icon-button danger-icon-button"
-                    type="button"
-                    onClick={() => void requestLayerDelete(layer)}
-                    disabled={deletingLayerIds.has(layer.id)}
-                    title="レイヤ削除"
-                  >
-                    {deletingLayerIds.has(layer.id) ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
-                  </button>
-                </div>
-              );
-            })}
-            {!layers.length ? <p className="empty-state">取込済みレイヤはありません</p> : null}
-          </div>
-        </section>
-
-        <section className="panel-section analysis-section">
-          <div className="section-title">
-            <MapIcon size={16} />
-            <h2>外縁生成</h2>
-          </div>
-          <label>
-            結果名
-            <input value={outerBoundaryName} onChange={(event) => setOuterBoundaryName(event.target.value)} />
-          </label>
-          <label>
-            ポリゴン1
-            <select value={outerTargetLayerId} onChange={(event) => setOuterTargetLayerId(event.target.value)}>
-              {polygonLayers.map((layer) => (
-                <option key={layer.id} value={layer.id}>
-                  {layer.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            区域指定レイヤ
-            <select value={outerBoundaryLayerId} onChange={(event) => setOuterBoundaryLayerId(event.target.value)}>
-              {boundaryCandidateLayers.map((layer) => (
-                <option key={layer.id} value={layer.id}>
-                  {layer.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            バッファ(m)
-            <input
-              value={outerBoundaryBufferMeters}
-              onChange={(event) => setOuterBoundaryBufferMeters(event.target.value)}
-              inputMode="decimal"
-            />
-          </label>
-          <button
-            className="command-button"
-            type="button"
-            onClick={() => void submitOuterBoundary()}
-            disabled={!outerTargetLayerId || !outerBoundaryLayerId}
-          >
-            <Play size={16} />
-            外縁生成開始
-          </button>
-        </section>
-      </aside>
-
-      <main className="map-panel">
-        <div ref={mapContainerRef} className="map-container" />
-        {notice ? (
-          <div className="notice">
-            <span>{notice}</span>
-            <button type="button" onClick={() => setNotice(null)}>
-              閉じる
-            </button>
-          </div>
-        ) : null}
-      </main>
-
-      <aside className="right-panel">
-        <section className="panel-section">
-          <h2>選択地物</h2>
-          {selectedFeature && selectedFeatureLayer ? (
-            <div className="feature-view">
-              <div className="feature-heading">
-                <div>
-                  <strong>{selectedFeatureLayer.name}</strong>
-                  <span>ID {selectedFeature.featureId}</span>
-                </div>
-                <button
-                  className="icon-button"
-                  type="button"
-                  onClick={() => setFeatureEditOpen((open) => !open)}
-                  title={featureEditOpen ? "編集を閉じる" : "地物編集"}
-                >
-                  {featureEditOpen ? <X size={16} /> : <Pencil size={16} />}
-                </button>
-              </div>
-              <BusinessLinksPanel links={businessLinks} loading={loadingBusinessLinks} />
-              {featureEditOpen ? (
-                <FeatureEditor
-                  layer={selectedFeatureLayer}
-                  propertyDraft={featurePropertyDraft}
-                  setPropertyDraft={setFeaturePropertyDraft}
-                  geometryDraft={featureGeometryDraft}
-                  setGeometryDraft={setFeatureGeometryDraft}
-                  saving={savingFeature}
-                  onCancel={() => setFeatureEditOpen(false)}
-                  onSave={() => void saveSelectedFeature()}
-                />
-              ) : (
-                <div className="property-table">
-                  {Object.entries(selectedFeature.properties).map(([key, value]) => (
-                    <div className="property-row" key={key}>
-                      <span>{key}</span>
-                      <strong>{formatValue(value)}</strong>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="empty-state">地図上の地物を選択してください</p>
-          )}
-        </section>
-
-        <section className="panel-section">
-          <h2>ジョブ</h2>
-          <JobList title="取込" jobs={importJobs} />
-          <JobList title="解析" jobs={analysisJobs} />
-        </section>
-            </aside>
-          </div>
+              setZoneDraft((current) => ({
+                ...current,
+                zoneLayerId: selectedFeature.layerId,
+                zoneFeatureId: selectedFeature.featureId
+              }));
+            }}
+            layers={layers}
+            selectedFeature={selectedFeature}
+            selectedFeatureLayer={selectedFeatureLayer}
+            selectedProject={selectedProject}
+            projects={projects}
+            onProjectChange={setSelectedProject}
+            gisTools={
+              <ZoneSearchPanel
+                layers={layers}
+                layerById={layerById}
+                lands={lands}
+                buildings={buildings}
+                parties={parties}
+                resultName={analysisName}
+                setResultName={setAnalysisName}
+                query={zoneSearchQuery}
+                setQuery={setZoneSearchQuery}
+                builderOpen={conditionBuilderOpen}
+                setBuilderOpen={setConditionBuilderOpen}
+                attributeConditions={attributeConditions}
+                setAttributeConditions={setAttributeConditions}
+                spatialConditions={spatialConditions}
+                setSpatialConditions={setSpatialConditions}
+                onAddAttribute={addAttributeCondition}
+                onAddSpatial={addSpatialCondition}
+                linkedOnly={zoneSearchLinkedOnly}
+                setLinkedOnly={setZoneSearchLinkedOnly}
+                spatialLayerIds={zoneSpatialLayerIds}
+                setSpatialLayerIds={setZoneSpatialLayerIds}
+                businessSourceType={zoneBusinessSourceType}
+                setBusinessSourceType={setZoneBusinessSourceType}
+                businessQuery={zoneBusinessQuery}
+                setBusinessQuery={setZoneBusinessQuery}
+                businessStatus={zoneBusinessStatus}
+                setBusinessStatus={setZoneBusinessStatus}
+                landUse={zoneLandUse}
+                setLandUse={setZoneLandUse}
+                buildingUse={zoneBuildingUse}
+                setBuildingUse={setZoneBuildingUse}
+                partyQuery={zonePartyQuery}
+                setPartyQuery={setZonePartyQuery}
+                partyType={zonePartyType}
+                setPartyType={setZonePartyType}
+                relationType={zoneRelationType}
+                setRelationType={setZoneRelationType}
+                loading={loadingZoneSearch}
+                saving={savingConditionSearch}
+                results={zoneSearchResults}
+                selectedFeature={selectedFeature}
+                onSearch={() => void submitZoneSearch()}
+                onSave={() => void saveConditionSearchResult()}
+                onClear={clearZoneSearchConditions}
+                onSelect={(result) => void openZoneSearchResult(result)}
+              />
+            }
+          />
         </section>
 
         <section className={`tab-pane${activeTab === "lands" ? " active" : ""}`} aria-hidden={activeTab !== "lands"}>
@@ -1880,6 +2168,7 @@ export default function App() {
             saving={savingLand}
             deleting={deletingLand}
             onRefresh={() => void refreshLands()}
+            onSearch={submitLandListSearch}
             onSelect={selectLand}
             onCreate={beginCreateLand}
             onCancelCreate={cancelCreateLand}
@@ -1923,6 +2212,7 @@ export default function App() {
             saving={savingBuilding}
             deleting={deletingBuilding}
             onRefresh={() => void refreshBuildings()}
+            onSearch={submitBuildingListSearch}
             onSelect={selectBuilding}
             onCreate={beginCreateBuilding}
             onCancelCreate={cancelCreateBuilding}
@@ -1966,6 +2256,7 @@ export default function App() {
             saving={savingParty}
             deleting={deletingParty}
             onRefresh={() => void refreshParties()}
+            onSearch={submitPartyListSearch}
             onSelect={selectParty}
             onCreate={beginCreateParty}
             onCancelCreate={cancelCreateParty}
@@ -1981,9 +2272,81 @@ export default function App() {
             onProjectChange={setSelectedProject}
           />
         </section>
+        </div>
+
+        <MapSupportPane
+          open={mapSupportOpen}
+          onToggle={() => setMapSupportOpen((open) => !open)}
+          mapContainerRef={mapContainerRef}
+          baseMapVisible={baseMapVisible}
+          setBaseMapVisible={setBaseMapVisible}
+          layerListItems={layerListItems}
+          visibleLayerIds={visibleLayerIds}
+          loadingLayers={loadingLayers}
+          deletingLayerIds={deletingLayerIds}
+          deletingResultSetIds={deletingResultSetIds}
+          draggingLayerId={draggingLayerId}
+          onRefreshLayers={() => void refreshLayers()}
+          onToggleLayer={toggleLayer}
+          onToggleLayerGroup={toggleLayerGroup}
+          onRequestLayerDelete={(layer) => void requestLayerDelete(layer)}
+          onConvertLayerToZone={(layer) => void convertLayerToZoneLayer(layer)}
+          onRequestResultSetDelete={(resultSet) => void requestResultSetDelete(resultSet)}
+          onDragLayerStart={startLayerDrag}
+          onDragLayerOver={dragLayerOver}
+          onDropLayer={dropLayer}
+          onDragLayerEnd={() => setDraggingLayerId(null)}
+          selectedFeature={selectedFeature}
+          selectedFeatureLayer={selectedFeatureLayer}
+          businessLinks={businessLinks}
+          loadingBusinessLinks={loadingBusinessLinks}
+          featureEditOpen={featureEditOpen}
+          setFeatureEditOpen={setFeatureEditOpen}
+          featurePropertyDraft={featurePropertyDraft}
+          setFeaturePropertyDraft={setFeaturePropertyDraft}
+          featureGeometryDraft={featureGeometryDraft}
+          setFeatureGeometryDraft={setFeatureGeometryDraft}
+          savingFeature={savingFeature}
+          onSaveFeature={() => void saveSelectedFeature()}
+          uploadFile={uploadFile}
+          setUploadFile={setUploadFile}
+          uploadFormat={uploadFormat}
+          setUploadFormat={setUploadFormat}
+          uploadSrid={uploadSrid}
+          setUploadSrid={setUploadSrid}
+          uploadAsZoneLayer={uploadAsZoneLayer}
+          setUploadAsZoneLayer={setUploadAsZoneLayer}
+          onSubmitUpload={() => void submitUpload()}
+          outerBoundaryName={outerBoundaryName}
+          setOuterBoundaryName={setOuterBoundaryName}
+          outerTargetLayerId={outerTargetLayerId}
+          setOuterTargetLayerId={setOuterTargetLayerId}
+          outerBoundaryLayerId={outerBoundaryLayerId}
+          setOuterBoundaryLayerId={setOuterBoundaryLayerId}
+          outerBoundaryBufferMeters={outerBoundaryBufferMeters}
+          setOuterBoundaryBufferMeters={setOuterBoundaryBufferMeters}
+          polygonLayers={polygonLayers}
+          boundaryCandidateLayers={boundaryCandidateLayers}
+          onSubmitOuterBoundary={() => void submitOuterBoundary()}
+          facilityZoneName={facilityZoneName}
+          setFacilityZoneName={setFacilityZoneName}
+          facilityZoneLayerId={facilityZoneLayerId}
+          setFacilityZoneLayerId={setFacilityZoneLayerId}
+          facilityZoneBufferMeters={facilityZoneBufferMeters}
+          setFacilityZoneBufferMeters={setFacilityZoneBufferMeters}
+          facilityZoneDistanceMeters={facilityZoneDistanceMeters}
+          setFacilityZoneDistanceMeters={setFacilityZoneDistanceMeters}
+          facilityZoneSourceType={facilityZoneSourceType}
+          setFacilityZoneSourceType={setFacilityZoneSourceType}
+          pointLayers={pointLayers}
+          creatingFacilityZone={creatingFacilityZone}
+          onSubmitFacilityZone={() => void submitFacilityZoneLayer()}
+          importJobs={importJobs}
+          analysisJobs={analysisJobs}
+        />
       </main>
 
-      {notice && activeTab !== "zone" ? (
+      {notice ? (
         <div className="notice business-notice">
           <span>{notice}</span>
           <button type="button" onClick={() => setNotice(null)}>
@@ -2701,6 +3064,839 @@ function ChoiceSelect({
   );
 }
 
+function ZoneWorkspace({
+  query,
+  setQuery,
+  filters,
+  setFilters,
+  filtersOpen,
+  setFiltersOpen,
+  items,
+  selectedId,
+  selected,
+  draft,
+  setDraft,
+  creating,
+  loading,
+  saving,
+  deleting,
+  onRefresh,
+  onSearch,
+  onSelect,
+  onCreate,
+  onCancelCreate,
+  onBackToList,
+  onSave,
+  onDelete,
+  onOpenLand,
+  onOpenBuilding,
+  onShowOnMap,
+  onOpenSourceFeature,
+  onUseSelectedFeature,
+  layers,
+  selectedFeature,
+  selectedFeatureLayer,
+  selectedProject,
+  projects,
+  onProjectChange,
+  gisTools
+}: {
+  query: string;
+  setQuery: (value: string) => void;
+  filters: BusinessObjectFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>;
+  filtersOpen: boolean;
+  setFiltersOpen: (value: boolean) => void;
+  items: Zone[];
+  selectedId: string | null;
+  selected: Zone | null;
+  draft: ZoneDraft;
+  setDraft: React.Dispatch<React.SetStateAction<ZoneDraft>>;
+  creating: boolean;
+  loading: boolean;
+  saving: boolean;
+  deleting: boolean;
+  onRefresh: () => void;
+  onSearch: () => void;
+  onSelect: (id: string) => void;
+  onCreate: () => void;
+  onCancelCreate: () => void;
+  onBackToList: () => void;
+  onSave: () => void;
+  onDelete: () => void;
+  onOpenLand: (id: string) => void;
+  onOpenBuilding: (id: string) => void;
+  onShowOnMap: (zone: Zone) => void;
+  onOpenSourceFeature: (layerId?: string | null, featureId?: string | null) => void;
+  onUseSelectedFeature: () => void;
+  layers: Layer[];
+  selectedFeature: Feature | null;
+  selectedFeatureLayer: Layer | null;
+  selectedProject: string;
+  projects: Project[];
+  onProjectChange: (id: string) => void;
+  gisTools: React.ReactNode;
+}) {
+  const detailOpen = creating || Boolean(selectedId);
+  const hasDetailContent = creating || Boolean(selected);
+  const statusChoices = mergeChoiceOptions(zoneStatusOptions, items.map((zone) => zone.status), draft.status);
+  const typeChoices = mergeChoiceOptions(zoneTypeOptions, items.map((zone) => zone.zoneType), draft.zoneType);
+  const sourceLayers = useMemo(() => zoneLayerOptions(layers), [layers]);
+  const selectedFeatureUsable = Boolean(
+    selectedFeature && selectedFeatureLayer && canUseSelectedFeatureAsZoneFeature(selectedFeature, selectedFeatureLayer)
+  );
+  const [featureOptions, setFeatureOptions] = useState<FeatureSearchResult[]>([]);
+  const [loadingFeatureOptions, setLoadingFeatureOptions] = useState(false);
+  const [featureOptionsError, setFeatureOptionsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sourceLayerId = draft.zoneLayerId?.trim() ?? "";
+    if (!sourceLayerId) {
+      setFeatureOptions([]);
+      setFeatureOptionsError(null);
+      setLoadingFeatureOptions(false);
+      return;
+    }
+    let active = true;
+    setLoadingFeatureOptions(true);
+    setFeatureOptionsError(null);
+    searchFeatures({ projectId: selectedProject, layerId: sourceLayerId, limit: 80 })
+      .then((results) => {
+        if (active) setFeatureOptions(results.filter((result) => isPolygonGeometry(result.geometry)));
+      })
+      .catch((error) => {
+        if (active) {
+          setFeatureOptions([]);
+          setFeatureOptionsError(errorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (active) setLoadingFeatureOptions(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [draft.zoneLayerId, selectedProject]);
+
+  const featureOptionIds = new Set(featureOptions.map((option) => option.featureId));
+  return (
+    <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
+      {!detailOpen ? (
+        <ObjectSidebar
+          title="区域"
+          query={query}
+          setQuery={setQuery}
+          loading={loading}
+          onRefresh={onRefresh}
+          onSearch={onSearch}
+          onCreate={onCreate}
+          filterContent={
+            <ZoneFilterPanel
+              filters={filters}
+              setFilters={setFilters}
+              open={filtersOpen}
+              setOpen={setFiltersOpen}
+              layers={layers}
+              statusOptions={statusChoices}
+              typeOptions={typeChoices}
+            />
+          }
+          selectedProject={selectedProject}
+          projects={projects}
+          onProjectChange={onProjectChange}
+        >
+          <div className="business-table-scroll">
+            <table className="business-table zone-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>区域名</th>
+                  <th>種別</th>
+                  <th>ステータス</th>
+                  <th>土地</th>
+                  <th>建物</th>
+                  <th>区域レイヤ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((zone) => (
+                  <tr className={selectedId === zone.id ? "active" : ""} key={zone.id} onClick={() => onSelect(zone.id)}>
+                    <td>{zone.id}</td>
+                    <td>
+                      <strong>{zone.name}</strong>
+                      <span>{zone.memo ?? ""}</span>
+                    </td>
+                    <td>{zone.zoneType ?? ""}</td>
+                    <td>{zone.status}</td>
+                    <td>{(zone.landCount ?? 0).toLocaleString()}</td>
+                    <td>{(zone.buildingCount ?? 0).toLocaleString()}</td>
+                    <td>{zoneLayerSummary(layers, zoneLayerIdOf(zone), zoneFeatureIdOf(zone))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!items.length ? <p className="empty-state">区域はありません</p> : null}
+          <details className="advanced-gis-tools">
+            <summary>
+              <Layers size={15} />
+              GIS検索
+            </summary>
+            {gisTools}
+          </details>
+        </ObjectSidebar>
+      ) : null}
+
+      {detailOpen ? (
+        <section className="object-detail">
+          {hasDetailContent ? (
+            <>
+              <ObjectDetailHeader
+                id={creating ? draft.id || "新規区域" : selected?.id ?? ""}
+                title={draft.name || "区域"}
+                subtitle={draft.zoneType}
+                status={draft.status}
+                href={selected ? `/zones/${encodeURIComponent(selected.id)}` : undefined}
+                onBack={creating ? onCancelCreate : onBackToList}
+              />
+              <div className="object-form">
+                <label>
+                  ID
+                  <input value={draft.id} disabled={!creating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
+                </label>
+                <label>
+                  区域名
+                  <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+                </label>
+                <label>
+                  種別
+                  <ChoiceSelect
+                    value={draft.zoneType}
+                    onChange={(value) => setDraft((current) => ({ ...current, zoneType: value }))}
+                    options={typeChoices}
+                    emptyLabel="選択"
+                  />
+                </label>
+                <label>
+                  ステータス
+                  <ChoiceSelect
+                    value={draft.status}
+                    onChange={(value) => setDraft((current) => ({ ...current, status: value }))}
+                    options={statusChoices}
+                    emptyLabel="選択"
+                  />
+                </label>
+                <label>
+                  区域レイヤ
+                  <select
+                    value={draft.zoneLayerId ?? ""}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        zoneLayerId: event.target.value,
+                        zoneFeatureId: ""
+                      }))
+                    }
+                  >
+                    <option value="">選択</option>
+                    {sourceLayers.map((layer) => (
+                      <option key={layer.id} value={layer.id}>
+                        {layer.name} ({layer.geometryType})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  区域地物
+                  <select
+                    value={draft.zoneFeatureId ?? ""}
+                    onChange={(event) => setDraft((current) => ({ ...current, zoneFeatureId: event.target.value }))}
+                    disabled={!draft.zoneLayerId || loadingFeatureOptions || Boolean(featureOptionsError)}
+                  >
+                    <option value="">{loadingFeatureOptions ? "取得中" : "選択"}</option>
+                    {draft.zoneFeatureId && !featureOptionIds.has(draft.zoneFeatureId) ? (
+                      <option value={draft.zoneFeatureId}>ID {draft.zoneFeatureId}</option>
+                    ) : null}
+                    {featureOptions.map((result) => (
+                      <option key={`${result.layerId}:${result.featureId}`} value={result.featureId}>
+                        ID {result.featureId} · {featureResultSummary(result)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="wide-field">
+                  メモ
+                  <textarea value={draft.memo} onChange={(event) => setDraft((current) => ({ ...current, memo: event.target.value }))} />
+                </label>
+              </div>
+
+              <div className="button-row compact-actions">
+                <button className="subtle-button" type="button" onClick={onUseSelectedFeature} disabled={!selectedFeatureUsable}>
+                  <Layers size={15} />
+                  選択中の地物を設定
+                </button>
+                {selected ? (
+                  <button className="subtle-button" type="button" onClick={() => onShowOnMap(selected)}>
+                    <MapIcon size={15} />
+                    地図で表示
+                  </button>
+                ) : null}
+              </div>
+
+              <SourceLinkPanel layers={layers} layerId={draft.zoneLayerId} featureId={draft.zoneFeatureId} onOpen={onOpenSourceFeature} />
+
+              {selected ? (
+                <div className="object-related zone-contained-links">
+                  <h3>含まれる土地</h3>
+                  {(selected.lands ?? []).map((land) => (
+                    <button key={land.id} type="button" onClick={() => onOpenLand(land.id)}>
+                      <MapIcon size={15} />
+                      <strong>{land.id}</strong>
+                      <span>{land.label}</span>
+                    </button>
+                  ))}
+                  {!(selected.lands ?? []).length ? <p className="empty-state compact">区域内の土地はありません</p> : null}
+                  <h3>含まれる建物</h3>
+                  {(selected.buildings ?? []).map((building) => (
+                    <button key={building.id} type="button" onClick={() => onOpenBuilding(building.id)}>
+                      <Building2 size={15} />
+                      <strong>{building.id}</strong>
+                      <span>{building.label}</span>
+                    </button>
+                  ))}
+                  {!(selected.buildings ?? []).length ? <p className="empty-state compact">区域内の建物はありません</p> : null}
+                </div>
+              ) : null}
+
+              <ObjectActions
+                saving={saving}
+                deleting={deleting}
+                onSave={onSave}
+                onDelete={onDelete}
+                onCancel={onCancelCreate}
+                creating={creating}
+              />
+            </>
+          ) : (
+            <p className="empty-state">区域を読み込み中です</p>
+          )}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function ZoneFilterPanel({
+  filters,
+  setFilters,
+  open,
+  setOpen,
+  layers,
+  statusOptions,
+  typeOptions
+}: {
+  filters: BusinessObjectFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>;
+  open: boolean;
+  setOpen: (value: boolean) => void;
+  layers: Layer[];
+  statusOptions: string[];
+  typeOptions: string[];
+}) {
+  const update = (key: keyof BusinessObjectFilters, value: string | boolean | undefined) => {
+    setFilters((current) => ({ ...current, [key]: value === "" ? undefined : value }));
+  };
+  const sourceLayers = zoneLayerOptions(layers);
+  return (
+    <div className="business-filter-panel">
+      <button className="subtle-button" type="button" onClick={() => setOpen(!open)}>
+        <Search size={14} />
+        {open ? "詳細条件を閉じる" : "詳細条件を表示"}
+      </button>
+      {open ? (
+        <div className="business-filter-fields">
+          <label>
+            ステータス
+            <ChoiceSelect value={filters.status ?? ""} onChange={(value) => update("status", value)} options={statusOptions} />
+          </label>
+          <label>
+            種別
+            <ChoiceSelect value={filters.zoneType ?? ""} onChange={(value) => update("zoneType", value)} options={typeOptions} />
+          </label>
+          <label>
+            区域レイヤ
+            <select value={filters.zoneLayerId ?? ""} onChange={(event) => update("zoneLayerId", event.target.value)}>
+              <option value="">すべて</option>
+              {sourceLayers.map((layer) => (
+                <option key={layer.id} value={layer.id}>
+                  {layer.name} ({layer.geometryType})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="checkbox-field filter-checkbox">
+            <input type="checkbox" checked={filters.linkedOnly ?? false} onChange={(event) => update("linkedOnly", event.target.checked)} />
+            <span>区域地物ありのみ</span>
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MapSupportPane({
+  open,
+  onToggle,
+  mapContainerRef,
+  baseMapVisible,
+  setBaseMapVisible,
+  layerListItems,
+  visibleLayerIds,
+  loadingLayers,
+  deletingLayerIds,
+  deletingResultSetIds,
+  draggingLayerId,
+  onRefreshLayers,
+  onToggleLayer,
+  onToggleLayerGroup,
+  onRequestLayerDelete,
+  onConvertLayerToZone,
+  onRequestResultSetDelete,
+  onDragLayerStart,
+  onDragLayerOver,
+  onDropLayer,
+  onDragLayerEnd,
+  selectedFeature,
+  selectedFeatureLayer,
+  businessLinks,
+  loadingBusinessLinks,
+  featureEditOpen,
+  setFeatureEditOpen,
+  featurePropertyDraft,
+  setFeaturePropertyDraft,
+  featureGeometryDraft,
+  setFeatureGeometryDraft,
+  savingFeature,
+  onSaveFeature,
+  uploadFile,
+  setUploadFile,
+  uploadFormat,
+  setUploadFormat,
+  uploadSrid,
+  setUploadSrid,
+  uploadAsZoneLayer,
+  setUploadAsZoneLayer,
+  onSubmitUpload,
+  outerBoundaryName,
+  setOuterBoundaryName,
+  outerTargetLayerId,
+  setOuterTargetLayerId,
+  outerBoundaryLayerId,
+  setOuterBoundaryLayerId,
+  outerBoundaryBufferMeters,
+  setOuterBoundaryBufferMeters,
+  polygonLayers,
+  boundaryCandidateLayers,
+  onSubmitOuterBoundary,
+  facilityZoneName,
+  setFacilityZoneName,
+  facilityZoneLayerId,
+  setFacilityZoneLayerId,
+  facilityZoneBufferMeters,
+  setFacilityZoneBufferMeters,
+  facilityZoneDistanceMeters,
+  setFacilityZoneDistanceMeters,
+  facilityZoneSourceType,
+  setFacilityZoneSourceType,
+  pointLayers,
+  creatingFacilityZone,
+  onSubmitFacilityZone,
+  importJobs,
+  analysisJobs
+}: {
+  open: boolean;
+  onToggle: () => void;
+  mapContainerRef: React.RefObject<HTMLDivElement>;
+  baseMapVisible: boolean;
+  setBaseMapVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  layerListItems: LayerListItem[];
+  visibleLayerIds: Set<string>;
+  loadingLayers: boolean;
+  deletingLayerIds: Set<string>;
+  deletingResultSetIds: Set<string>;
+  draggingLayerId: string | null;
+  onRefreshLayers: () => void;
+  onToggleLayer: (layerId: string) => void;
+  onToggleLayerGroup: (layerIds: string[]) => void;
+  onRequestLayerDelete: (layer: Layer) => void;
+  onConvertLayerToZone: (layer: Layer) => void;
+  onRequestResultSetDelete: (resultSet: Extract<LayerListItem, { type: "resultSet" }>) => void;
+  onDragLayerStart: (event: DragEvent<HTMLDivElement>, layerId: string) => void;
+  onDragLayerOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDropLayer: (event: DragEvent<HTMLDivElement>, targetLayerId: string) => void;
+  onDragLayerEnd: () => void;
+  selectedFeature: Feature | null;
+  selectedFeatureLayer: Layer | null;
+  businessLinks: BusinessLinks;
+  loadingBusinessLinks: boolean;
+  featureEditOpen: boolean;
+  setFeatureEditOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  featurePropertyDraft: Record<string, string>;
+  setFeaturePropertyDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  featureGeometryDraft: string;
+  setFeatureGeometryDraft: React.Dispatch<React.SetStateAction<string>>;
+  savingFeature: boolean;
+  onSaveFeature: () => void;
+  uploadFile: File | null;
+  setUploadFile: (file: File | null) => void;
+  uploadFormat: string;
+  setUploadFormat: (value: string) => void;
+  uploadSrid: string;
+  setUploadSrid: (value: string) => void;
+  uploadAsZoneLayer: boolean;
+  setUploadAsZoneLayer: (value: boolean) => void;
+  onSubmitUpload: () => void;
+  outerBoundaryName: string;
+  setOuterBoundaryName: (value: string) => void;
+  outerTargetLayerId: string;
+  setOuterTargetLayerId: (value: string) => void;
+  outerBoundaryLayerId: string;
+  setOuterBoundaryLayerId: (value: string) => void;
+  outerBoundaryBufferMeters: string;
+  setOuterBoundaryBufferMeters: (value: string) => void;
+  polygonLayers: Layer[];
+  boundaryCandidateLayers: Layer[];
+  onSubmitOuterBoundary: () => void;
+  facilityZoneName: string;
+  setFacilityZoneName: (value: string) => void;
+  facilityZoneLayerId: string;
+  setFacilityZoneLayerId: (value: string) => void;
+  facilityZoneBufferMeters: string;
+  setFacilityZoneBufferMeters: (value: string) => void;
+  facilityZoneDistanceMeters: string;
+  setFacilityZoneDistanceMeters: (value: string) => void;
+  facilityZoneSourceType: ZoneBusinessSourceType;
+  setFacilityZoneSourceType: (value: ZoneBusinessSourceType) => void;
+  pointLayers: Layer[];
+  creatingFacilityZone: boolean;
+  onSubmitFacilityZone: () => void;
+  importJobs: ImportJob[];
+  analysisJobs: AnalysisJob[];
+}) {
+  return (
+    <aside className={`map-support-pane${open ? "" : " closed"}`}>
+      <header className="map-support-header">
+        <div>
+          <p className="eyebrow">Map Support</p>
+          <h2>地図</h2>
+        </div>
+        <button className="icon-button" type="button" onClick={onToggle} title="地図ペインを閉じる">
+          <EyeOff size={16} />
+        </button>
+      </header>
+
+      <div className="support-map-panel">
+        <div ref={mapContainerRef} className="map-container" />
+      </div>
+
+      <div className="map-support-scroll">
+        <section className="panel-section layer-list-section">
+          <div className="section-title">
+            <Layers size={16} />
+            <h2>レイヤ</h2>
+            {loadingLayers ? <Loader2 className="spin muted-icon" size={15} /> : null}
+            <button className="icon-button inline-icon-button" type="button" onClick={onRefreshLayers} title="レイヤ更新">
+              <RefreshCcw size={15} />
+            </button>
+          </div>
+          <div className="layer-list">
+            <div className="layer-row base-layer">
+              <span className="drag-handle disabled" aria-hidden="true" />
+              <button className="icon-button" type="button" onClick={() => setBaseMapVisible((visible) => !visible)} title="ベース地図表示切替">
+                {baseMapVisible ? <Eye size={17} /> : <EyeOff size={17} />}
+              </button>
+              <div className="layer-meta">
+                <strong>
+                  <MapIcon size={14} />
+                  OpenStreetMap
+                </strong>
+                <span>ベース地図</span>
+              </div>
+              <span className="layer-action-spacer" aria-hidden="true" />
+            </div>
+            {layerListItems.map((item) => {
+              if (item.type === "resultSet") {
+                const childIds = item.layers.map((layer) => layer.id);
+                const allVisible = childIds.every((layerId) => visibleLayerIds.has(layerId));
+                const deletingResultSet = deletingResultSetIds.has(item.id);
+                return (
+                  <div className="layer-result-group" key={item.id}>
+                    <div className="layer-row layer-group-row">
+                      <span className="drag-handle disabled" aria-hidden="true" />
+                      <button className="icon-button" type="button" onClick={() => onToggleLayerGroup(childIds)} title="まとめて表示切替">
+                        {allVisible ? <Eye size={17} /> : <EyeOff size={17} />}
+                      </button>
+                      <div className="layer-meta">
+                        <strong>{item.name}</strong>
+                        <span>条件検索結果 · {item.layers.length.toLocaleString()}レイヤ</span>
+                      </div>
+                      <button
+                        className="icon-button danger-icon-button"
+                        type="button"
+                        onClick={() => onRequestResultSetDelete(item)}
+                        disabled={deletingResultSet}
+                        title="条件検索結果を削除"
+                      >
+                        {deletingResultSet ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                      </button>
+                    </div>
+                    {item.layers.map((layer) => (
+                      <div className="layer-row child-layer-row" key={layer.id}>
+                        <span className="drag-handle disabled" aria-hidden="true" />
+                        <button className="icon-button" type="button" onClick={() => onToggleLayer(layer.id)} title="表示切替">
+                          {visibleLayerIds.has(layer.id) ? <Eye size={17} /> : <EyeOff size={17} />}
+                        </button>
+                        <div className="layer-meta">
+                          <strong>{layer.name}</strong>
+                          <span>
+                            {layer.geometryType} · {layer.rowCount.toLocaleString()}件
+                          </span>
+                        </div>
+                        <button
+                          className="icon-button danger-icon-button"
+                          type="button"
+                          onClick={() => onRequestLayerDelete(layer)}
+                          disabled={deletingResultSet || deletingLayerIds.has(layer.id)}
+                          title="レイヤ削除"
+                        >
+                          {deletingResultSet || deletingLayerIds.has(layer.id) ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
+              const layer = item.layer;
+              return (
+                <div
+                  className={`layer-row${draggingLayerId === layer.id ? " dragging" : ""}`}
+                  key={layer.id}
+                  draggable
+                  onDragEnd={onDragLayerEnd}
+                  onDragOver={onDragLayerOver}
+                  onDragStart={(event) => onDragLayerStart(event, layer.id)}
+                  onDrop={(event) => onDropLayer(event, layer.id)}
+                >
+                  <span className="drag-handle" title="ドラッグして並べ替え" aria-label="ドラッグして並べ替え">
+                    <GripVertical size={16} />
+                  </span>
+                  <button className="icon-button" type="button" onClick={() => onToggleLayer(layer.id)} title="表示切替">
+                    {visibleLayerIds.has(layer.id) ? <Eye size={17} /> : <EyeOff size={17} />}
+                  </button>
+                  <div className="layer-meta">
+                    <strong>{layer.name}</strong>
+                    <span>
+                      {layer.geometryType} · {layer.rowCount.toLocaleString()}件{layer.isResult ? " · 結果" : ""}{layer.layerRole === "zone" ? " · 区域" : ""}
+                    </span>
+                  </div>
+                  {isPolygonLayer(layer) && layer.layerRole !== "zone" && !layer.isResult ? (
+                    <button className="icon-button" type="button" onClick={() => onConvertLayerToZone(layer)} title="区域レイヤ化">
+                      <MapIcon size={16} />
+                    </button>
+                  ) : null}
+                  <button
+                    className="icon-button danger-icon-button"
+                    type="button"
+                    onClick={() => onRequestLayerDelete(layer)}
+                    disabled={deletingLayerIds.has(layer.id)}
+                    title="レイヤ削除"
+                  >
+                    {deletingLayerIds.has(layer.id) ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                  </button>
+                </div>
+              );
+            })}
+            {!layerListItems.length ? <p className="empty-state">取込済みレイヤはありません</p> : null}
+          </div>
+        </section>
+
+        <section className="panel-section">
+          <h2>選択地物</h2>
+          {selectedFeature && selectedFeatureLayer ? (
+            <div className="feature-view">
+              <div className="feature-heading">
+                <div>
+                  <strong>{selectedFeatureLayer.name}</strong>
+                  <span>ID {selectedFeature.featureId}</span>
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => setFeatureEditOpen((editing) => !editing)}
+                  title={featureEditOpen ? "編集を閉じる" : "地物編集"}
+                >
+                  {featureEditOpen ? <X size={16} /> : <Pencil size={16} />}
+                </button>
+              </div>
+              <BusinessLinksPanel links={businessLinks} loading={loadingBusinessLinks} />
+              {featureEditOpen ? (
+                <FeatureEditor
+                  layer={selectedFeatureLayer}
+                  propertyDraft={featurePropertyDraft}
+                  setPropertyDraft={setFeaturePropertyDraft}
+                  geometryDraft={featureGeometryDraft}
+                  setGeometryDraft={setFeatureGeometryDraft}
+                  saving={savingFeature}
+                  onCancel={() => setFeatureEditOpen(false)}
+                  onSave={onSaveFeature}
+                />
+              ) : (
+                <div className="property-table">
+                  {Object.entries(selectedFeature.properties).map(([key, value]) => (
+                    <div className="property-row" key={key}>
+                      <span>{key}</span>
+                      <strong>{formatValue(value)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="empty-state">地図上の地物を選択してください</p>
+          )}
+        </section>
+
+        <details className="map-tool-details">
+          <summary>
+            <Upload size={15} />
+            取込
+          </summary>
+          <section className="panel-section">
+            <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
+            <div className="inline-fields">
+              <label>
+                形式
+                <select value={uploadFormat} onChange={(event) => setUploadFormat(event.target.value)}>
+                  <option value="geojson">GeoJSON</option>
+                  <option value="shapefile">Shapefile zip</option>
+                  <option value="gml">GML</option>
+                  <option value="kml">KML</option>
+                  <option value="gpx">GPX</option>
+                </select>
+              </label>
+              <label>
+                SRID
+                <input value={uploadSrid} onChange={(event) => setUploadSrid(event.target.value)} inputMode="numeric" />
+              </label>
+            </div>
+            <label className="checkbox-field">
+              <input type="checkbox" checked={uploadAsZoneLayer} onChange={(event) => setUploadAsZoneLayer(event.target.checked)} />
+              <span>区域レイヤとして取り込む</span>
+            </label>
+            <button className="command-button" type="button" onClick={onSubmitUpload} disabled={!uploadFile}>
+              <Upload size={16} />
+              取込開始
+            </button>
+          </section>
+        </details>
+
+        <details className="map-tool-details">
+          <summary>
+            <MapIcon size={15} />
+            施設起点区域
+          </summary>
+          <section className="panel-section">
+            <label>
+              結果名
+              <input value={facilityZoneName} onChange={(event) => setFacilityZoneName(event.target.value)} />
+            </label>
+            <label>
+              施設ポイントレイヤ
+              <select value={facilityZoneLayerId} onChange={(event) => setFacilityZoneLayerId(event.target.value)}>
+                <option value="">選択</option>
+                {pointLayers.map((layer) => (
+                  <option key={layer.id} value={layer.id}>
+                    {layer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="inline-fields">
+              <label>
+                外縁距離(m)
+                <input value={facilityZoneBufferMeters} onChange={(event) => setFacilityZoneBufferMeters(event.target.value)} inputMode="decimal" />
+              </label>
+              <label>
+                抽出距離(m)
+                <input value={facilityZoneDistanceMeters} onChange={(event) => setFacilityZoneDistanceMeters(event.target.value)} inputMode="decimal" />
+              </label>
+            </div>
+            <label>
+              対象
+              <select value={facilityZoneSourceType} onChange={(event) => setFacilityZoneSourceType(event.target.value as ZoneBusinessSourceType)}>
+                <option value="all">土地・建物</option>
+                <option value="land">土地</option>
+                <option value="building">建物</option>
+              </select>
+            </label>
+            <button className="command-button" type="button" onClick={onSubmitFacilityZone} disabled={!facilityZoneLayerId || creatingFacilityZone}>
+              {creatingFacilityZone ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+              生成開始
+            </button>
+          </section>
+        </details>
+
+        <details className="map-tool-details">
+          <summary>
+            <MapIcon size={15} />
+            外縁生成
+          </summary>
+          <section className="panel-section">
+            <label>
+              結果名
+              <input value={outerBoundaryName} onChange={(event) => setOuterBoundaryName(event.target.value)} />
+            </label>
+            <label>
+              ポリゴン1
+              <select value={outerTargetLayerId} onChange={(event) => setOuterTargetLayerId(event.target.value)}>
+                {polygonLayers.map((layer) => (
+                  <option key={layer.id} value={layer.id}>
+                    {layer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              区域指定レイヤ
+              <select value={outerBoundaryLayerId} onChange={(event) => setOuterBoundaryLayerId(event.target.value)}>
+                {boundaryCandidateLayers.map((layer) => (
+                  <option key={layer.id} value={layer.id}>
+                    {layer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              バッファ(m)
+              <input value={outerBoundaryBufferMeters} onChange={(event) => setOuterBoundaryBufferMeters(event.target.value)} inputMode="decimal" />
+            </label>
+            <button className="command-button" type="button" onClick={onSubmitOuterBoundary} disabled={!outerTargetLayerId || !outerBoundaryLayerId}>
+              <Play size={16} />
+              外縁生成開始
+            </button>
+          </section>
+        </details>
+
+        <section className="panel-section">
+          <h2>ジョブ</h2>
+          <JobList title="取込" jobs={importJobs} />
+          <JobList title="解析" jobs={analysisJobs} />
+        </section>
+      </div>
+    </aside>
+  );
+}
+
 function LandWorkspace({
   query,
   setQuery,
@@ -2718,6 +3914,7 @@ function LandWorkspace({
   saving,
   deleting,
   onRefresh,
+  onSearch,
   onSelect,
   onCreate,
   onCancelCreate,
@@ -2756,6 +3953,7 @@ function LandWorkspace({
   saving: boolean;
   deleting: boolean;
   onRefresh: () => void;
+  onSearch: () => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onCancelCreate: () => void;
@@ -2799,6 +3997,7 @@ function LandWorkspace({
         setQuery={setQuery}
         loading={loading}
         onRefresh={onRefresh}
+        onSearch={onSearch}
         onCreate={onCreate}
         filterContent={
           <BusinessFilterPanel
@@ -3018,6 +4217,7 @@ function BuildingWorkspace({
   saving,
   deleting,
   onRefresh,
+  onSearch,
   onSelect,
   onCreate,
   onCancelCreate,
@@ -3056,6 +4256,7 @@ function BuildingWorkspace({
   saving: boolean;
   deleting: boolean;
   onRefresh: () => void;
+  onSearch: () => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onCancelCreate: () => void;
@@ -3094,6 +4295,7 @@ function BuildingWorkspace({
         setQuery={setQuery}
         loading={loading}
         onRefresh={onRefresh}
+        onSearch={onSearch}
         onCreate={onCreate}
         filterContent={
           <BusinessFilterPanel
@@ -3329,6 +4531,7 @@ function PartyWorkspace({
   saving,
   deleting,
   onRefresh,
+  onSearch,
   onSelect,
   onCreate,
   onCancelCreate,
@@ -3361,6 +4564,7 @@ function PartyWorkspace({
   saving: boolean;
   deleting: boolean;
   onRefresh: () => void;
+  onSearch: () => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onCancelCreate: () => void;
@@ -3388,6 +4592,7 @@ function PartyWorkspace({
         setQuery={setQuery}
         loading={loading}
         onRefresh={onRefresh}
+        onSearch={onSearch}
         onCreate={onCreate}
         filterContent={
           <BusinessFilterPanel
@@ -3519,6 +4724,7 @@ function ObjectSidebar({
   setQuery,
   loading,
   onRefresh,
+  onSearch,
   onCreate,
   filterContent,
   selectedProject,
@@ -3531,6 +4737,7 @@ function ObjectSidebar({
   setQuery: (value: string) => void;
   loading: boolean;
   onRefresh: () => void;
+  onSearch: () => void;
   onCreate: () => void;
   filterContent?: React.ReactNode;
   selectedProject: string;
@@ -3564,17 +4771,29 @@ function ObjectSidebar({
           ))}
         </select>
       </label>
-      <label className="search-field">
-        キーワード検索
-        <span>
-          <Search size={15} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="ID、所在地、地番、名称、関係者名"
-          />
-        </span>
-      </label>
+      <form
+        className="sidebar-search-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSearch();
+        }}
+      >
+        <label className="search-field">
+          キーワード検索
+          <span>
+            <Search size={15} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="ID、所在地、地番、名称、関係者名"
+            />
+          </span>
+        </label>
+        <button className="command-button sidebar-search-button" type="submit" disabled={loading}>
+          {loading ? <Loader2 className="spin" size={15} /> : <Search size={15} />}
+          検索
+        </button>
+      </form>
       {filterContent}
       <div className="object-list">{children}</div>
     </aside>
@@ -4070,6 +5289,7 @@ function addMapLayers(map: MapLibreMap, layer: Layer, color: string): string[] {
   const sourceLayer = layer.tileSourceId;
   const source = layer.id;
   const geometryType = layer.geometryType.toUpperCase();
+  const isZone = layer.layerRole === "zone";
   const ids: string[] = [];
 
   if (geometryType.includes("POLYGON") || geometryType === "GEOMETRY") {
@@ -4081,7 +5301,7 @@ function addMapLayers(map: MapLibreMap, layer: Layer, color: string): string[] {
       source,
       "source-layer": sourceLayer,
       filter: ["==", "$type", "Polygon"],
-      paint: { "fill-color": color, "fill-opacity": 0.32 }
+      paint: { "fill-color": isZone ? "#38bdf8" : color, "fill-opacity": isZone ? 0.18 : 0.32 }
     } as maplibregl.FillLayerSpecification);
     map.addLayer({
       id: outlineId,
@@ -4089,7 +5309,7 @@ function addMapLayers(map: MapLibreMap, layer: Layer, color: string): string[] {
       source,
       "source-layer": sourceLayer,
       filter: ["==", "$type", "Polygon"],
-      paint: { "line-color": color, "line-width": 1.2 }
+      paint: { "line-color": isZone ? "#0369a1" : color, "line-width": isZone ? 2.2 : 1.2 }
     } as maplibregl.LineLayerSpecification);
     ids.push(fillId, outlineId);
   }
@@ -4130,9 +5350,16 @@ function addMapLayers(map: MapLibreMap, layer: Layer, color: string): string[] {
 
 function syncConditionSearchHighlight(map: MapLibreMap, results: FeatureSearchResult[]) {
   const sourceId = "condition-search-highlight";
+  const markerSourceId = `${sourceId}-markers`;
   const emptyCollection = { type: "FeatureCollection", features: [] } as any;
   if (!map.getSource(sourceId)) {
     map.addSource(sourceId, {
+      type: "geojson",
+      data: emptyCollection
+    });
+  }
+  if (!map.getSource(markerSourceId)) {
+    map.addSource(markerSourceId, {
       type: "geojson",
       data: emptyCollection
     });
@@ -4143,15 +5370,30 @@ function syncConditionSearchHighlight(map: MapLibreMap, results: FeatureSearchRe
       type: "fill",
       source: sourceId,
       filter: ["==", "$type", "Polygon"],
-      paint: { "fill-color": "#facc15", "fill-opacity": 0.42 }
+      paint: { "fill-color": "#facc15", "fill-opacity": 0.5 }
     } as maplibregl.FillLayerSpecification);
+  }
+  if (!map.getLayer(`${sourceId}-line-halo`)) {
+    map.addLayer({
+      id: `${sourceId}-line-halo`,
+      type: "line",
+      source: sourceId,
+      paint: {
+        "line-color": "#ffffff",
+        "line-opacity": 0.95,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 7, 7, 12, 9, 16, 12]
+      }
+    } as maplibregl.LineLayerSpecification);
   }
   if (!map.getLayer(`${sourceId}-line`)) {
     map.addLayer({
       id: `${sourceId}-line`,
       type: "line",
       source: sourceId,
-      paint: { "line-color": "#e11d48", "line-width": 3 }
+      paint: {
+        "line-color": "#e11d48",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 7, 4, 12, 6, 16, 8]
+      }
     } as maplibregl.LineLayerSpecification);
   }
   if (!map.getLayer(`${sourceId}-point`)) {
@@ -4168,19 +5410,67 @@ function syncConditionSearchHighlight(map: MapLibreMap, results: FeatureSearchRe
       }
     } as maplibregl.CircleLayerSpecification);
   }
+  if (!map.getLayer(`${markerSourceId}-label`)) {
+    map.addLayer({
+      id: `${markerSourceId}-label`,
+      type: "symbol",
+      source: markerSourceId,
+      layout: {
+        "text-field": ["get", "label"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 7, 13, 12, 15, 16, 17],
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      paint: {
+        "text-color": "#e11d48",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2.5
+      }
+    } as maplibregl.SymbolLayerSpecification);
+  }
 
   const features = results
     .filter((result) => result.geometry)
-    .map((result) => ({
+    .map((result, index) => ({
       type: "Feature",
       geometry: result.geometry,
       properties: {
         layerId: result.layerId,
-        featureId: result.featureId
+        featureId: result.featureId,
+        label: String(index + 1)
       }
     }));
+  const markerFeatures = results
+    .map((result, index) => {
+      const center = geoJsonGeometryCenter(result.geometry);
+      if (!center) return null;
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: center
+        },
+        properties: {
+          layerId: result.layerId,
+          featureId: result.featureId,
+          label: String(index + 1)
+        }
+      };
+    })
+    .filter((feature): feature is NonNullable<typeof feature> => Boolean(feature));
   const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
   source?.setData({ type: "FeatureCollection", features } as any);
+  const markerSource = map.getSource(markerSourceId) as maplibregl.GeoJSONSource | undefined;
+  markerSource?.setData({ type: "FeatureCollection", features: markerFeatures } as any);
+  [
+    `${sourceId}-fill`,
+    `${sourceId}-line-halo`,
+    `${sourceId}-line`,
+    `${sourceId}-point`,
+    `${markerSourceId}-label`
+  ].forEach((layerId) => {
+    if (map.getLayer(layerId)) map.moveLayer(layerId);
+  });
 }
 
 function toAttributePayload(condition: AttributeConditionDraft) {
@@ -4413,6 +5703,193 @@ function gisLinkSummary(layerId?: string | null, featureId?: string | null): str
   return layerId && featureId ? "あり" : "";
 }
 
+function zoneLayerSummary(layers: Layer[], layerId?: string | null, featureId?: string | null): string {
+  if (!layerId || !featureId) return "";
+  const layer = layers.find((item) => item.id === layerId);
+  return `${layer?.name ?? "区域レイヤ"} · ID ${featureId}`;
+}
+
+function zoneLayerIdOf(zone: Zone): string {
+  return zone.zoneLayerId ?? zone.sourceLayerId ?? "";
+}
+
+function zoneFeatureIdOf(zone: Zone): string {
+  return zone.zoneFeatureId ?? zone.sourceFeatureId ?? "";
+}
+
+async function buildBusinessMapTargets({
+  tab,
+  zones,
+  lands,
+  buildings,
+  parties,
+  layerById
+}: BusinessMapTargetContext): Promise<BusinessMapTarget[]> {
+  if (tab === "zone") {
+    const includeContained = zones.length === 1;
+    const groups = await Promise.all(zones.map((zone) => zoneToBusinessMapTargets(zone, layerById, includeContained)));
+    return groups.flat();
+  }
+  if (tab === "lands") {
+    return lands.flatMap((land) => landToBusinessMapTarget(land, layerById) ?? []);
+  }
+  if (tab === "buildings") {
+    return buildings.flatMap((building) => buildingToBusinessMapTarget(building, layerById) ?? []);
+  }
+  return partyBusinessMapTargets(parties, lands, buildings, layerById);
+}
+
+async function zoneToBusinessMapTargets(zone: Zone, layerById: Map<string, Layer>, includeContained: boolean): Promise<BusinessMapTarget[]> {
+  const zoneLayerId = zoneLayerIdOf(zone);
+  const zoneFeatureId = zoneFeatureIdOf(zone);
+  if (!zoneLayerId || !zoneFeatureId) return [];
+  const targets: BusinessMapTarget[] = [{
+    layerId: zoneLayerId,
+    layerName: sourceLayerName(layerById, zoneLayerId, "区域"),
+    featureId: zoneFeatureId,
+    matchSummary: `区域 ${zone.id} · ${zone.name}`,
+    businessLinks: {
+      lands: zone.lands ?? [],
+      buildings: zone.buildings ?? []
+    },
+    matchedBusinessLinks: emptyBusinessLinks
+  }];
+  if (!includeContained) return targets;
+
+  const landTargets = await Promise.all(
+    (zone.lands ?? []).map(async (link) => {
+      const land = await getLandForMap(link.id);
+      return land ? landToBusinessMapTarget(land, layerById, "区域内の土地", { lands: [link], buildings: [] }) : null;
+    })
+  );
+  const buildingTargets = await Promise.all(
+    (zone.buildings ?? []).map(async (link) => {
+      const building = await getBuildingForMap(link.id);
+      return building ? buildingToBusinessMapTarget(building, layerById, "区域内の建物", { lands: [], buildings: [link] }) : null;
+    })
+  );
+  return [...targets, ...landTargets, ...buildingTargets].filter((target): target is BusinessMapTarget => Boolean(target));
+}
+
+function landToBusinessMapTarget(
+  land: Land,
+  layerById: Map<string, Layer>,
+  matchSummary = `土地 ${land.id} · ${landMapLabel(land)}`,
+  matchedBusinessLinks?: BusinessLinks
+): BusinessMapTarget | null {
+  if (!land.sourceLayerId || !land.sourceFeatureId) return null;
+  const landLink = { id: land.id, label: landMapLabel(land) };
+  return {
+    layerId: land.sourceLayerId,
+    layerName: sourceLayerName(layerById, land.sourceLayerId, "土地"),
+    featureId: land.sourceFeatureId,
+    matchSummary,
+    businessLinks: {
+      lands: [landLink],
+      buildings: land.buildings
+    },
+    matchedBusinessLinks: matchedBusinessLinks ?? {
+      lands: [landLink],
+      buildings: []
+    }
+  };
+}
+
+function buildingToBusinessMapTarget(
+  building: Building,
+  layerById: Map<string, Layer>,
+  matchSummary = `建物 ${building.id} · ${buildingMapLabel(building)}`,
+  matchedBusinessLinks?: BusinessLinks
+): BusinessMapTarget | null {
+  if (!building.sourceLayerId || !building.sourceFeatureId) return null;
+  const buildingLink = { id: building.id, label: buildingMapLabel(building) };
+  return {
+    layerId: building.sourceLayerId,
+    layerName: sourceLayerName(layerById, building.sourceLayerId, "建物"),
+    featureId: building.sourceFeatureId,
+    matchSummary,
+    businessLinks: {
+      lands: building.landId ? [{ id: building.landId, label: building.landLabel ?? building.landId }] : [],
+      buildings: [buildingLink]
+    },
+    matchedBusinessLinks: matchedBusinessLinks ?? {
+      lands: [],
+      buildings: [buildingLink]
+    }
+  };
+}
+
+async function partyBusinessMapTargets(
+  parties: Party[],
+  lands: Land[],
+  buildings: Building[],
+  layerById: Map<string, Layer>
+): Promise<BusinessMapTarget[]> {
+  const landById = new Map(lands.map((land) => [land.id, land]));
+  const buildingById = new Map(buildings.map((building) => [building.id, building]));
+  const relationships = parties
+    .flatMap((party) => party.relationships.map((relationship) => ({ party, relationship })))
+    .slice(0, businessMapHighlightLimit * 2);
+  const targets = await Promise.all(
+    relationships.map(async ({ party, relationship }) => {
+      const matchSummary = `${party.name} · ${relationship.relationType}`;
+      if (relationship.targetType === "land") {
+        const land = landById.get(relationship.targetId) ?? (await getLandForMap(relationship.targetId));
+        if (!land) return null;
+        return landToBusinessMapTarget(land, layerById, matchSummary, {
+          lands: [{ id: land.id, label: relationship.targetLabel ?? landMapLabel(land) }],
+          buildings: []
+        });
+      }
+      const building = buildingById.get(relationship.targetId) ?? (await getBuildingForMap(relationship.targetId));
+      if (!building) return null;
+      return buildingToBusinessMapTarget(building, layerById, matchSummary, {
+        lands: [],
+        buildings: [{ id: building.id, label: relationship.targetLabel ?? buildingMapLabel(building) }]
+      });
+    })
+  );
+  return targets.filter((target): target is BusinessMapTarget => Boolean(target));
+}
+
+async function getLandForMap(id: string): Promise<Land | null> {
+  try {
+    return await getLand(id);
+  } catch {
+    return null;
+  }
+}
+
+async function getBuildingForMap(id: string): Promise<Building | null> {
+  try {
+    return await getBuilding(id);
+  } catch {
+    return null;
+  }
+}
+
+function uniqueBusinessMapTargets(targets: BusinessMapTarget[]): BusinessMapTarget[] {
+  const seen = new Set<string>();
+  return targets.filter((target) => {
+    const key = `${target.layerId}:${target.featureId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function sourceLayerName(layerById: Map<string, Layer>, layerId: string, fallback: string): string {
+  return layerById.get(layerId)?.name ?? fallback;
+}
+
+function landMapLabel(land: Land): string {
+  return [land.lotNumber, land.address].filter(Boolean).join(" · ") || land.id;
+}
+
+function buildingMapLabel(building: Building): string {
+  return building.name || building.houseNumber || building.buildingLocation || building.id;
+}
+
 function featureResultSummary(result: FeatureSearchResult): string {
   const entries = Object.entries(result.properties)
     .filter(([, value]) => value !== null && value !== undefined && formatValue(value) !== "")
@@ -4503,6 +5980,32 @@ function isPolygonLayer(layer: Layer): boolean {
   return layer.geometryType.toUpperCase().includes("POLYGON");
 }
 
+function isZoneLayer(layer: Layer): boolean {
+  return layer.layerRole === "zone";
+}
+
+function zoneLayerOptions(layers: Layer[]): Layer[] {
+  const zoneLayers = layers.filter(isZoneLayer);
+  return zoneLayers.length ? zoneLayers : layers.filter(isZoneSourceLayer);
+}
+
+function isZoneSourceLayer(layer: Layer): boolean {
+  const geometryType = layer.geometryType.toUpperCase();
+  return geometryType.includes("POLYGON") || geometryType === "GEOMETRY";
+}
+
+function canUseSelectedFeatureAsZoneFeature(feature: Feature, layer: Layer): boolean {
+  return isZoneLayer(layer) && isPolygonGeometry(feature.geometry);
+}
+
+function isPointLayer(layer: Layer): boolean {
+  return layer.geometryType.toUpperCase().includes("POINT");
+}
+
+function isPolygonGeometry(geometry: unknown): boolean {
+  return isRecord(geometry) && typeof geometry.type === "string" && geometry.type.toUpperCase().includes("POLYGON");
+}
+
 function isLineLayer(layer: Layer): boolean {
   return layer.geometryType.toUpperCase().includes("LINE");
 }
@@ -4525,6 +6028,36 @@ function focusGeometry(map: MapLibreMap | null, geometry: unknown) {
     return;
   }
   map.fitBounds([southWest, northEast], { padding: 72, duration: 500, maxZoom: 17 });
+}
+
+function focusFeatureResults(map: MapLibreMap | null, results: FeatureSearchResult[]) {
+  if (!map) return;
+  const bounds: GeometryBounds = {
+    minLng: Number.POSITIVE_INFINITY,
+    minLat: Number.POSITIVE_INFINITY,
+    maxLng: Number.NEGATIVE_INFINITY,
+    maxLat: Number.NEGATIVE_INFINITY
+  };
+  for (const result of results) {
+    const geometryBounds = geoJsonGeometryBounds(result.geometry);
+    if (!geometryBounds) continue;
+    extendBounds(bounds, geometryBounds.minLng, geometryBounds.minLat);
+    extendBounds(bounds, geometryBounds.maxLng, geometryBounds.maxLat);
+  }
+  if (!Number.isFinite(bounds.minLng) || !Number.isFinite(bounds.minLat)) return;
+  const southWest: [number, number] = [bounds.minLng, bounds.minLat];
+  const northEast: [number, number] = [bounds.maxLng, bounds.maxLat];
+  if (bounds.minLng === bounds.maxLng && bounds.minLat === bounds.maxLat) {
+    map.flyTo({ center: southWest, zoom: Math.max(map.getZoom(), 16), duration: 500 });
+    return;
+  }
+  map.fitBounds([southWest, northEast], { padding: 72, duration: 500, maxZoom: 17 });
+}
+
+function geoJsonGeometryCenter(geometry: unknown): [number, number] | null {
+  const bounds = geoJsonGeometryBounds(geometry);
+  if (!bounds) return null;
+  return [(bounds.minLng + bounds.maxLng) / 2, (bounds.minLat + bounds.maxLat) / 2];
 }
 
 function geoJsonGeometryBounds(geometry: unknown): GeometryBounds | null {
@@ -4578,6 +6111,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseRoute(pathname: string): RouteSelection {
   const [segment, rawId] = pathname.split("/").filter(Boolean);
   const id = rawId ? decodeURIComponent(rawId) : null;
+  if (segment === "zones") return { tab: "zone", id };
   if (segment === "lands") return { tab: "lands", id };
   if (segment === "buildings") return { tab: "buildings", id };
   if (segment === "parties") return { tab: "parties", id };
@@ -4585,10 +6119,23 @@ function parseRoute(pathname: string): RouteSelection {
 }
 
 function tabPath(tab: BusinessTab): string {
+  if (tab === "zone") return "/zones";
   if (tab === "lands") return "/lands";
   if (tab === "buildings") return "/buildings";
   if (tab === "parties") return "/parties";
-  return "/";
+  return "/zones";
+}
+
+function emptyZoneDraft(): ZoneDraft {
+  return {
+    id: "",
+    name: "",
+    zoneType: "",
+    status: "",
+    memo: "",
+    zoneLayerId: "",
+    zoneFeatureId: ""
+  };
 }
 
 function emptyLandDraft(): LandDraft {
@@ -4651,6 +6198,32 @@ function newBuildingDraft(): BuildingDraft {
 
 function newPartyDraft(): PartyDraft {
   return { ...emptyPartyDraft(), partyType: "法人" };
+}
+
+function newZoneDraft(selectedFeature?: Feature | null, selectedFeatureLayer?: Layer | null, fallbackLayer?: Layer): ZoneDraft {
+  const useSelectedFeature = Boolean(
+    selectedFeature && selectedFeatureLayer && canUseSelectedFeatureAsZoneFeature(selectedFeature, selectedFeatureLayer)
+  );
+  const zoneLayerId = useSelectedFeature && selectedFeatureLayer ? selectedFeatureLayer.id : fallbackLayer?.id ?? "";
+  const zoneFeatureId = useSelectedFeature && selectedFeature ? selectedFeature.featureId : "";
+  return {
+    ...emptyZoneDraft(),
+    status: "有効",
+    zoneLayerId,
+    zoneFeatureId
+  };
+}
+
+function toZoneDraft(zone: Zone): ZoneDraft {
+  return {
+    id: zone.id,
+    name: zone.name,
+    zoneType: zone.zoneType ?? "",
+    status: zone.status,
+    memo: zone.memo ?? "",
+    zoneLayerId: zoneLayerIdOf(zone),
+    zoneFeatureId: zoneFeatureIdOf(zone)
+  };
 }
 
 function toLandDraft(land: Land): LandDraft {

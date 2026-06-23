@@ -41,14 +41,31 @@ The same fresh seed also includes business-domain records for the condition-sear
 - Lands: `L-0001` to `L-0003`
 - Buildings: `B-0001` to `B-0002`
 - Parties and relationships for owner, manager, and sales-party filters, including `銀座開発株式会社`
+- Dense central Tokyo demo layers:
+  - `登記所備付地図 土地筆（都心サンプル）`
+  - `PLATEAU 建物（都心サンプル）`
+  - `都心業務区域v1`
+- Dense demo business records:
+  - Lands: `L-DENSE-001` to `L-DENSE-036`
+  - Buildings: `B-DENSE-001` to `B-DENSE-036`
+  - Zones: `Z-DENSE-001` to `Z-DENSE-004`, each containing multiple linked lands and buildings
 
 The GIS seed data is stored as PostGIS SQL dumps, not as the original source ZIP files. Source datasets:
 
 - 国土数値情報 地価公示データ L01 2023 東京都
 - 国土数値情報 用途地域データ A29 2019 東京都
 - e-Stat 国勢調査 2020 小地域（町丁・字等）境界 東京都
+- 法務省 登記所備付地図データ（G空間情報センターで公開）
+- PLATEAU 3D都市モデル 建築物モデル
 
 PostgreSQL entrypoint seed scripts run only when the `postgres-data` volume is created. If you need to recreate the bundled sample state from scratch, remove the existing Compose volume first.
+
+Open-data fetch settings for the dense Tokyo demo live under `tools/open-data`.
+The direct G空間情報センター download URLs are configuration values because they can change by release year and may require a logged-in session:
+
+```bash
+python3 tools/open-data/fetch_tokyo_core_open_data.py --cache-dir /tmp/tokyo-core-open-data
+```
 
 ## Import Workflow
 

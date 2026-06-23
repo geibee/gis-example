@@ -12,7 +12,9 @@ import type {
   Layer,
   Party,
   PartyRelationship,
-  Project
+  Project,
+  Zone,
+  ZoneLayerOperation
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
@@ -47,11 +49,13 @@ function businessFilterParams(filters?: BusinessObjectFilters): Record<string, s
   if (!filters) return {};
   return {
     status: filters.status,
+    zoneType: filters.zoneType,
     landUse: filters.landUse,
     buildingUse: filters.buildingUse,
     partyType: filters.partyType,
     relationType: filters.relationType,
     linkedOnly: filters.linkedOnly ? "true" : undefined,
+    zoneLayerId: filters.zoneLayerId,
     sourceLayerId: filters.sourceLayerId,
     bbox: filters.bbox,
     intersectsLayerId: filters.intersectsLayerId,
@@ -233,6 +237,65 @@ export function updateParty(id: string, body: unknown): Promise<Party> {
 
 export function deleteParty(id: string): Promise<void> {
   return requestVoid(`/api/parties/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function getZones(projectId?: string, q?: string, filters?: BusinessObjectFilters): Promise<Zone[]> {
+  return requestJson<Zone[]>(`/api/zones${queryString({ projectId, q, ...businessFilterParams(filters) })}`);
+}
+
+export function getZone(id: string): Promise<Zone> {
+  return requestJson<Zone>(`/api/zones/${encodeURIComponent(id)}`);
+}
+
+export function createZone(body: unknown): Promise<Zone> {
+  return requestJson<Zone>("/api/zones", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function updateZone(id: string, body: unknown): Promise<Zone> {
+  return requestJson<Zone>(`/api/zones/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function deleteZone(id: string): Promise<void> {
+  return requestVoid(`/api/zones/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function createZoneLayerFromImport(body: {
+  projectId?: string;
+  layerId: string;
+  zoneType?: string | null;
+  status?: string | null;
+  nameField?: string | null;
+}): Promise<ZoneLayerOperation> {
+  return requestJson<ZoneLayerOperation>("/api/zone-layers/from-import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function createZoneLayerFromFacilities(body: {
+  projectId?: string;
+  facilityLayerId: string;
+  name?: string | null;
+  bufferMeters?: number | null;
+  facilityDistanceMeters?: number | null;
+  sourceTypes?: Array<"land" | "building">;
+  zoneType?: string | null;
+  status?: string | null;
+}): Promise<ZoneLayerOperation> {
+  return requestJson<ZoneLayerOperation>("/api/zone-layers/from-facilities", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
 export function createPartyRelationship(body: unknown): Promise<PartyRelationship> {

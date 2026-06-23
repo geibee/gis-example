@@ -29,6 +29,7 @@ class LayerMeta:
     geometry_column: str
     geometry_type: str
     feature_id_column: str
+    layer_role: str
     attributes: set[str]
 
 
@@ -80,7 +81,7 @@ def claim_import_job(conn: psycopg.Connection) -> dict[str, Any] | None:
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
-            RETURNING id::text, project_id::text, filename, format, source_srid, upload_path
+            RETURNING id::text, project_id::text, filename, format, source_srid, upload_path, layer_role
             """
         ).fetchone()
     return row
@@ -123,7 +124,10 @@ def run_import_job(conn: psycopg.Connection, job: dict[str, Any]) -> None:
                 table_name=table_name,
                 source_srid=source_srid,
                 is_result=False,
+                layer_role=job.get("layer_role") or "generic",
             )
+            if (job.get("layer_role") or "generic") == "zone":
+                sync_zones_for_layer(conn, layer_id, job["project_id"], table_name)
             conn.execute(
                 """
                 UPDATE app.import_jobs
@@ -190,6 +194,7 @@ def insert_layer_metadata(
     table_name: str,
     source_srid: int | None,
     is_result: bool,
+    layer_role: str = "generic",
     result_set_id: str | None = None,
     source_layer_id: str | None = None,
 ) -> str:
@@ -199,9 +204,9 @@ def insert_layer_metadata(
         INSERT INTO app.layers (
             project_id, name, schema_name, table_name, geometry_column, geometry_type,
             source_srid, display_srid, feature_id_column, bbox_4326, row_count,
-            is_result, result_set_id, source_layer_id, tile_source_id
+            is_result, layer_role, result_set_id, source_layer_id, tile_source_id
         )
-        VALUES (%s::uuid, %s, 'gis_data', %s, 'geom', %s, %s, 3857, 'fid', %s::jsonb, %s, %s, %s::uuid, %s::uuid, %s)
+        VALUES (%s::uuid, %s, 'gis_data', %s, 'geom', %s, %s, 3857, 'fid', %s::jsonb, %s, %s, %s, %s::uuid, %s::uuid, %s)
         RETURNING id::text
         """,
         (
@@ -213,6 +218,7 @@ def insert_layer_metadata(
             json.dumps(stats["bbox"]) if stats["bbox"] is not None else None,
             stats["row_count"],
             is_result,
+            normalize_layer_role(layer_role),
             result_set_id,
             source_layer_id,
             table_name,
@@ -220,6 +226,51 @@ def insert_layer_metadata(
     ).fetchone()["id"]
     insert_layer_attributes(conn, layer_id, table_name)
     return layer_id
+
+
+def sync_zones_for_layer(conn: psycopg.Connection, layer_id: str, project_id: str, table_name: str) -> None:
+    columns = {
+        row["column_name"]
+        for row in conn.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'gis_data' AND table_name = %s
+            """,
+            (table_name,),
+        ).fetchall()
+    }
+    candidates = [column for column in ["name", "区域名", "title", "zone_name", "Name", "NAME"] if column in columns]
+    name_expr = ", ".join(f"NULLIF(t.{quote_ident(column)}::text, '')" for column in candidates) or "NULL"
+    table_ref = qtable("gis_data", table_name)
+    conn.execute(
+        f"""
+        INSERT INTO app.zones (
+            id, project_id, name, zone_type, status, memo,
+            zone_layer_id, zone_feature_id, source_layer_id, source_feature_id
+        )
+        SELECT
+            concat('Z-', replace(%s::text, '-', ''), '-', t.{quote_ident('fid')}::text) AS id,
+            %s::uuid AS project_id,
+            COALESCE({name_expr}, concat('区域 ', t.{quote_ident('fid')}::text)) AS name,
+            NULL::text AS zone_type,
+            '有効'::text AS status,
+            NULL::text AS memo,
+            %s::uuid AS zone_layer_id,
+            t.{quote_ident('fid')}::text AS zone_feature_id,
+            %s::uuid AS source_layer_id,
+            t.{quote_ident('fid')}::text AS source_feature_id
+        FROM {table_ref} AS t
+        WHERE t.{quote_ident('geom')} IS NOT NULL
+          AND GeometryType(t.{quote_ident('geom')}) ILIKE '%%POLYGON%%'
+        ON CONFLICT (zone_layer_id, zone_feature_id) DO UPDATE
+        SET name = EXCLUDED.name,
+            source_layer_id = EXCLUDED.source_layer_id,
+            source_feature_id = EXCLUDED.source_feature_id,
+            updated_at = now()
+        """,
+        (layer_id, project_id, layer_id, layer_id),
+    )
 
 
 def table_stats(conn: psycopg.Connection, table_name: str) -> dict[str, Any]:
@@ -922,7 +973,7 @@ def list_layers_for_project(conn: psycopg.Connection, project_id: str) -> list[L
         """
         SELECT id::text
         FROM app.layers
-        WHERE project_id = %s::uuid
+        WHERE project_id = %s::uuid AND layer_role <> 'zone'
         ORDER BY created_at
         """,
         (project_id,),
@@ -1075,7 +1126,7 @@ def load_layer(conn: psycopg.Connection, layer_id: str) -> LayerMeta:
     row = conn.execute(
         """
         SELECT id::text, project_id::text, name, schema_name, table_name,
-               geometry_column, geometry_type, feature_id_column
+               geometry_column, geometry_type, feature_id_column, layer_role
         FROM app.layers
         WHERE id = %s::uuid
         """,
@@ -1104,6 +1155,7 @@ def load_layer(conn: psycopg.Connection, layer_id: str) -> LayerMeta:
         geometry_column=row["geometry_column"],
         geometry_type=row["geometry_type"],
         feature_id_column=row["feature_id_column"],
+        layer_role=row["layer_role"],
         attributes=attrs,
     )
 
@@ -1175,6 +1227,13 @@ def quote_ident(value: str) -> str:
     if not value:
         raise ValueError("Identifier must not be empty")
     return '"' + value.replace('"', '""') + '"'
+
+
+def normalize_layer_role(value: str | None) -> str:
+    role = (value or "generic").strip().lower() or "generic"
+    if role not in {"generic", "zone"}:
+        raise ValueError("layerRole must be generic or zone")
+    return role
 
 
 if __name__ == "__main__":

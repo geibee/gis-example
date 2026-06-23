@@ -162,6 +162,55 @@ ON CONFLICT (id) DO UPDATE SET
     source_feature_id = EXCLUDED.source_feature_id,
     updated_at = now();
 
+INSERT INTO app.zones (
+    id,
+    project_id,
+    name,
+    zone_type,
+    status,
+    memo,
+    zone_layer_id,
+    zone_feature_id,
+    source_layer_id,
+    source_feature_id
+)
+VALUES
+    (
+        'Z-0001',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '丸の内重点確認区域',
+        '重点調査',
+        '有効',
+        '駅前再開発候補地を中心に確認',
+        'a6dbb70e-1999-578f-904d-8f5c68513085'::uuid,
+        '1',
+        'a6dbb70e-1999-578f-904d-8f5c68513085'::uuid,
+        '1'
+    ),
+    (
+        'Z-0002',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '銀座商業確認区域',
+        '商業調査',
+        '有効',
+        NULL,
+        'a6dbb70e-1999-578f-904d-8f5c68513085'::uuid,
+        '85',
+        'a6dbb70e-1999-578f-904d-8f5c68513085'::uuid,
+        '85'
+    )
+ON CONFLICT (id) DO UPDATE SET
+    project_id = EXCLUDED.project_id,
+    name = EXCLUDED.name,
+    zone_type = EXCLUDED.zone_type,
+    status = EXCLUDED.status,
+    memo = EXCLUDED.memo,
+    zone_layer_id = EXCLUDED.zone_layer_id,
+    zone_feature_id = EXCLUDED.zone_feature_id,
+    source_layer_id = EXCLUDED.source_layer_id,
+    source_feature_id = EXCLUDED.source_feature_id,
+    updated_at = now();
+
 INSERT INTO app.parties (
     id,
     project_id,

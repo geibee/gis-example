@@ -62,6 +62,16 @@ data class PartyListQuery(
     val targetType: String?
 )
 
+data class ZoneListQuery(
+    val projectId: String?,
+    val q: String?,
+    val status: String?,
+    val zoneType: String?,
+    val linkedOnly: Boolean,
+    val zoneLayerId: String?,
+    val sourceLayerId: String?
+)
+
 class Database(private val dataSource: HikariDataSource) : AutoCloseable {
     companion object {
         private val json = Json {
@@ -98,6 +108,17 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         val schemaName: String,
         val tableName: String,
         val resultSetId: String?
+    )
+
+    private data class ZoneLayerSyncCounts(
+        val created: Int,
+        val updated: Int
+    )
+
+    private data class LayerStats(
+        val rowCount: Long,
+        val geometryType: String,
+        val bbox4326: String?
     )
 
     override fun close() {
@@ -164,6 +185,22 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                         updated_at timestamptz NOT NULL DEFAULT now()
                     );
 
+                    CREATE TABLE IF NOT EXISTS app.zones (
+                        id text PRIMARY KEY,
+                        project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
+                        name text NOT NULL,
+                        zone_type text,
+                        status text NOT NULL DEFAULT '有効',
+                        memo text,
+                        zone_layer_id uuid NOT NULL REFERENCES app.layers(id) ON DELETE RESTRICT,
+                        zone_feature_id text NOT NULL,
+                        source_layer_id uuid NOT NULL REFERENCES app.layers(id) ON DELETE RESTRICT,
+                        source_feature_id text NOT NULL,
+                        created_at timestamptz NOT NULL DEFAULT now(),
+                        updated_at timestamptz NOT NULL DEFAULT now(),
+                        UNIQUE (zone_layer_id, zone_feature_id)
+                    );
+
                     CREATE TABLE IF NOT EXISTS app.party_relationships (
                         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                         project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
@@ -187,8 +224,23 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                         ADD COLUMN IF NOT EXISTS result_set_id uuid REFERENCES app.result_sets(id) ON DELETE SET NULL;
                     ALTER TABLE app.layers
                         ADD COLUMN IF NOT EXISTS source_layer_id uuid REFERENCES app.layers(id) ON DELETE SET NULL;
+                    ALTER TABLE app.layers
+                        ADD COLUMN IF NOT EXISTS layer_role text NOT NULL DEFAULT 'generic';
+                    ALTER TABLE app.import_jobs
+                        ADD COLUMN IF NOT EXISTS layer_role text NOT NULL DEFAULT 'generic';
                     ALTER TABLE app.analysis_jobs
                         ADD COLUMN IF NOT EXISTS result_set_id uuid REFERENCES app.result_sets(id) ON DELETE SET NULL;
+                    ALTER TABLE app.zones
+                        ADD COLUMN IF NOT EXISTS zone_layer_id uuid REFERENCES app.layers(id) ON DELETE RESTRICT;
+                    ALTER TABLE app.zones
+                        ADD COLUMN IF NOT EXISTS zone_feature_id text;
+                    UPDATE app.zones
+                    SET zone_layer_id = COALESCE(zone_layer_id, source_layer_id),
+                        zone_feature_id = COALESCE(zone_feature_id, source_feature_id)
+                    WHERE zone_layer_id IS NULL OR zone_feature_id IS NULL;
+                    ALTER TABLE app.zones
+                        ALTER COLUMN zone_layer_id SET NOT NULL,
+                        ALTER COLUMN zone_feature_id SET NOT NULL;
                     ALTER TABLE app.lands
                         ADD COLUMN IF NOT EXISTS registered_owner text,
                         ADD COLUMN IF NOT EXISTS right_type text,
@@ -207,11 +259,16 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                     CREATE INDEX IF NOT EXISTS buildings_land_idx ON app.buildings(land_id);
                     CREATE INDEX IF NOT EXISTS buildings_source_feature_idx ON app.buildings(source_layer_id, source_feature_id);
                     CREATE INDEX IF NOT EXISTS parties_project_search_idx ON app.parties(project_id, id);
+                    CREATE INDEX IF NOT EXISTS zones_project_search_idx ON app.zones(project_id, id);
+                    CREATE INDEX IF NOT EXISTS zones_source_feature_idx ON app.zones(source_layer_id, source_feature_id);
+                    CREATE UNIQUE INDEX IF NOT EXISTS zones_zone_feature_unique_idx ON app.zones(zone_layer_id, zone_feature_id);
+                    CREATE INDEX IF NOT EXISTS zones_zone_feature_idx ON app.zones(zone_layer_id, zone_feature_id);
                     CREATE INDEX IF NOT EXISTS party_relationships_party_idx ON app.party_relationships(party_id);
                     CREATE INDEX IF NOT EXISTS party_relationships_target_idx ON app.party_relationships(target_type, target_id);
                     CREATE INDEX IF NOT EXISTS result_sets_project_created_idx ON app.result_sets(project_id, created_at);
                     CREATE INDEX IF NOT EXISTS layers_result_set_idx ON app.layers(result_set_id, created_at);
                     CREATE INDEX IF NOT EXISTS layers_source_layer_idx ON app.layers(source_layer_id);
+                    CREATE INDEX IF NOT EXISTS layers_role_idx ON app.layers(layer_role, project_id);
                     CREATE INDEX IF NOT EXISTS lands_search_text_trgm_idx ON app.lands USING gin (
                         lower(
                             coalesce(id, '') || ' ' ||
@@ -246,6 +303,15 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                             coalesce(party_type, '') || ' ' ||
                             coalesce(contact, '') || ' ' ||
                             coalesce(address, '') || ' ' ||
+                            coalesce(memo, '')
+                        ) gin_trgm_ops
+                    );
+                    CREATE INDEX IF NOT EXISTS zones_search_text_trgm_idx ON app.zones USING gin (
+                        lower(
+                            coalesce(id, '') || ' ' ||
+                            coalesce(name, '') || ' ' ||
+                            coalesce(zone_type, '') || ' ' ||
+                            coalesce(status, '') || ' ' ||
                             coalesce(memo, '')
                         ) gin_trgm_ops
                     );
@@ -313,14 +379,16 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         filename: String,
         format: String,
         sourceSrid: Int?,
-        uploadPath: String
+        uploadPath: String,
+        layerRole: String = "generic"
     ): ImportJobDto {
         val resolvedProjectId = projectId ?: defaultProjectId()
+        val normalizedLayerRole = normalizeLayerRole(layerRole)
         return dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
-                INSERT INTO app.import_jobs (project_id, filename, format, source_srid, upload_path)
-                VALUES (?::uuid, ?, ?, ?, ?)
+                INSERT INTO app.import_jobs (project_id, filename, format, source_srid, upload_path, layer_role)
+                VALUES (?::uuid, ?, ?, ?, ?, ?)
                 RETURNING id::text
                 """.trimIndent()
             ).use { stmt ->
@@ -329,6 +397,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                 stmt.setString(3, format)
                 if (sourceSrid == null) stmt.setNull(4, java.sql.Types.INTEGER) else stmt.setInt(4, sourceSrid)
                 stmt.setString(5, uploadPath)
+                stmt.setString(6, normalizedLayerRole)
                 stmt.executeQuery().use { rs ->
                     rs.next()
                     getImportJob(rs.getString(1)) ?: error("Created import job disappeared")
@@ -341,7 +410,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         connection.prepareStatement(
             """
             SELECT id::text, project_id::text, filename, format, source_srid, status,
-                   error_message, layer_id::text, created_at::text, started_at::text, finished_at::text
+                   error_message, layer_id::text, layer_role, created_at::text, started_at::text, finished_at::text
             FROM app.import_jobs
             WHERE id = ?::uuid
             """.trimIndent()
@@ -358,7 +427,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             """
             SELECT l.id::text, l.project_id::text, l.name, l.schema_name, l.table_name, l.geometry_column,
                    l.geometry_type, l.source_srid, l.display_srid, l.feature_id_column,
-                   l.bbox_4326::text, l.row_count, l.is_result, l.result_set_id::text, rs.name AS result_set_name,
+                   l.bbox_4326::text, l.row_count, l.is_result, l.layer_role, l.result_set_id::text, rs.name AS result_set_name,
                    l.source_layer_id::text, l.tile_source_id, l.created_at::text
             FROM app.layers AS l
             LEFT JOIN app.result_sets AS rs ON rs.id = l.result_set_id
@@ -368,7 +437,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             """
             SELECT l.id::text, l.project_id::text, l.name, l.schema_name, l.table_name, l.geometry_column,
                    l.geometry_type, l.source_srid, l.display_srid, l.feature_id_column,
-                   l.bbox_4326::text, l.row_count, l.is_result, l.result_set_id::text, rs.name AS result_set_name,
+                   l.bbox_4326::text, l.row_count, l.is_result, l.layer_role, l.result_set_id::text, rs.name AS result_set_name,
                    l.source_layer_id::text, l.tile_source_id, l.created_at::text
             FROM app.layers AS l
             LEFT JOIN app.result_sets AS rs ON rs.id = l.result_set_id
@@ -392,7 +461,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             """
             SELECT l.id::text, l.project_id::text, l.name, l.schema_name, l.table_name, l.geometry_column,
                    l.geometry_type, l.source_srid, l.display_srid, l.feature_id_column,
-                   l.bbox_4326::text, l.row_count, l.is_result, l.result_set_id::text, rs.name AS result_set_name,
+                   l.bbox_4326::text, l.row_count, l.is_result, l.layer_role, l.result_set_id::text, rs.name AS result_set_name,
                    l.source_layer_id::text, l.tile_source_id, l.created_at::text
             FROM app.layers AS l
             LEFT JOIN app.result_sets AS rs ON rs.id = l.result_set_id
@@ -554,6 +623,11 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             """.trimIndent()
         ).use { stmt ->
             stmt.setString(1, layer.id)
+            stmt.executeUpdate()
+        }
+        connection.prepareStatement("DELETE FROM app.zones WHERE zone_layer_id = ?::uuid OR source_layer_id = ?::uuid").use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.setString(2, layer.id)
             stmt.executeUpdate()
         }
         connection.prepareStatement("UPDATE app.layers SET source_layer_id = NULL WHERE source_layer_id = ?::uuid").use { stmt ->
@@ -1627,6 +1701,415 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     )
 
+    fun listZones(query: ZoneListQuery): List<ZoneDto> = dataSource.connection.use { connection ->
+        val filters = mutableListOf<String>()
+        val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+        val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
+        if (!query.projectId.isNullOrBlank()) {
+            filters.add("z.project_id = ?::uuid")
+            binders.add { stmt, index -> stmt.setString(index, query.projectId) }
+        }
+        if (textQuery != null) {
+            filters.add(
+                """
+                lower(
+                    coalesce(z.id, '') || ' ' ||
+                    coalesce(z.name, '') || ' ' ||
+                    coalesce(z.zone_type, '') || ' ' ||
+                    coalesce(z.status, '') || ' ' ||
+                    coalesce(z.memo, '')
+                ) LIKE lower(?)
+                """.trimIndent()
+            )
+            binders.add { stmt, index -> stmt.setString(index, "%$textQuery%") }
+        }
+        query.status?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            filters.add("z.status ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+        }
+        query.zoneType?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            filters.add("z.zone_type ILIKE ?")
+            binders.add { stmt, index -> stmt.setString(index, "%$value%") }
+        }
+        val requestedZoneLayerId = query.zoneLayerId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: query.sourceLayerId?.trim()?.takeIf { it.isNotEmpty() }
+        requestedZoneLayerId?.let { value ->
+            filters.add("z.zone_layer_id = ?::uuid")
+            binders.add { stmt, index -> stmt.setString(index, value) }
+        }
+        if (query.linkedOnly) {
+            filters.add("z.zone_layer_id IS NOT NULL AND z.zone_feature_id IS NOT NULL")
+        }
+        val sql = """
+            SELECT z.id, z.project_id::text, z.name, z.zone_type, z.status, z.memo,
+                   z.zone_layer_id::text, z.zone_feature_id,
+                   z.source_layer_id::text, z.source_feature_id
+            FROM app.zones AS z
+            ${whereClause(filters)}
+            ORDER BY z.id
+        """.trimIndent()
+        connection.prepareStatement(sql).use { stmt ->
+            bindPatchValues(stmt, binders)
+            stmt.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        val zone = rs.toZoneDto()
+                        val contained = listZoneBusinessLinks(zone)
+                        add(
+                            zone.copy(
+                                landCount = contained.lands.size,
+                                buildingCount = contained.buildings.size
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun getZone(id: String): ZoneDto? = dataSource.connection.use { connection ->
+        val zone = connection.prepareStatement(
+            """
+            SELECT id, project_id::text, name, zone_type, status, memo,
+                   zone_layer_id::text, zone_feature_id,
+                   source_layer_id::text, source_feature_id
+            FROM app.zones
+            WHERE id = ?
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs ->
+                if (!rs.next()) null else rs.toZoneDto()
+            }
+        } ?: return@use null
+        val contained = listZoneBusinessLinks(zone)
+        zone.copy(
+            landCount = contained.lands.size,
+            buildingCount = contained.buildings.size,
+            lands = contained.lands,
+            buildings = contained.buildings
+        )
+    }
+
+    fun createZone(request: JsonObject): ZoneDto = try {
+        val id = readRequiredText(request, "id")
+        val projectId = readRequiredUuid(request, "projectId")
+        val name = readRequiredText(request, "name")
+        val zoneType = readOptionalText(request, "zoneType")
+        val status = readOptionalText(request, "status") ?: "有効"
+        val memo = readOptionalText(request, "memo")
+        val zoneLayerId = readOptionalUuid(request, "zoneLayerId") ?: readRequiredUuid(request, "sourceLayerId")
+        val zoneFeatureId = readOptionalText(request, "zoneFeatureId") ?: readRequiredText(request, "sourceFeatureId")
+        validateZoneFeature(projectId, zoneLayerId, zoneFeatureId)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO app.zones (
+                    id, project_id, name, zone_type, status, memo,
+                    zone_layer_id, zone_feature_id, source_layer_id, source_feature_id
+                )
+                VALUES (?, ?::uuid, ?, ?, ?, ?, ?::uuid, ?, ?::uuid, ?)
+                RETURNING id
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, id)
+                stmt.setString(2, projectId)
+                stmt.setString(3, name)
+                setNullableString(stmt, 4, zoneType)
+                stmt.setString(5, status)
+                setNullableString(stmt, 6, memo)
+                stmt.setString(7, zoneLayerId)
+                stmt.setString(8, zoneFeatureId)
+                stmt.setString(9, zoneLayerId)
+                stmt.setString(10, zoneFeatureId)
+                stmt.executeQuery().use { rs ->
+                    rs.next()
+                    getZone(rs.getString("id")) ?: error("Created zone disappeared")
+                }
+            }
+        }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone create failed: ${exc.message ?: "invalid zone create"}")
+    }
+
+    fun updateZone(id: String, request: JsonObject): ZoneDto = try {
+        dataSource.connection.use { connection ->
+            val existing = getZone(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Zone not found")
+            val setters = mutableListOf<String>()
+            val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+            addTextPatch(request, "name", "name", setters, binders, required = true)
+            addTextPatch(request, "zoneType", "zone_type", setters, binders)
+            addTextPatch(request, "status", "status", setters, binders, required = true)
+            addTextPatch(request, "memo", "memo", setters, binders)
+            if (setters.isEmpty()) {
+                return@use existing
+            }
+
+            val updatedId = connection.prepareStatement(
+                """
+                UPDATE app.zones
+                SET ${setters.joinToString(", ")}, updated_at = now()
+                WHERE id = ?
+                RETURNING id
+                """.trimIndent()
+            ).use { stmt ->
+                bindPatchValues(stmt, binders)
+                stmt.setString(binders.size + 1, id)
+                stmt.executeQuery().use { rs ->
+                    if (!rs.next()) {
+                        throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Zone not found")
+                    }
+                    rs.getString("id")
+                }
+            }
+            getZone(updatedId) ?: error("Updated zone disappeared")
+        }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone update failed: ${exc.message ?: "invalid zone update"}")
+    }
+
+    fun deleteZone(id: String) {
+        dataSource.connection.use { connection ->
+            val deleted = connection.prepareStatement("DELETE FROM app.zones WHERE id = ?").use { stmt ->
+                stmt.setString(1, id)
+                stmt.executeUpdate()
+            }
+            if (deleted == 0) {
+                throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Zone not found")
+            }
+        }
+    }
+
+    fun createZoneLayerFromImport(request: ZoneLayerFromImportRequest): ZoneLayerOperationDto {
+        val requestedLayerId = request.layerId.trim().takeIf { it.isNotEmpty() }
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "layerId is required")
+        val layer = getLayer(requestedLayerId)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
+        val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() } ?: layer.projectId
+        if (layer.projectId != projectId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Layer does not belong to the selected project")
+        }
+        validateZoneLayerGeometry(layer)
+
+        return dataSource.connection.use { connection ->
+            val previousAutoCommit = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                connection.prepareStatement("UPDATE app.layers SET layer_role = 'zone' WHERE id = ?::uuid").use { stmt ->
+                    stmt.setString(1, layer.id)
+                    stmt.executeUpdate()
+                }
+                val counts = syncZonesForLayer(
+                    connection = connection,
+                    layer = layer.copy(layerRole = "zone"),
+                    zoneType = request.zoneType,
+                    status = request.status,
+                    nameField = request.nameField
+                )
+                connection.commit()
+                val updatedLayer = getLayer(layer.id) ?: error("Updated layer disappeared")
+                ZoneLayerOperationDto(
+                    layer = updatedLayer,
+                    zonesCreated = counts.created,
+                    zonesUpdated = counts.updated,
+                    zones = listZones(
+                        ZoneListQuery(
+                            projectId = projectId,
+                            q = null,
+                            status = null,
+                            zoneType = null,
+                            linkedOnly = false,
+                            zoneLayerId = updatedLayer.id,
+                            sourceLayerId = null
+                        )
+                    )
+                )
+            } catch (exc: ApiException) {
+                connection.rollback()
+                throw exc
+            } catch (exc: SQLException) {
+                connection.rollback()
+                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone layer conversion failed: ${exc.message ?: "invalid zone layer conversion"}")
+            } finally {
+                connection.autoCommit = previousAutoCommit
+            }
+        }
+    }
+
+    fun createZoneLayerFromFacilities(request: ZoneLayerFromFacilitiesRequest): ZoneLayerOperationDto {
+        val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() } ?: defaultProjectId()
+        if (!projectExists(projectId)) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Project does not exist")
+        }
+        val facilityLayer = getLayer(request.facilityLayerId)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "facilityLayerId not found")
+        if (facilityLayer.projectId != projectId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "facilityLayerId belongs to another project")
+        }
+        val facilityGeometryType = facilityLayer.geometryType.uppercase()
+        if (!facilityGeometryType.contains("POINT") && facilityGeometryType != "GEOMETRY") {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Facility layer must be a point layer")
+        }
+        val bufferMeters = request.bufferMeters ?: 1000.0
+        if (bufferMeters <= 0.0) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "bufferMeters must be positive")
+        }
+        val facilityDistanceMeters = request.facilityDistanceMeters?.takeIf { it > 0.0 }
+        val sourceTypes = request.sourceTypes
+            .mapNotNull { it.trim().lowercase().takeIf(String::isNotEmpty) }
+            .ifEmpty { listOf("land", "building") }
+            .distinct()
+        val invalidSourceTypes = sourceTypes.toSet() - setOf("land", "building")
+        if (invalidSourceTypes.isNotEmpty()) {
+            throw ApiException(
+                io.ktor.http.HttpStatusCode.BadRequest,
+                "Unsupported source type(s): ${invalidSourceTypes.joinToString(", ")}"
+            )
+        }
+        val sourceLayers = listLayers(projectId).filter { !it.isResult && it.layerRole != "zone" }
+        val businessGeoms = businessGeometrySql(
+            sourceLayers = sourceLayers,
+            projectId = projectId,
+            sourceTypes = sourceTypes.toSet(),
+            request = BusinessSpatialSearchRequest(
+                projectId = projectId,
+                targetLayerIds = emptyList(),
+                sourceTypes = sourceTypes
+            )
+        )
+        if (businessGeoms.sql.isBlank()) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "No linked land/building geometry exists")
+        }
+
+        val layerName = request.name?.trim()?.takeIf { it.isNotEmpty() } ?: "施設起点区域"
+        val tableName = generatedTableName("zone_facility")
+        return dataSource.connection.use { connection ->
+            val previousAutoCommit = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                createFacilityZoneTable(
+                    connection = connection,
+                    tableName = tableName,
+                    facilityLayer = facilityLayer,
+                    businessGeoms = businessGeoms,
+                    layerName = layerName,
+                    bufferMeters = bufferMeters,
+                    facilityDistanceMeters = facilityDistanceMeters,
+                    sourceTypes = sourceTypes
+                )
+                normalizeGeneratedTable(connection, "gis_data", tableName, "geom")
+                val count = connection.prepareStatement("SELECT count(*)::int FROM ${quoteIdent("gis_data")}.${quoteIdent(tableName)}").use { stmt ->
+                    stmt.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
+                if (count == 0) {
+                    throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Facility points did not match linked land/building geometry")
+                }
+                val layerId = insertLayerMetadata(
+                    connection = connection,
+                    projectId = projectId,
+                    name = layerName,
+                    tableName = tableName,
+                    sourceSrid = 3857,
+                    isResult = false,
+                    layerRole = "zone",
+                    sourceLayerId = facilityLayer.id
+                )
+                val layer = getLayerInConnection(connection, layerId)
+                    ?: throw ApiException(io.ktor.http.HttpStatusCode.InternalServerError, "Created layer disappeared")
+                val counts = syncZonesForLayer(
+                    connection = connection,
+                    layer = layer,
+                    zoneType = request.zoneType,
+                    status = request.status,
+                    nameField = "name"
+                )
+                connection.commit()
+                val createdLayer = getLayer(layerId) ?: error("Created layer disappeared")
+                ZoneLayerOperationDto(
+                    layer = createdLayer,
+                    zonesCreated = counts.created,
+                    zonesUpdated = counts.updated,
+                    zones = listZones(
+                        ZoneListQuery(
+                            projectId = projectId,
+                            q = null,
+                            status = null,
+                            zoneType = null,
+                            linkedOnly = false,
+                            zoneLayerId = layerId,
+                            sourceLayerId = null
+                        )
+                    )
+                )
+            } catch (exc: ApiException) {
+                connection.rollback()
+                throw exc
+            } catch (exc: SQLException) {
+                connection.rollback()
+                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Facility zone layer generation failed: ${exc.message ?: "invalid facility zone generation"}")
+            } finally {
+                connection.autoCommit = previousAutoCommit
+            }
+        }
+    }
+
+    private fun listZoneBusinessLinks(zone: ZoneDto): BusinessLinksDto {
+        val landLinks = listLands(
+            LandListQuery(
+                projectId = zone.projectId,
+                q = null,
+                status = null,
+                landUse = null,
+                partyType = null,
+                relationType = null,
+                linkedOnly = true,
+                sourceLayerId = null,
+                bbox = null,
+                intersectsLayerId = zone.zoneLayerId,
+                intersectsFeatureId = zone.zoneFeatureId,
+                distanceMeters = null
+            )
+        ).map { land -> BusinessEntityLinkDto(land.id, "${land.lotNumber} · ${land.address}") }
+        val buildingLinks = listBuildings(
+            BuildingListQuery(
+                projectId = zone.projectId,
+                q = null,
+                landId = null,
+                status = null,
+                buildingUse = null,
+                partyType = null,
+                relationType = null,
+                linkedOnly = true,
+                sourceLayerId = null,
+                bbox = null,
+                intersectsLayerId = zone.zoneLayerId,
+                intersectsFeatureId = zone.zoneFeatureId,
+                distanceMeters = null
+            )
+        ).map { building -> BusinessEntityLinkDto(building.id, building.name) }
+        return BusinessLinksDto(lands = landLinks, buildings = buildingLinks)
+    }
+
+    private fun validateZoneFeature(projectId: String, zoneLayerId: String, zoneFeatureId: String) {
+        val layer = getLayer(zoneLayerId)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "zoneLayerId not found")
+        if (layer.projectId != projectId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "zoneLayerId belongs to another project")
+        }
+        val layerGeometryType = layer.geometryType.uppercase()
+        if (!layerGeometryType.contains("POLYGON") && layerGeometryType != "GEOMETRY") {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone layer must be a polygon layer")
+        }
+        val feature = getFeature(zoneLayerId, zoneFeatureId)
+        val featureGeometryType = feature.geometry?.jsonObject?.get("type")?.jsonPrimitive?.contentOrNull?.uppercase()
+        if (featureGeometryType?.contains("POLYGON") != true) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone feature must be a polygon")
+        }
+    }
+
     fun listLands(query: LandListQuery): List<LandDto> = dataSource.connection.use { connection ->
         val filters = mutableListOf<String>()
         val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
@@ -2375,6 +2858,311 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         return layers.map { byLayer.getValue(it.id).copy(attributes = attrs.getValue(it.id)) }
     }
 
+    private fun getLayerInConnection(connection: Connection, id: String): LayerDto? =
+        connection.prepareStatement(
+            """
+            SELECT l.id::text, l.project_id::text, l.name, l.schema_name, l.table_name, l.geometry_column,
+                   l.geometry_type, l.source_srid, l.display_srid, l.feature_id_column,
+                   l.bbox_4326::text, l.row_count, l.is_result, l.layer_role, l.result_set_id::text, rs.name AS result_set_name,
+                   l.source_layer_id::text, l.tile_source_id, l.created_at::text
+            FROM app.layers AS l
+            LEFT JOIN app.result_sets AS rs ON rs.id = l.result_set_id
+            WHERE l.id = ?::uuid
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs ->
+                if (!rs.next()) null else withAttributes(connection, listOf(rs.toLayerDto(emptyList()))).single()
+            }
+        }
+
+    private fun validateZoneLayerGeometry(layer: LayerDto) {
+        val geometryType = layer.geometryType.uppercase()
+        if (!geometryType.contains("POLYGON") && geometryType != "GEOMETRY") {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone layer must be polygon geometry")
+        }
+    }
+
+    private fun syncZonesForLayer(
+        connection: Connection,
+        layer: LayerDto,
+        zoneType: String?,
+        status: String?,
+        nameField: String?
+    ): ZoneLayerSyncCounts {
+        validateZoneLayerGeometry(layer)
+        val tableRef = "${quoteIdent(layer.schemaName)}.${quoteIdent(layer.tableName)}"
+        val featureIdRef = "t.${quoteIdent(layer.featureIdColumn)}"
+        val geometryRef = "t.${quoteIdent(layer.geometryColumn)}"
+        val existingCount = connection.prepareStatement("SELECT count(*)::int FROM app.zones WHERE zone_layer_id = ?::uuid").use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
+        val nameExpression = zoneNameExpression(layer, nameField)
+        val normalizedStatus = status?.trim()?.takeIf { it.isNotEmpty() } ?: "有効"
+        val normalizedZoneType = zoneType?.trim()?.takeIf { it.isNotEmpty() }
+        val affected = connection.prepareStatement(
+            """
+            INSERT INTO app.zones (
+                id, project_id, name, zone_type, status, memo,
+                zone_layer_id, zone_feature_id, source_layer_id, source_feature_id
+            )
+            SELECT
+                concat('Z-', replace(?::text, '-', ''), '-', $featureIdRef::text) AS id,
+                ?::uuid AS project_id,
+                COALESCE($nameExpression, concat('区域 ', $featureIdRef::text)) AS name,
+                ? AS zone_type,
+                ? AS status,
+                NULL::text AS memo,
+                ?::uuid AS zone_layer_id,
+                $featureIdRef::text AS zone_feature_id,
+                ?::uuid AS source_layer_id,
+                $featureIdRef::text AS source_feature_id
+            FROM $tableRef AS t
+            WHERE $geometryRef IS NOT NULL
+              AND GeometryType($geometryRef) ILIKE '%POLYGON%'
+            ON CONFLICT (zone_layer_id, zone_feature_id) DO UPDATE
+            SET name = EXCLUDED.name,
+                zone_type = COALESCE(app.zones.zone_type, EXCLUDED.zone_type),
+                status = COALESCE(app.zones.status, EXCLUDED.status),
+                source_layer_id = EXCLUDED.source_layer_id,
+                source_feature_id = EXCLUDED.source_feature_id,
+                updated_at = now()
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.setString(2, layer.projectId)
+            setNullableString(stmt, 3, normalizedZoneType)
+            stmt.setString(4, normalizedStatus)
+            stmt.setString(5, layer.id)
+            stmt.setString(6, layer.id)
+            stmt.executeUpdate()
+        }
+        val nextCount = connection.prepareStatement("SELECT count(*)::int FROM app.zones WHERE zone_layer_id = ?::uuid").use { stmt ->
+            stmt.setString(1, layer.id)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
+        val created = (nextCount - existingCount).coerceAtLeast(0)
+        return ZoneLayerSyncCounts(created = created, updated = (affected - created).coerceAtLeast(0))
+    }
+
+    private fun zoneNameExpression(layer: LayerDto, requestedNameField: String?): String {
+        val attributeNames = layer.attributes.map { it.name }.toSet()
+        val requested = requestedNameField?.trim()?.takeIf { it.isNotEmpty() }
+        if (requested != null && requested !in attributeNames) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Unknown zone name field: $requested")
+        }
+        val candidates = buildList {
+            if (requested != null) add(requested)
+            addAll(listOf("name", "区域名", "title", "zone_name", "Name", "NAME"))
+        }.distinct().filter { it in attributeNames }
+        if (candidates.isEmpty()) return "NULL"
+        return candidates.joinToString(", ") { "NULLIF(t.${quoteIdent(it)}::text, '')" }
+    }
+
+    private fun createFacilityZoneTable(
+        connection: Connection,
+        tableName: String,
+        facilityLayer: LayerDto,
+        businessGeoms: SqlFragment,
+        layerName: String,
+        bufferMeters: Double,
+        facilityDistanceMeters: Double?,
+        sourceTypes: List<String>
+    ) {
+        val tableRef = "${quoteIdent("gis_data")}.${quoteIdent(tableName)}"
+        val facilityRef = "${quoteIdent(facilityLayer.schemaName)}.${quoteIdent(facilityLayer.tableName)}"
+        val facilityGeom = "f.${quoteIdent(facilityLayer.geometryColumn)}"
+        val facilityPredicate = if (facilityDistanceMeters != null) {
+            "ST_DWithin(bg.geom, fp.geom, ?::double precision)"
+        } else {
+            "bg.geom && fp.geom AND ST_Intersects(bg.geom, fp.geom)"
+        }
+        connection.createStatement().use { stmt ->
+            stmt.execute("DROP TABLE IF EXISTS $tableRef")
+        }
+        val sql = """
+            CREATE TABLE $tableRef AS
+            WITH facility_points AS (
+                SELECT $facilityGeom AS geom
+                FROM $facilityRef AS f
+                WHERE $facilityGeom IS NOT NULL
+            ),
+            business_geoms AS (
+                ${businessGeoms.sql}
+            ),
+            selected_business AS (
+                SELECT DISTINCT bg.business_type, bg.business_id, bg.business_label, bg.geom
+                FROM business_geoms AS bg
+                JOIN facility_points AS fp ON $facilityPredicate
+                WHERE bg.geom IS NOT NULL AND fp.geom IS NOT NULL
+            ),
+            merged AS (
+                SELECT count(*)::integer AS source_business_count,
+                       ST_MemUnion(ST_Buffer(geom, ?::double precision)) AS geom
+                FROM selected_business
+            )
+            SELECT
+                1::integer AS fid,
+                ?::text AS name,
+                'facility_boundary'::text AS operation,
+                ?::double precision AS buffer_meters,
+                ?::uuid AS facility_layer_id,
+                ?::text AS source_types,
+                source_business_count,
+                ST_Multi(ST_CollectionExtract(ST_MakeValid(geom), 3))::geometry(MultiPolygon, 3857) AS geom
+            FROM merged
+            WHERE geom IS NOT NULL
+              AND NOT ST_IsEmpty(geom)
+              AND source_business_count > 0
+        """.trimIndent()
+        connection.prepareStatement(sql).use { stmt ->
+            var index = 1
+            for (binder in businessGeoms.binders) {
+                binder(stmt, index++)
+            }
+            if (facilityDistanceMeters != null) {
+                stmt.setDouble(index++, facilityDistanceMeters)
+            }
+            stmt.setDouble(index++, bufferMeters)
+            stmt.setString(index++, layerName)
+            stmt.setDouble(index++, bufferMeters)
+            stmt.setString(index++, facilityLayer.id)
+            stmt.setString(index, sourceTypes.joinToString(","))
+            stmt.execute()
+        }
+    }
+
+    private fun normalizeGeneratedTable(connection: Connection, schemaName: String, tableName: String, geometryColumn: String) {
+        val tableRef = "${quoteIdent(schemaName)}.${quoteIdent(tableName)}"
+        val geom = quoteIdent(geometryColumn)
+        val indexName = quoteIdent("${tableName.take(48)}_geom_gix")
+        connection.createStatement().use { stmt ->
+            stmt.execute("UPDATE $tableRef SET $geom = ST_MakeValid($geom) WHERE $geom IS NOT NULL AND NOT ST_IsValid($geom)")
+            stmt.execute("DELETE FROM $tableRef WHERE $geom IS NULL OR ST_IsEmpty($geom)")
+            stmt.execute("CREATE INDEX IF NOT EXISTS $indexName ON $tableRef USING GIST ($geom)")
+            stmt.execute("ANALYZE $tableRef")
+        }
+    }
+
+    private fun insertLayerMetadata(
+        connection: Connection,
+        projectId: String,
+        name: String,
+        tableName: String,
+        sourceSrid: Int?,
+        isResult: Boolean,
+        layerRole: String,
+        resultSetId: String? = null,
+        sourceLayerId: String? = null
+    ): String {
+        val stats = tableStats(connection, "gis_data", tableName, "geom")
+        val layerId = connection.prepareStatement(
+            """
+            INSERT INTO app.layers (
+                project_id, name, schema_name, table_name, geometry_column, geometry_type,
+                source_srid, display_srid, feature_id_column, bbox_4326, row_count,
+                is_result, layer_role, result_set_id, source_layer_id, tile_source_id
+            )
+            VALUES (?::uuid, ?, 'gis_data', ?, 'geom', ?, ?, 3857, 'fid', ?::jsonb, ?, ?, ?, ?::uuid, ?::uuid, ?)
+            RETURNING id::text
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, projectId)
+            stmt.setString(2, name)
+            stmt.setString(3, tableName)
+            stmt.setString(4, stats.geometryType)
+            if (sourceSrid == null) stmt.setNull(5, Types.INTEGER) else stmt.setInt(5, sourceSrid)
+            setNullableString(stmt, 6, stats.bbox4326)
+            stmt.setLong(7, stats.rowCount)
+            stmt.setBoolean(8, isResult)
+            stmt.setString(9, normalizeLayerRole(layerRole))
+            setNullableUuidString(stmt, 10, resultSetId)
+            setNullableUuidString(stmt, 11, sourceLayerId)
+            stmt.setString(12, tableName)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getString(1)
+            }
+        }
+        insertLayerAttributes(connection, layerId, "gis_data", tableName)
+        return layerId
+    }
+
+    private fun tableStats(connection: Connection, schemaName: String, tableName: String, geometryColumn: String): LayerStats {
+        val tableRef = "${quoteIdent(schemaName)}.${quoteIdent(tableName)}"
+        val geom = quoteIdent(geometryColumn)
+        return connection.prepareStatement(
+            """
+            WITH stats AS (
+                SELECT
+                    count(*)::bigint AS row_count,
+                    (array_agg(GeometryType($geom) ORDER BY GeometryType($geom)) FILTER (WHERE $geom IS NOT NULL))[1] AS geometry_type,
+                    ST_Extent(ST_Transform($geom, 4326)) AS bbox
+                FROM $tableRef
+            )
+            SELECT row_count,
+                   COALESCE(geometry_type, 'GEOMETRY') AS geometry_type,
+                   CASE
+                       WHEN bbox IS NULL THEN NULL
+                       ELSE jsonb_build_array(ST_XMin(bbox), ST_YMin(bbox), ST_XMax(bbox), ST_YMax(bbox))::text
+                   END AS bbox_4326
+            FROM stats
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                LayerStats(
+                    rowCount = rs.getLong("row_count"),
+                    geometryType = rs.getString("geometry_type"),
+                    bbox4326 = rs.getString("bbox_4326")
+                )
+            }
+        }
+    }
+
+    private fun insertLayerAttributes(connection: Connection, layerId: String, schemaName: String, tableName: String) {
+        connection.prepareStatement(
+            """
+            SELECT column_name, data_type, udt_name, ordinal_position
+            FROM information_schema.columns
+            WHERE table_schema = ? AND table_name = ?
+            ORDER BY ordinal_position
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, schemaName)
+            stmt.setString(2, tableName)
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    val isGeometry = rs.getString("column_name") == "geom" || rs.getString("udt_name") == "geometry"
+                    connection.prepareStatement(
+                        """
+                        INSERT INTO app.layer_attributes (layer_id, name, data_type, ordinal_position, is_geometry)
+                        VALUES (?::uuid, ?, ?, ?, ?)
+                        ON CONFLICT (layer_id, name) DO UPDATE
+                        SET data_type = EXCLUDED.data_type,
+                            ordinal_position = EXCLUDED.ordinal_position,
+                            is_geometry = EXCLUDED.is_geometry
+                        """.trimIndent()
+                    ).use { insert ->
+                        insert.setString(1, layerId)
+                        insert.setString(2, rs.getString("column_name"))
+                        insert.setString(3, if (isGeometry) "geometry" else rs.getString("data_type"))
+                        insert.setInt(4, rs.getInt("ordinal_position"))
+                        insert.setBoolean(5, isGeometry)
+                        insert.executeUpdate()
+                    }
+                }
+            }
+        }
+    }
+
     private fun refreshLayerMetadata(connection: Connection, layer: LayerDto) {
         val tableRef = "${quoteIdent(layer.schemaName)}.${quoteIdent(layer.tableName)}"
         val geometryColumn = quoteIdent(layer.geometryColumn)
@@ -2739,7 +3527,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             }
             return listOf(layer)
         }
-        return listLayers(projectId).filter { !it.isResult }
+        return listLayers(projectId).filter { !it.isResult && it.layerRole != "zone" }
     }
 
     private fun businessGeometrySql(
@@ -2934,6 +3722,17 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             "real",
             "double precision"
         )
+
+    private fun normalizeLayerRole(value: String?): String {
+        val role = value?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "generic"
+        if (role !in setOf("generic", "zone")) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "layerRole must be generic or zone")
+        }
+        return role
+    }
+
+    private fun generatedTableName(prefix: String): String =
+        "${prefix}_${UUID.randomUUID().toString().replace("-", "").take(24)}"
 
     private fun addTextPatch(
         request: JsonObject,
@@ -3186,6 +3985,19 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         memo = getString("memo")
     )
 
+    private fun ResultSet.toZoneDto(): ZoneDto = ZoneDto(
+        id = getString("id"),
+        projectId = getString("project_id"),
+        name = getString("name"),
+        zoneType = getString("zone_type"),
+        status = getString("status"),
+        memo = getString("memo"),
+        zoneLayerId = getString("zone_layer_id"),
+        zoneFeatureId = getString("zone_feature_id"),
+        sourceLayerId = getString("source_layer_id"),
+        sourceFeatureId = getString("source_feature_id")
+    )
+
     private fun ResultSet.toPartyRelationshipDto(): PartyRelationshipDto = PartyRelationshipDto(
         id = getString("id"),
         projectId = getString("project_id"),
@@ -3213,6 +4025,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         status = getString("status"),
         errorMessage = getString("error_message"),
         layerId = getString("layer_id"),
+        layerRole = getString("layer_role"),
         createdAt = getString("created_at"),
         startedAt = getString("started_at"),
         finishedAt = getString("finished_at")
@@ -3232,6 +4045,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         bbox4326 = getString("bbox_4326")?.let { json.decodeFromString<List<Double>>(it) },
         rowCount = getLong("row_count"),
         isResult = getBoolean("is_result"),
+        layerRole = getString("layer_role"),
         resultSetId = getString("result_set_id"),
         resultSetName = getString("result_set_name"),
         sourceLayerId = getString("source_layer_id"),

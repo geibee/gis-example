@@ -37,6 +37,7 @@ data class LayerDto(
     val bbox4326: List<Double>? = null,
     val rowCount: Long,
     val isResult: Boolean,
+    val layerRole: String,
     val resultSetId: String? = null,
     val resultSetName: String? = null,
     val sourceLayerId: String? = null,
@@ -55,6 +56,7 @@ data class ImportJobDto(
     val status: String,
     val errorMessage: String? = null,
     val layerId: String? = null,
+    val layerRole: String,
     val createdAt: String,
     val startedAt: String? = null,
     val finishedAt: String? = null
@@ -250,6 +252,53 @@ data class PartyDto(
     val address: String? = null,
     val memo: String? = null,
     val relationships: List<PartyRelationshipDto> = emptyList()
+)
+
+@Serializable
+data class ZoneDto(
+    val id: String,
+    val projectId: String,
+    val name: String,
+    val zoneType: String? = null,
+    val status: String,
+    val memo: String? = null,
+    val zoneLayerId: String,
+    val zoneFeatureId: String,
+    val sourceLayerId: String,
+    val sourceFeatureId: String,
+    val landCount: Int = 0,
+    val buildingCount: Int = 0,
+    val lands: List<BusinessEntityLinkDto> = emptyList(),
+    val buildings: List<BusinessEntityLinkDto> = emptyList()
+)
+
+@Serializable
+data class ZoneLayerFromImportRequest(
+    val projectId: String? = null,
+    val layerId: String,
+    val zoneType: String? = null,
+    val status: String? = null,
+    val nameField: String? = null
+)
+
+@Serializable
+data class ZoneLayerFromFacilitiesRequest(
+    val projectId: String? = null,
+    val facilityLayerId: String,
+    val name: String? = null,
+    val bufferMeters: Double? = null,
+    val facilityDistanceMeters: Double? = null,
+    val sourceTypes: List<String> = listOf("land", "building"),
+    val zoneType: String? = null,
+    val status: String? = null
+)
+
+@Serializable
+data class ZoneLayerOperationDto(
+    val layer: LayerDto,
+    val zonesCreated: Int,
+    val zonesUpdated: Int,
+    val zones: List<ZoneDto> = emptyList()
 )
 
 @Serializable

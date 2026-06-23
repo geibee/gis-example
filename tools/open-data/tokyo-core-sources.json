@@ -1,0 +1,55 @@
+{
+  "cacheDir": "data/open-data-cache/tokyo-core",
+  "bbox4326": [139.7445, 35.6638, 139.7698, 35.6841],
+  "sources": [
+    {
+      "id": "moj-registry-map",
+      "label": "登記所備付地図データ",
+      "sourcePageUrl": "https://www.moj.go.jp/MINJI/minji05_00494.html",
+      "downloadPageUrl": "https://front.geospatial.jp/",
+      "format": "map-xml-or-geojson",
+      "notes": "G空間情報センターの配布URLはログインや年度更新で変わるため、downloadUrlを設定してから取得する。",
+      "artifacts": [
+        {
+          "name": "tokyo-registry-map",
+          "downloadUrl": "",
+          "fileName": "tokyo-registry-map.zip",
+          "extract": true,
+          "notes": "東京都の登記所備付地図データ、または変換済みGeoJSON/Shapeを指定する。"
+        }
+      ],
+      "conversion": {
+        "outputGeojson": "moj-parcels-tokyo-core.geojson",
+        "inputGlobs": ["**/*.geojson", "**/*.json", "**/*.shp", "**/*.gml"],
+        "ogrLayer": null
+      }
+    },
+    {
+      "id": "plateau-buildings",
+      "label": "PLATEAU 建築物モデル",
+      "sourcePageUrl": "https://www.mlit.go.jp/plateau/open-data/",
+      "datasetPageUrls": [
+        "https://www.geospatial.jp/ckan/dataset/plateau-tokyo23ku-2022",
+        "https://www.geospatial.jp/ckan/dataset/plateau-13101-chiyoda-ku-2025",
+        "https://www.geospatial.jp/ckan/dataset/plateau-13102-chuo-ku-2025",
+        "https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2025"
+      ],
+      "format": "citygml-or-geojson",
+      "notes": "CityGML ZIPを指定した場合、udx/bldg配下のGMLを優先して抽出する。",
+      "artifacts": [
+        {
+          "name": "tokyo-plateau-buildings",
+          "downloadUrl": "",
+          "fileName": "tokyo-plateau-buildings.zip",
+          "extract": true,
+          "notes": "東京都23区、千代田区、中央区、港区のいずれかのPLATEAU CityGML ZIPを指定する。"
+        }
+      ],
+      "conversion": {
+        "outputGeojson": "plateau-buildings-tokyo-core.geojson",
+        "inputGlobs": ["**/udx/bldg/*.gml", "**/*bldg*.gml", "**/*.geojson", "**/*.json", "**/*.shp"],
+        "ogrLayer": null
+      }
+    }
+  ]
+}

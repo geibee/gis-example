@@ -24,6 +24,7 @@ export type Layer = {
   bbox4326?: [number, number, number, number] | null;
   rowCount: number;
   isResult: boolean;
+  layerRole: "generic" | "zone" | string;
   resultSetId?: string | null;
   resultSetName?: string | null;
   sourceLayerId?: string | null;
@@ -41,6 +42,7 @@ export type ImportJob = {
   status: "pending" | "running" | "succeeded" | "failed";
   errorMessage?: string | null;
   layerId?: string | null;
+  layerRole: "generic" | "zone" | string;
   createdAt: string;
   startedAt?: string | null;
   finishedAt?: string | null;
@@ -149,11 +151,13 @@ export type PartyRelationship = {
 
 export type BusinessObjectFilters = {
   status?: string;
+  zoneType?: string;
   landUse?: string;
   buildingUse?: string;
   partyType?: string;
   relationType?: string;
   linkedOnly?: boolean;
+  zoneLayerId?: string;
   sourceLayerId?: string;
   bbox?: string;
   intersectsLayerId?: string;
@@ -213,6 +217,30 @@ export type Party = {
   address?: string | null;
   memo?: string | null;
   relationships: PartyRelationship[];
+};
+
+export type Zone = {
+  id: string;
+  projectId: string;
+  name: string;
+  zoneType?: string | null;
+  status: string;
+  memo?: string | null;
+  zoneLayerId: string;
+  zoneFeatureId: string;
+  sourceLayerId: string;
+  sourceFeatureId: string;
+  landCount: number;
+  buildingCount: number;
+  lands: BusinessEntityLink[];
+  buildings: BusinessEntityLink[];
+};
+
+export type ZoneLayerOperation = {
+  layer: Layer;
+  zonesCreated: number;
+  zonesUpdated: number;
+  zones: Zone[];
 };
 
 export type BusinessLinks = {

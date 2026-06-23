@@ -284,6 +284,51 @@ fun Application.module() {
             call.respond(HttpStatusCode.NoContent)
         }
 
+        get("/api/zones") {
+            val params = call.request.queryParameters
+            call.respond(
+                db.listZones(
+                    ZoneListQuery(
+                        projectId = params["projectId"],
+                        q = params["q"],
+                        status = params["status"],
+                        zoneType = params["zoneType"],
+                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                        zoneLayerId = params["zoneLayerId"],
+                        sourceLayerId = params["sourceLayerId"]
+                    )
+                )
+            )
+        }
+
+        post("/api/zones") {
+            call.respond(HttpStatusCode.Created, db.createZone(call.receive<JsonObject>()))
+        }
+
+        get("/api/zones/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+            call.respond(db.getZone(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
+        }
+
+        patch("/api/zones/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+            call.respond(db.updateZone(id, call.receive<JsonObject>()))
+        }
+
+        delete("/api/zones/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+            db.deleteZone(id)
+            call.respond(HttpStatusCode.NoContent)
+        }
+
+        post("/api/zone-layers/from-import") {
+            call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(call.receive<ZoneLayerFromImportRequest>()))
+        }
+
+        post("/api/zone-layers/from-facilities") {
+            call.respond(HttpStatusCode.Created, db.createZoneLayerFromFacilities(call.receive<ZoneLayerFromFacilitiesRequest>()))
+        }
+
         post("/api/party-relationships") {
             call.respond(HttpStatusCode.Created, db.createPartyRelationship(call.receive<JsonObject>()))
         }
@@ -304,6 +349,7 @@ fun Application.module() {
             var projectId: String? = null
             var format: String? = null
             var sourceSrid: Int? = null
+            var layerRole: String? = null
             var filename: String? = null
             var uploadPath: String? = null
 
@@ -315,6 +361,7 @@ fun Application.module() {
                             "projectId" -> projectId = part.value.takeIf { it.isNotBlank() }
                             "format" -> format = part.value.takeIf { it.isNotBlank() }?.lowercase()
                             "sourceSrid" -> sourceSrid = part.value.takeIf { it.isNotBlank() }?.toIntOrNull()
+                            "layerRole" -> layerRole = part.value.takeIf { it.isNotBlank() }?.lowercase()
                         }
                     }
                     is PartData.FileItem -> {
@@ -341,7 +388,8 @@ fun Application.module() {
                 filename = actualFilename,
                 format = actualFormat,
                 sourceSrid = sourceSrid,
-                uploadPath = actualUploadPath
+                uploadPath = actualUploadPath,
+                layerRole = layerRole ?: "generic"
             )
             call.respond(HttpStatusCode.Created, job)
         }
