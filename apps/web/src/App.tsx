@@ -5350,16 +5350,9 @@ function addMapLayers(map: MapLibreMap, layer: Layer, color: string): string[] {
 
 function syncConditionSearchHighlight(map: MapLibreMap, results: FeatureSearchResult[]) {
   const sourceId = "condition-search-highlight";
-  const markerSourceId = `${sourceId}-markers`;
   const emptyCollection = { type: "FeatureCollection", features: [] } as any;
   if (!map.getSource(sourceId)) {
     map.addSource(sourceId, {
-      type: "geojson",
-      data: emptyCollection
-    });
-  }
-  if (!map.getSource(markerSourceId)) {
-    map.addSource(markerSourceId, {
       type: "geojson",
       data: emptyCollection
     });
@@ -5410,64 +5403,24 @@ function syncConditionSearchHighlight(map: MapLibreMap, results: FeatureSearchRe
       }
     } as maplibregl.CircleLayerSpecification);
   }
-  if (!map.getLayer(`${markerSourceId}-label`)) {
-    map.addLayer({
-      id: `${markerSourceId}-label`,
-      type: "symbol",
-      source: markerSourceId,
-      layout: {
-        "text-field": ["get", "label"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 7, 13, 12, 15, 16, 17],
-        "text-allow-overlap": true,
-        "text-ignore-placement": true
-      },
-      paint: {
-        "text-color": "#e11d48",
-        "text-halo-color": "#ffffff",
-        "text-halo-width": 2.5
-      }
-    } as maplibregl.SymbolLayerSpecification);
-  }
 
   const features = results
     .filter((result) => result.geometry)
-    .map((result, index) => ({
+    .map((result) => ({
       type: "Feature",
       geometry: result.geometry,
       properties: {
         layerId: result.layerId,
-        featureId: result.featureId,
-        label: String(index + 1)
+        featureId: result.featureId
       }
     }));
-  const markerFeatures = results
-    .map((result, index) => {
-      const center = geoJsonGeometryCenter(result.geometry);
-      if (!center) return null;
-      return {
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: center
-        },
-        properties: {
-          layerId: result.layerId,
-          featureId: result.featureId,
-          label: String(index + 1)
-        }
-      };
-    })
-    .filter((feature): feature is NonNullable<typeof feature> => Boolean(feature));
   const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
   source?.setData({ type: "FeatureCollection", features } as any);
-  const markerSource = map.getSource(markerSourceId) as maplibregl.GeoJSONSource | undefined;
-  markerSource?.setData({ type: "FeatureCollection", features: markerFeatures } as any);
   [
     `${sourceId}-fill`,
     `${sourceId}-line-halo`,
     `${sourceId}-line`,
-    `${sourceId}-point`,
-    `${markerSourceId}-label`
+    `${sourceId}-point`
   ].forEach((layerId) => {
     if (map.getLayer(layerId)) map.moveLayer(layerId);
   });
@@ -6052,12 +6005,6 @@ function focusFeatureResults(map: MapLibreMap | null, results: FeatureSearchResu
     return;
   }
   map.fitBounds([southWest, northEast], { padding: 72, duration: 500, maxZoom: 17 });
-}
-
-function geoJsonGeometryCenter(geometry: unknown): [number, number] | null {
-  const bounds = geoJsonGeometryBounds(geometry);
-  if (!bounds) return null;
-  return [(bounds.minLng + bounds.maxLng) / 2, (bounds.minLat + bounds.maxLat) / 2];
 }
 
 function geoJsonGeometryBounds(geometry: unknown): GeometryBounds | null {
