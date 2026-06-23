@@ -14,7 +14,8 @@ import type {
   PartyRelationship,
   Project,
   Zone,
-  ZoneLayerOperation
+  ZoneLayerOperation,
+  ZonePartySummary
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
@@ -245,6 +246,10 @@ export function getZones(projectId?: string, q?: string, filters?: BusinessObjec
 
 export function getZone(id: string): Promise<Zone> {
   return requestJson<Zone>(`/api/zones/${encodeURIComponent(id)}`);
+}
+
+export function getZonePartySummary(id: string): Promise<ZonePartySummary> {
+  return requestJson<ZonePartySummary>(`/api/zones/${encodeURIComponent(id)}/party-summary`);
 }
 
 export function createZone(body: unknown): Promise<Zone> {

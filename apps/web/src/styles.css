@@ -1056,6 +1056,122 @@ input[type="file"] {
   white-space: nowrap;
 }
 
+.zone-party-summary h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zps-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.zps-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #37474f;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.zps-chip.strong {
+  background: #1f6feb;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.zps-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d2dbe3;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #455a64;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.zps-tag-chip.selected {
+  border-color: #b54708;
+  background: #fff4ec;
+  color: #b54708;
+  font-weight: 600;
+}
+
+.zps-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.zps-party {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  border: 1px solid #d2dbe3;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.zps-party:hover {
+  border-color: #1f6feb;
+  background: #f5f9ff;
+}
+
+.zps-party-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: #263238;
+}
+
+.zps-type-badge {
+  border-radius: 4px;
+  background: #eef2f6;
+  color: #546e7a;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.zps-tag-badge {
+  border-radius: 4px;
+  background: #fff4ec;
+  color: #b54708;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.zps-party-meta {
+  color: #637381;
+  font-size: 12px;
+}
+
+.zps-bar {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: #e1e7ed;
+  overflow: hidden;
+}
+
+.zps-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #1f6feb;
+}
+
 .relationship-row {
   display: grid;
   grid-template-columns: minmax(92px, 0.7fr) minmax(140px, 1fr) minmax(160px, 1.2fr);

@@ -251,6 +251,7 @@ data class PartyDto(
     val contact: String? = null,
     val address: String? = null,
     val memo: String? = null,
+    val tags: List<String> = emptyList(),
     val relationships: List<PartyRelationshipDto> = emptyList()
 )
 
@@ -270,6 +271,34 @@ data class ZoneDto(
     val buildingCount: Int = 0,
     val lands: List<BusinessEntityLinkDto> = emptyList(),
     val buildings: List<BusinessEntityLinkDto> = emptyList()
+)
+
+@Serializable
+data class ZonePartyBreakdownDto(
+    val key: String,
+    val count: Int
+)
+
+@Serializable
+data class ZonePartySummaryEntryDto(
+    val id: String,
+    val name: String,
+    val partyType: String,
+    val tags: List<String> = emptyList(),
+    val zoneInvolvement: Int,
+    val projectInvolvement: Int,
+    val relationTypes: List<String> = emptyList(),
+    val coverageRatio: Double
+)
+
+@Serializable
+data class ZonePartySummaryDto(
+    val zoneId: String,
+    val containedCount: Int,
+    val partyCount: Int,
+    val typeBreakdown: List<ZonePartyBreakdownDto> = emptyList(),
+    val tagBreakdown: List<ZonePartyBreakdownDto> = emptyList(),
+    val parties: List<ZonePartySummaryEntryDto> = emptyList()
 )
 
 @Serializable

@@ -218,7 +218,8 @@ INSERT INTO app.parties (
     party_type,
     contact,
     address,
-    memo
+    memo,
+    tags
 )
 VALUES
     (
@@ -228,7 +229,8 @@ VALUES
         '法人',
         'asset@example.com',
         '東京都千代田区丸の内',
-        'L-0001所有者'
+        'L-0001所有者',
+        '{外国人}'
     ),
     (
         'P-0002',
@@ -237,7 +239,8 @@ VALUES
         '法人',
         'dev@example.com',
         '東京都中央区銀座',
-        '売買事業者'
+        '売買事業者',
+        '{競合}'
     ),
     (
         'P-0003',
@@ -246,7 +249,28 @@ VALUES
         '管理会社',
         '03-0000-0000',
         '東京都港区新橋',
-        NULL
+        NULL,
+        '{}'
+    ),
+    (
+        'P-0004',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '丸の内アセット合同会社',
+        '法人',
+        'maru@example.com',
+        '東京都千代田区丸の内',
+        '区域内に広く関与',
+        '{外国人,競合,要注意}'
+    ),
+    (
+        'P-0005',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        'グローバル投資ファンド',
+        '金融機関',
+        'fund@example.com',
+        'Singapore',
+        '海外投資家',
+        '{外国人}'
     )
 ON CONFLICT (id) DO UPDATE SET
     project_id = EXCLUDED.project_id,
@@ -255,6 +279,7 @@ ON CONFLICT (id) DO UPDATE SET
     contact = EXCLUDED.contact,
     address = EXCLUDED.address,
     memo = EXCLUDED.memo,
+    tags = EXCLUDED.tags,
     updated_at = now();
 
 INSERT INTO app.party_relationships (
@@ -292,6 +317,33 @@ VALUES
         'building',
         'B-0001',
         '管理者',
+        NULL
+    ),
+    (
+        '44444444-4444-4444-4444-444444444444'::uuid,
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        'P-0004',
+        'land',
+        'L-0001',
+        '連絡先',
+        '区域内土地に関与'
+    ),
+    (
+        '55555555-5555-5555-5555-555555555555'::uuid,
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        'P-0004',
+        'building',
+        'B-0001',
+        '賃借人',
+        '区域内建物にも関与'
+    ),
+    (
+        '66666666-6666-6666-6666-666666666666'::uuid,
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        'P-0005',
+        'land',
+        'L-0001',
+        '借地権者',
         NULL
     )
 ON CONFLICT (id) DO UPDATE SET

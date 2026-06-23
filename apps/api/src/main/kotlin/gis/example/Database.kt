@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.sql.Connection
@@ -181,6 +182,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                         contact text,
                         address text,
                         memo text,
+                        tags text[] NOT NULL DEFAULT '{}',
                         created_at timestamptz NOT NULL DEFAULT now(),
                         updated_at timestamptz NOT NULL DEFAULT now()
                     );
@@ -252,6 +254,8 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                         ADD COLUMN IF NOT EXISTS registered_owner text,
                         ADD COLUMN IF NOT EXISTS right_type text,
                         ADD COLUMN IF NOT EXISTS registration_accepted_on date;
+                    ALTER TABLE app.parties
+                        ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
 
                     CREATE INDEX IF NOT EXISTS lands_project_search_idx ON app.lands(project_id, id);
                     CREATE INDEX IF NOT EXISTS lands_source_feature_idx ON app.lands(source_layer_id, source_feature_id);
@@ -1791,6 +1795,111 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         )
     }
 
+    fun getZonePartySummary(id: String): ZonePartySummaryDto? {
+        val zone = getZone(id) ?: return null
+        val landIds = zone.lands.map { it.id }
+        val buildingIds = zone.buildings.map { it.id }
+        val containedCount = landIds.size + buildingIds.size
+        if (landIds.isEmpty() && buildingIds.isEmpty()) {
+            return ZonePartySummaryDto(zoneId = id, containedCount = 0, partyCount = 0)
+        }
+        data class PartyAcc(
+            val id: String,
+            val name: String,
+            val partyType: String,
+            val tags: List<String>,
+            val targets: MutableSet<String> = mutableSetOf(),
+            val relationTypes: MutableSet<String> = mutableSetOf()
+        )
+        return dataSource.connection.use { connection ->
+            val targetConds = mutableListOf<String>()
+            val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+            if (landIds.isNotEmpty()) {
+                targetConds.add("(r.target_type = 'land' AND r.target_id = ANY(?))")
+                binders.add { stmt, index -> stmt.setArray(index, connection.createArrayOf("text", landIds.toTypedArray())) }
+            }
+            if (buildingIds.isNotEmpty()) {
+                targetConds.add("(r.target_type = 'building' AND r.target_id = ANY(?))")
+                binders.add { stmt, index -> stmt.setArray(index, connection.createArrayOf("text", buildingIds.toTypedArray())) }
+            }
+            val accById = linkedMapOf<String, PartyAcc>()
+            connection.prepareStatement(
+                """
+                SELECT p.id, p.name, p.party_type, p.tags, r.target_type, r.target_id, r.relation_type
+                FROM app.party_relationships AS r
+                JOIN app.parties AS p ON p.id = r.party_id
+                WHERE ${targetConds.joinToString(" OR ")}
+                """.trimIndent()
+            ).use { stmt ->
+                bindPatchValues(stmt, binders)
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        val partyId = rs.getString("id")
+                        val acc = accById.getOrPut(partyId) {
+                            PartyAcc(
+                                id = partyId,
+                                name = rs.getString("name"),
+                                partyType = rs.getString("party_type"),
+                                tags = rs.textArray("tags")
+                            )
+                        }
+                        acc.targets.add("${rs.getString("target_type")}:${rs.getString("target_id")}")
+                        rs.getString("relation_type")?.let { acc.relationTypes.add(it) }
+                    }
+                }
+            }
+
+            val projectInvolvement = mutableMapOf<String, Int>()
+            if (accById.isNotEmpty()) {
+                connection.prepareStatement(
+                    """
+                    SELECT party_id, count(DISTINCT (target_type, target_id)) AS cnt
+                    FROM app.party_relationships
+                    WHERE party_id = ANY(?)
+                    GROUP BY party_id
+                    """.trimIndent()
+                ).use { stmt ->
+                    stmt.setArray(1, connection.createArrayOf("text", accById.keys.toTypedArray()))
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) projectInvolvement[rs.getString("party_id")] = rs.getInt("cnt")
+                    }
+                }
+            }
+
+            val parties = accById.values
+                .map { acc ->
+                    val zoneInvolvement = acc.targets.size
+                    ZonePartySummaryEntryDto(
+                        id = acc.id,
+                        name = acc.name,
+                        partyType = acc.partyType,
+                        tags = acc.tags,
+                        zoneInvolvement = zoneInvolvement,
+                        projectInvolvement = projectInvolvement[acc.id] ?: zoneInvolvement,
+                        relationTypes = acc.relationTypes.sorted(),
+                        coverageRatio = if (containedCount > 0) zoneInvolvement.toDouble() / containedCount else 0.0
+                    )
+                }
+                .sortedWith(compareByDescending<ZonePartySummaryEntryDto> { it.zoneInvolvement }.thenBy { it.id })
+
+            val typeBreakdown = parties.groupingBy { it.partyType }.eachCount()
+                .map { (key, count) -> ZonePartyBreakdownDto(key, count) }
+                .sortedWith(compareByDescending<ZonePartyBreakdownDto> { it.count }.thenBy { it.key })
+            val tagBreakdown = parties.flatMap { it.tags }.groupingBy { it }.eachCount()
+                .map { (key, count) -> ZonePartyBreakdownDto(key, count) }
+                .sortedWith(compareByDescending<ZonePartyBreakdownDto> { it.count }.thenBy { it.key })
+
+            ZonePartySummaryDto(
+                zoneId = id,
+                containedCount = containedCount,
+                partyCount = parties.size,
+                typeBreakdown = typeBreakdown,
+                tagBreakdown = tagBreakdown,
+                parties = parties
+            )
+        }
+    }
+
     fun createZone(request: JsonObject): ZoneDto = try {
         val id = readRequiredText(request, "id")
         val projectId = readRequiredUuid(request, "projectId")
@@ -2638,7 +2747,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             )
         }
         val sql = """
-            SELECT p.id, p.project_id::text, p.name, p.party_type, p.contact, p.address, p.memo
+            SELECT p.id, p.project_id::text, p.name, p.party_type, p.contact, p.address, p.memo, p.tags
             FROM app.parties AS p
             ${whereClause(filters)}
             ORDER BY p.id
@@ -2657,7 +2766,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
     fun getParty(id: String): PartyDto? = dataSource.connection.use { connection ->
         val party = connection.prepareStatement(
             """
-            SELECT id, project_id::text, name, party_type, contact, address, memo
+            SELECT id, project_id::text, name, party_type, contact, address, memo, tags
             FROM app.parties
             WHERE id = ?
             """.trimIndent()
@@ -2679,10 +2788,11 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             val contact = readOptionalText(request, "contact")
             val address = readOptionalText(request, "address")
             val memo = readOptionalText(request, "memo")
+            val tags = readTextArray(request, "tags") ?: emptyList()
             connection.prepareStatement(
                 """
-                INSERT INTO app.parties (id, project_id, name, party_type, contact, address, memo)
-                VALUES (?, ?::uuid, ?, ?, ?, ?, ?)
+                INSERT INTO app.parties (id, project_id, name, party_type, contact, address, memo, tags)
+                VALUES (?, ?::uuid, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """.trimIndent()
             ).use { stmt ->
@@ -2693,6 +2803,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                 setNullableString(stmt, 5, contact)
                 setNullableString(stmt, 6, address)
                 setNullableString(stmt, 7, memo)
+                stmt.setArray(8, connection.createArrayOf("text", tags.toTypedArray()))
                 stmt.executeQuery().use { rs ->
                     rs.next()
                     getParty(rs.getString("id")) ?: error("Created party disappeared")
@@ -2712,6 +2823,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
             addTextPatch(request, "contact", "contact", setters, binders)
             addTextPatch(request, "address", "address", setters, binders)
             addTextPatch(request, "memo", "memo", setters, binders)
+            addTextArrayPatch(request, "tags", "tags", setters, binders)
             if (setters.isEmpty()) {
                 return@use getParty(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Party not found")
             }
@@ -2721,7 +2833,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                 UPDATE app.parties
                 SET ${setters.joinToString(", ")}, updated_at = now()
                 WHERE id = ?
-                RETURNING id, project_id::text, name, party_type, contact, address, memo
+                RETURNING id, project_id::text, name, party_type, contact, address, memo, tags
                 """.trimIndent()
             ).use { stmt ->
                 bindPatchValues(stmt, binders)
@@ -3750,6 +3862,32 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     }
 
+    private fun readTextArray(request: JsonObject, key: String): List<String>? {
+        val element = request[key] ?: return null
+        if (element is JsonNull) return emptyList()
+        val array = try {
+            element.jsonArray
+        } catch (exc: IllegalArgumentException) {
+            return null
+        }
+        return array.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.ifBlank { null } }.distinct()
+    }
+
+    private fun addTextArrayPatch(
+        request: JsonObject,
+        key: String,
+        column: String,
+        setters: MutableList<String>,
+        binders: MutableList<(PreparedStatement, Int) -> Unit>
+    ) {
+        if (key !in request) return
+        val value = readTextArray(request, key) ?: emptyList()
+        setters.add("${quoteIdent(column)} = ?")
+        binders.add { stmt, index ->
+            stmt.setArray(index, stmt.connection.createArrayOf("text", value.toTypedArray()))
+        }
+    }
+
     private fun addUuidPatch(
         request: JsonObject,
         key: String,
@@ -3982,7 +4120,8 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         partyType = getString("party_type"),
         contact = getString("contact"),
         address = getString("address"),
-        memo = getString("memo")
+        memo = getString("memo"),
+        tags = textArray("tags")
     )
 
     private fun ResultSet.toZoneDto(): ZoneDto = ZoneDto(
@@ -4009,6 +4148,13 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         relationType = getString("relation_type"),
         note = getString("note")
     )
+
+    private fun ResultSet.textArray(column: String): List<String> {
+        val array = getArray(column) ?: return emptyList()
+        @Suppress("UNCHECKED_CAST")
+        val values = array.array as? Array<Any?> ?: return emptyList()
+        return values.mapNotNull { it as? String }
+    }
 
     private fun ResultSet.nullableDouble(column: String): Double? =
         (getObject(column) as Number?)?.toDouble()

@@ -310,6 +310,11 @@ fun Application.module() {
             call.respond(db.getZone(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
         }
 
+        get("/api/zones/{id}/party-summary") {
+            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+            call.respond(db.getZonePartySummary(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
+        }
+
         patch("/api/zones/{id}") {
             val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
             call.respond(db.updateZone(id, call.receive<JsonObject>()))

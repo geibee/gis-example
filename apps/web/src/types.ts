@@ -216,7 +216,33 @@ export type Party = {
   contact?: string | null;
   address?: string | null;
   memo?: string | null;
+  tags: string[];
   relationships: PartyRelationship[];
+};
+
+export type ZonePartyBreakdown = {
+  key: string;
+  count: number;
+};
+
+export type ZonePartySummaryEntry = {
+  id: string;
+  name: string;
+  partyType: string;
+  tags: string[];
+  zoneInvolvement: number;
+  projectInvolvement: number;
+  relationTypes: string[];
+  coverageRatio: number;
+};
+
+export type ZonePartySummary = {
+  zoneId: string;
+  containedCount: number;
+  partyCount: number;
+  typeBreakdown: ZonePartyBreakdown[];
+  tagBreakdown: ZonePartyBreakdown[];
+  parties: ZonePartySummaryEntry[];
 };
 
 export type Zone = {
