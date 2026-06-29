@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS app.parties (
     contact text,
     address text,
     memo text,
+    tags text[] NOT NULL DEFAULT '{}',
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );

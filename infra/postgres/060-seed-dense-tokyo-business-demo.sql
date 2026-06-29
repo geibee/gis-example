@@ -708,3 +708,284 @@ ON CONFLICT (zone_layer_id, zone_feature_id) DO UPDATE SET
     source_layer_id = EXCLUDED.source_layer_id,
     source_feature_id = EXCLUDED.source_feature_id,
     updated_at = now();
+
+INSERT INTO app.parties (
+    id,
+    project_id,
+    name,
+    party_type,
+    contact,
+    address,
+    memo,
+    tags
+)
+VALUES
+    (
+        'P-DENSE-001',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '丸の内都市開発株式会社',
+        '法人',
+        'marunouchi-owner@example.com',
+        '東京都千代田区丸の内一丁目',
+        '都心DENSEデモの丸の内系地権者',
+        ARRAY['地権者', '重点交渉']
+    ),
+    (
+        'P-DENSE-002',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '銀座アセットマネジメント合同会社',
+        '法人',
+        'ginza-asset@example.com',
+        '東京都中央区銀座四丁目',
+        '都心DENSEデモの銀座系地権者',
+        ARRAY['地権者', '競合']
+    ),
+    (
+        'P-DENSE-003',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '東京都心不動産信託',
+        '金融機関',
+        'trust@example.com',
+        '東京都千代田区大手町',
+        '信託受益権を含む権利関係の確認先',
+        ARRAY['信託', '要確認']
+    ),
+    (
+        'P-DENSE-004',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '首都圏プロパティホールディングス',
+        '法人',
+        'property-hd@example.com',
+        '東京都港区虎ノ門',
+        '都心DENSEデモの広域地権者',
+        ARRAY['地権者']
+    ),
+    (
+        'P-DENSE-005',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '都心ビル管理株式会社',
+        '管理会社',
+        'pm-east@example.com',
+        '東京都中央区日本橋',
+        '偶数建物を中心に管理するPM会社',
+        ARRAY['管理会社']
+    ),
+    (
+        'P-DENSE-006',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '東京コアPM株式会社',
+        '管理会社',
+        'pm-core@example.com',
+        '東京都港区新橋',
+        '奇数建物を中心に管理するPM会社',
+        ARRAY['管理会社', '要確認']
+    ),
+    (
+        'P-DENSE-007',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '国際投資パートナーズ',
+        '金融機関',
+        'global-invest@example.com',
+        'Singapore',
+        '借地権・区分所有権を横断して確認する投資家',
+        ARRAY['外国人', '投資家']
+    ),
+    (
+        'P-DENSE-008',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '丸の内再開発準備組合',
+        '法人',
+        'marunouchi-redev@example.com',
+        '東京都千代田区丸の内一丁目',
+        '丸の内周辺区域の取得・再開発調整先',
+        ARRAY['再開発', '重点交渉']
+    ),
+    (
+        'P-DENSE-009',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '銀座商業テナント会',
+        '法人',
+        'ginza-tenant@example.com',
+        '東京都中央区銀座四丁目',
+        '銀座商業区域の既存テナント調整先',
+        ARRAY['テナント', '要調整']
+    ),
+    (
+        'P-DENSE-010',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '新橋まちづくり協議会',
+        '法人',
+        'shimbashi-area@example.com',
+        '東京都港区新橋二丁目',
+        '新橋周辺区域の地元協議先',
+        ARRAY['再開発', '地元調整']
+    ),
+    (
+        'P-DENSE-011',
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        '虎ノ門業務街区LLP',
+        '法人',
+        'toranomon-llp@example.com',
+        '東京都港区虎ノ門一丁目',
+        '虎ノ門周辺区域の複合用途開発主体',
+        ARRAY['再開発', '競合']
+    )
+ON CONFLICT (id) DO UPDATE SET
+    project_id = EXCLUDED.project_id,
+    name = EXCLUDED.name,
+    party_type = EXCLUDED.party_type,
+    contact = EXCLUDED.contact,
+    address = EXCLUDED.address,
+    memo = EXCLUDED.memo,
+    tags = EXCLUDED.tags,
+    updated_at = now();
+
+WITH relationship_rows AS (
+    SELECT
+        CASE l.registered_owner
+            WHEN '丸の内都市開発株式会社' THEN 'P-DENSE-001'
+            WHEN '銀座アセットマネジメント合同会社' THEN 'P-DENSE-002'
+            WHEN '東京都心不動産信託' THEN 'P-DENSE-003'
+            ELSE 'P-DENSE-004'
+        END AS party_id,
+        'land' AS target_type,
+        l.id AS target_id,
+        '所有者' AS relation_type,
+        '土地登記名義人としてseed生成' AS note
+    FROM app.lands AS l
+    WHERE l.id LIKE 'L-DENSE-%'
+
+    UNION ALL
+
+    SELECT
+        CASE b.registered_owner
+            WHEN '丸の内都市開発株式会社' THEN 'P-DENSE-001'
+            WHEN '銀座アセットマネジメント合同会社' THEN 'P-DENSE-002'
+            WHEN '東京都心不動産信託' THEN 'P-DENSE-003'
+            ELSE 'P-DENSE-004'
+        END AS party_id,
+        'building' AS target_type,
+        b.id AS target_id,
+        '登記名義人' AS relation_type,
+        '建物登記名義人としてseed生成' AS note
+    FROM app.buildings AS b
+    WHERE b.id LIKE 'B-DENSE-%'
+
+    UNION ALL
+
+    SELECT
+        CASE WHEN (b.source_feature_id)::integer % 2 = 0 THEN 'P-DENSE-005' ELSE 'P-DENSE-006' END AS party_id,
+        'building' AS target_type,
+        b.id AS target_id,
+        '管理者' AS relation_type,
+        '建物管理会社としてseed生成' AS note
+    FROM app.buildings AS b
+    WHERE b.id LIKE 'B-DENSE-%'
+
+    UNION ALL
+
+    SELECT
+        'P-DENSE-007' AS party_id,
+        'land' AS target_type,
+        l.id AS target_id,
+        '借地権者' AS relation_type,
+        '借地権ありの土地に投資家関係者をseed生成' AS note
+    FROM app.lands AS l
+    WHERE l.id LIKE 'L-DENSE-%'
+      AND l.right_type = '借地権'
+
+    UNION ALL
+
+    SELECT
+        'P-DENSE-007' AS party_id,
+        'building' AS target_type,
+        b.id AS target_id,
+        '抵当権者' AS relation_type,
+        '区分所有権建物の金融関係者としてseed生成' AS note
+    FROM app.buildings AS b
+    WHERE b.id LIKE 'B-DENSE-%'
+      AND b.right_type = '区分所有権'
+
+    UNION ALL
+
+    SELECT
+        CASE p.cluster_no
+            WHEN 1 THEN 'P-DENSE-008'
+            WHEN 2 THEN 'P-DENSE-009'
+            WHEN 3 THEN 'P-DENSE-010'
+            ELSE 'P-DENSE-011'
+        END AS party_id,
+        'land' AS target_type,
+        l.id AS target_id,
+        '売買事業者' AS relation_type,
+        '地区別の取得・調整候補としてseed生成' AS note
+    FROM app.lands AS l
+    JOIN gis_data.layer_demo_moj_parcels_tokyo_core AS p
+      ON l.source_layer_id = 'd0f5f841-0a8d-4ff5-a2c4-94cf5c5d1001'::uuid
+     AND l.source_feature_id = p.fid::text
+    WHERE l.id LIKE 'L-DENSE-%'
+      AND (((p.fid - 1) % 9) + 1) IN (2, 5, 8)
+
+    UNION ALL
+
+    SELECT
+        CASE p.cluster_no
+            WHEN 1 THEN 'P-DENSE-008'
+            WHEN 2 THEN 'P-DENSE-009'
+            WHEN 3 THEN 'P-DENSE-010'
+            ELSE 'P-DENSE-011'
+        END AS party_id,
+        'building' AS target_type,
+        b.id AS target_id,
+        CASE WHEN p.cluster_no = 2 THEN '賃借人' ELSE '連絡先' END AS relation_type,
+        '区域別の建物関係者としてseed生成' AS note
+    FROM app.buildings AS b
+    JOIN gis_data.layer_demo_plateau_buildings_tokyo_core AS pb
+      ON b.source_layer_id = 'd0f5f841-0a8d-4ff5-a2c4-94cf5c5d1002'::uuid
+     AND b.source_feature_id = pb.fid::text
+    JOIN gis_data.layer_demo_moj_parcels_tokyo_core AS p
+      ON ST_Contains(p.geom, ST_PointOnSurface(pb.geom))
+    WHERE b.id LIKE 'B-DENSE-%'
+      AND (((p.fid - 1) % 9) + 1) IN (3, 6, 9)
+),
+stable_relationship_rows AS (
+    SELECT
+        (
+            substr(md5('dense-party-relationship:' || party_id || ':' || target_type || ':' || target_id || ':' || relation_type), 1, 8) || '-' ||
+            substr(md5('dense-party-relationship:' || party_id || ':' || target_type || ':' || target_id || ':' || relation_type), 9, 4) || '-' ||
+            substr(md5('dense-party-relationship:' || party_id || ':' || target_type || ':' || target_id || ':' || relation_type), 13, 4) || '-' ||
+            substr(md5('dense-party-relationship:' || party_id || ':' || target_type || ':' || target_id || ':' || relation_type), 17, 4) || '-' ||
+            substr(md5('dense-party-relationship:' || party_id || ':' || target_type || ':' || target_id || ':' || relation_type), 21, 12)
+        )::uuid AS id,
+        party_id,
+        target_type,
+        target_id,
+        relation_type,
+        note
+    FROM relationship_rows
+)
+INSERT INTO app.party_relationships (
+    id,
+    project_id,
+    party_id,
+    target_type,
+    target_id,
+    relation_type,
+    note
+)
+SELECT
+    id,
+    '00000000-0000-0000-0000-000000000000'::uuid AS project_id,
+    party_id,
+    target_type,
+    target_id,
+    relation_type,
+    note
+FROM stable_relationship_rows
+ON CONFLICT (id) DO UPDATE SET
+    project_id = EXCLUDED.project_id,
+    party_id = EXCLUDED.party_id,
+    target_type = EXCLUDED.target_type,
+    target_id = EXCLUDED.target_id,
+    relation_type = EXCLUDED.relation_type,
+    note = EXCLUDED.note;

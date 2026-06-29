@@ -49,6 +49,7 @@ The same fresh seed also includes business-domain records for the condition-sear
   - Lands: `L-DENSE-001` to `L-DENSE-036`
   - Buildings: `B-DENSE-001` to `B-DENSE-036`
   - Zones: `Z-DENSE-001` to `Z-DENSE-004`, each containing multiple linked lands and buildings
+  - Parties: `P-DENSE-001` to `P-DENSE-011`, with generated relationships for zone party summaries and ranking
 
 The GIS seed data is stored as PostGIS SQL dumps, not as the original source ZIP files. Source datasets:
 
