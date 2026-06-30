@@ -13,7 +13,7 @@ fun validateAnalysisRequest(db: Database, request: AnalysisJobRequest) {
     }
 
     val operation = request.operation?.takeIf { it.isNotBlank() }?.lowercase() ?: "and_filter"
-    if (operation !in setOf("and_filter", "outer_boundary", "condition_search")) {
+    if (operation !in setOf("and_filter", "condition_search")) {
         throw ApiException(HttpStatusCode.BadRequest, "Unsupported analysis operation: ${request.operation}")
     }
 
@@ -44,23 +44,6 @@ fun validateAnalysisRequest(db: Database, request: AnalysisJobRequest) {
         ?: throw ApiException(HttpStatusCode.BadRequest, "targetLayerId is required")
     val target = layersById[targetLayerId]
         ?: throw ApiException(HttpStatusCode.BadRequest, "Target layer does not exist in project")
-
-    if (operation == "outer_boundary") {
-        if (!target.isPolygonLike()) {
-            throw ApiException(HttpStatusCode.BadRequest, "Outer boundary target layer must be polygon")
-        }
-        val boundaryLayerId = request.boundaryLayerId?.takeIf { it.isNotBlank() }
-            ?: throw ApiException(HttpStatusCode.BadRequest, "boundaryLayerId is required for outer_boundary")
-        val boundary = layersById[boundaryLayerId]
-            ?: throw ApiException(HttpStatusCode.BadRequest, "Boundary layer does not exist in project")
-        if (!boundary.isPolygonLike() && !boundary.isLineLike()) {
-            throw ApiException(HttpStatusCode.BadRequest, "Boundary layer must be polygon or line")
-        }
-        if ((request.bufferMeters ?: 1000.0) <= 0.0) {
-            throw ApiException(HttpStatusCode.BadRequest, "bufferMeters must be positive")
-        }
-        return
-    }
 
     val referencedLayerIds = buildSet {
         add(target.id)
@@ -110,7 +93,3 @@ fun validateAnalysisRequest(db: Database, request: AnalysisJobRequest) {
         }
     }
 }
-
-private fun LayerDto.isPolygonLike(): Boolean = geometryType.uppercase().contains("POLYGON")
-
-private fun LayerDto.isLineLike(): Boolean = geometryType.uppercase().contains("LINE")

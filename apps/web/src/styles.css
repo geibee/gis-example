@@ -1008,6 +1008,56 @@ input[type="file"] {
   font-family: inherit;
 }
 
+.zone-data-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zone-data-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.zone-data-block {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border: 1px solid #d8e0e8;
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.zone-data-note {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #c9d2dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #4b5563;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.zone-data-note strong {
+  color: #263238;
+  font-size: 12px;
+}
+
+.zone-data-note p,
+.zone-data-note ol {
+  margin: 0;
+}
+
+.zone-data-note ol {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+}
+
 .object-related,
 .relationship-list,
 .business-links-panel,
@@ -1395,7 +1445,6 @@ input[type="file"] {
 }
 
 .layer-meta strong,
-.job-row strong,
 .feature-heading strong {
   display: flex;
   align-items: center;
@@ -1413,7 +1462,6 @@ input[type="file"] {
 }
 
 .layer-meta span,
-.job-row span,
 .feature-heading span {
   display: block;
   overflow: hidden;
@@ -1509,52 +1557,6 @@ input[type="file"] {
 .feature-editor-fields {
   display: grid;
   gap: 10px;
-}
-
-.job-group {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid #dfe5eb;
-  padding-top: 12px;
-}
-
-.job-row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-}
-
-.job-row em {
-  display: block;
-  overflow-wrap: anywhere;
-  color: #b91c1c;
-  font-size: 12px;
-  font-style: normal;
-}
-
-.status-dot {
-  width: 9px;
-  height: 9px;
-  margin-top: 5px;
-  border-radius: 999px;
-  background: #9ca3af;
-}
-
-.status-dot.pending {
-  background: #f59e0b;
-}
-
-.status-dot.running {
-  background: #2563eb;
-}
-
-.status-dot.succeeded {
-  background: #16a34a;
-}
-
-.status-dot.failed {
-  background: #dc2626;
 }
 
 .empty-state {
@@ -1670,6 +1672,10 @@ input[type="file"] {
   }
 
   .object-form {
+    grid-template-columns: 1fr;
+  }
+
+  .zone-data-grid {
     grid-template-columns: 1fr;
   }
 

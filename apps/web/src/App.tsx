@@ -12,7 +12,6 @@ import {
   Loader2,
   Map as MapIcon,
   Pencil,
-  Play,
   Plus,
   RefreshCcw,
   Save,
@@ -30,7 +29,6 @@ import {
   createParty,
   createPartyRelationship,
   createZone,
-  createZoneLayerFromFacilities,
   createZoneLayerFromImport,
   conditionSearchFeatures,
   deleteBuilding,
@@ -65,7 +63,6 @@ import {
   updateZone
 } from "./api";
 import type {
-  AnalysisJob,
   AttributeConditionDraft,
   Building,
   BusinessObjectFilters,
@@ -74,7 +71,6 @@ import type {
   ConditionQueryCondition,
   Feature,
   FeatureSearchResult,
-  ImportJob,
   Land,
   Layer,
   Party,
@@ -82,6 +78,7 @@ import type {
   Project,
   SpatialConditionDraft,
   Zone,
+  ZoneLayerOperation,
   ZonePartySummary as ZonePartySummaryData
 } from "./types";
 
@@ -137,6 +134,12 @@ type ZoneBusinessSourceType = "all" | "land" | "building";
 type RouteSelection = {
   tab: BusinessTab;
   id: string | null;
+};
+
+type ZoneLayerCreateMetadata = {
+  name?: string | null;
+  zoneType?: string | null;
+  status?: string | null;
 };
 
 type LandDraft = {
@@ -314,28 +317,16 @@ export default function App() {
   const [conditionBuilderOpen, setConditionBuilderOpen] = useState(false);
   const [savingConditionSearch, setSavingConditionSearch] = useState(false);
 
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadFormat, setUploadFormat] = useState("geojson");
-  const [uploadSrid, setUploadSrid] = useState("4326");
-  const [uploadAsZoneLayer, setUploadAsZoneLayer] = useState(false);
-  const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
-
   const [analysisName, setAnalysisName] = useState("");
   const [targetLayerId, setTargetLayerId] = useState("");
   const [attributeConditions, setAttributeConditions] = useState<AttributeConditionDraft[]>([]);
   const [spatialConditions, setSpatialConditions] = useState<SpatialConditionDraft[]>([]);
-  const [analysisJobs, setAnalysisJobs] = useState<AnalysisJob[]>([]);
 
-  const [outerBoundaryName, setOuterBoundaryName] = useState("");
-  const [outerTargetLayerId, setOuterTargetLayerId] = useState("");
-  const [outerBoundaryLayerId, setOuterBoundaryLayerId] = useState("");
-  const [outerBoundaryBufferMeters, setOuterBoundaryBufferMeters] = useState("1000");
-  const [facilityZoneName, setFacilityZoneName] = useState("");
-  const [facilityZoneLayerId, setFacilityZoneLayerId] = useState("");
-  const [facilityZoneBufferMeters, setFacilityZoneBufferMeters] = useState("1000");
-  const [facilityZoneDistanceMeters, setFacilityZoneDistanceMeters] = useState("");
-  const [facilityZoneSourceType, setFacilityZoneSourceType] = useState<ZoneBusinessSourceType>("all");
-  const [creatingFacilityZone, setCreatingFacilityZone] = useState(false);
+  const [zoneSourceLayerId, setZoneSourceLayerId] = useState("");
+  const [zoneUploadFile, setZoneUploadFile] = useState<File | null>(null);
+  const [zoneUploadFormat, setZoneUploadFormat] = useState("geojson");
+  const [zoneUploadSrid, setZoneUploadSrid] = useState("4326");
+  const [creatingZoneLayer, setCreatingZoneLayer] = useState(false);
 
   const [featureEditOpen, setFeatureEditOpen] = useState(false);
   const [featurePropertyDraft, setFeaturePropertyDraft] = useState<Record<string, string>>({});
@@ -393,9 +384,7 @@ export default function App() {
   const layerById = useMemo(() => new Map(layers.map((layer) => [layer.id, layer])), [layers]);
   const layerListItems = useMemo(() => groupLayerListItems(layers), [layers]);
   const zoneLayers = useMemo(() => layers.filter(isZoneLayer), [layers]);
-  const polygonLayers = useMemo(() => layers.filter(isPolygonLayer), [layers]);
-  const pointLayers = useMemo(() => layers.filter(isPointLayer), [layers]);
-  const boundaryCandidateLayers = useMemo(() => layers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer)), [layers]);
+  const zoneSourceLayers = useMemo(() => layers.filter(canCreateZoneLayerFromSource), [layers]);
 
   useEffect(() => {
     setZoneFilters((current) => normalizeZoneLayerFilter(current, zoneLayers));
@@ -557,9 +546,7 @@ export default function App() {
       const previousLayers = loadedLayerProjectId.current === selectedProject ? layersRef.current : [];
       const previousLayerIds = new Set(previousLayers.map((layer) => layer.id));
       const orderedLayers = orderLayers(nextLayers, savedViewState?.layerOrder ?? previousLayers.map((layer) => layer.id));
-      const nextPolygonLayers = nextLayers.filter(isPolygonLayer);
-      const nextPointLayers = nextLayers.filter(isPointLayer);
-      const nextBoundaryCandidateLayers = nextLayers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer));
+      const nextZoneSourceLayers = nextLayers.filter(canCreateZoneLayerFromSource);
       loadedLayerProjectId.current = selectedProject;
       if (typeof savedViewState?.baseMapVisible === "boolean") {
         setBaseMapVisible(savedViewState.baseMapVisible);
@@ -571,21 +558,15 @@ export default function App() {
       if (!nextLayers.some((layer) => layer.id === targetLayerId)) {
         setTargetLayerId(nextLayers[0]?.id ?? "");
       }
-      if (!nextPolygonLayers.some((layer) => layer.id === outerTargetLayerId)) {
-        setOuterTargetLayerId(nextPolygonLayers[0]?.id ?? "");
-      }
-      if (!nextBoundaryCandidateLayers.some((layer) => layer.id === outerBoundaryLayerId)) {
-        setOuterBoundaryLayerId(nextBoundaryCandidateLayers[0]?.id ?? "");
-      }
-      if (!nextPointLayers.some((layer) => layer.id === facilityZoneLayerId)) {
-        setFacilityZoneLayerId(nextPointLayers[0]?.id ?? "");
+      if (!nextZoneSourceLayers.some((layer) => layer.id === zoneSourceLayerId)) {
+        setZoneSourceLayerId(nextZoneSourceLayers[0]?.id ?? "");
       }
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
       setLoadingLayers(false);
     }
-  }, [facilityZoneLayerId, outerBoundaryLayerId, outerTargetLayerId, selectedProject, targetLayerId]);
+  }, [selectedProject, targetLayerId, zoneSourceLayerId]);
 
   const refreshZones = useCallback(async () => {
     if (!selectedProject) return;
@@ -1033,35 +1014,53 @@ export default function App() {
     source?.reload?.();
   };
 
-  const submitUpload = async () => {
-    if (!selectedProject || !uploadFile) return;
+  const submitZoneUpload = async () => {
+    if (!selectedProject || !zoneUploadFile) return;
     const formData = new FormData();
     formData.set("projectId", selectedProject);
-    formData.set("format", uploadFormat);
-    if (uploadSrid.trim()) formData.set("sourceSrid", uploadSrid.trim());
-    if (uploadAsZoneLayer) formData.set("layerRole", "zone");
-    formData.set("file", uploadFile);
+    formData.set("format", zoneUploadFormat);
+    if (zoneUploadSrid.trim()) formData.set("sourceSrid", zoneUploadSrid.trim());
+    formData.set("file", zoneUploadFile);
     try {
+      setCreatingZoneLayer(true);
       const job = await createImportJob(formData);
-      setImportJobs((current) => upsertJob(current, job));
-      pollImportJob(job.id);
+      pollImportJob(job.id, { createZoneLayer: true, metadata: zoneMetadataFromDraft(zoneDraft) });
     } catch (error) {
+      setCreatingZoneLayer(false);
       setNotice(errorMessage(error));
     }
   };
 
-  const pollImportJob = (id: string) => {
+  const pollImportJob = (id: string, options: { createZoneLayer?: boolean; metadata?: ZoneLayerCreateMetadata } = {}) => {
     const timer = window.setInterval(async () => {
       try {
         const job = await getImportJob(id);
-        setImportJobs((current) => upsertJob(current, job));
         if (job.status === "succeeded" || job.status === "failed") {
           window.clearInterval(timer);
-          void refreshLayers();
-          void refreshZones();
+          if (job.status === "failed") {
+            if (options.createZoneLayer) setCreatingZoneLayer(false);
+            setNotice(job.errorMessage ?? "区域データの取込に失敗しました");
+            return;
+          }
+          if (options.createZoneLayer) {
+            if (job.layerId) {
+              const result = await createZoneFromSourceLayer(job.layerId, {
+                ...options.metadata,
+                manageLoading: false
+              });
+              if (result) openCreatedZoneFromOperation(result);
+            } else {
+              setNotice("区域データの取込結果を取得できませんでした");
+            }
+            setCreatingZoneLayer(false);
+          } else {
+            void refreshLayers();
+            void refreshZones();
+          }
         }
       } catch (error) {
         window.clearInterval(timer);
+        if (options.createZoneLayer) setCreatingZoneLayer(false);
         setNotice(errorMessage(error));
       }
     }, 1500);
@@ -1087,88 +1086,57 @@ export default function App() {
     };
     try {
       const job = await createAnalysisJob(body);
-      setAnalysisJobs((current) => upsertJob(current, job));
       pollAnalysisJob(job.id);
     } catch (error) {
       setNotice(errorMessage(error));
     }
   };
 
-  const submitOuterBoundary = async () => {
-    if (!selectedProject || !outerTargetLayerId || !outerBoundaryLayerId) return;
-    const bufferMeters = Number(outerBoundaryBufferMeters || "1000");
-    if (!Number.isFinite(bufferMeters) || bufferMeters <= 0) {
-      setNotice("バッファ距離は正の数値で入力してください");
-      return;
-    }
-    const body = {
-      projectId: selectedProject,
-      name: outerBoundaryName.trim() || undefined,
-      targetLayerId: outerTargetLayerId,
-      operation: "outer_boundary",
-      boundaryLayerId: outerBoundaryLayerId,
-      bufferMeters
-    };
-    try {
-      const job = await createAnalysisJob(body);
-      setAnalysisJobs((current) => upsertJob(current, job));
-      pollAnalysisJob(job.id);
-    } catch (error) {
-      setNotice(errorMessage(error));
-    }
+  const openCreatedZoneFromOperation = (result: ZoneLayerOperation) => {
+    const createdZone = result.zones[0];
+    if (!createdZone) return;
+    setActiveTab("zone");
+    setCreatingZone(false);
+    window.history.pushState(null, "", `/zones/${encodeURIComponent(createdZone.id)}`);
+    setRouteSelection({ tab: "zone", id: createdZone.id });
+    setSelectedZoneId(createdZone.id);
+    setSelectedZone(createdZone);
+    setZoneDraft(toZoneDraft(createdZone));
   };
 
-  const convertLayerToZoneLayer = async (layer: Layer) => {
-    if (!selectedProject) return;
+  const createZoneFromSourceLayer = async (
+    layerId: string,
+    options: ZoneLayerCreateMetadata & { manageLoading?: boolean } = {}
+  ): Promise<ZoneLayerOperation | null> => {
+    if (!selectedProject) return null;
+    const manageLoading = options.manageLoading ?? true;
     try {
+      if (manageLoading) setCreatingZoneLayer(true);
       const result = await createZoneLayerFromImport({
         projectId: selectedProject,
-        layerId: layer.id
+        layerId,
+        name: options.name,
+        zoneType: options.zoneType,
+        status: options.status
       });
       await refreshLayers();
       await refreshZones();
       setZoneFilters((current) => ({ ...current, zoneLayerId: result.layer.id }));
       setVisibleLayerIds((current) => new Set([...current, result.layer.id]));
-      setNotice(`区域レイヤ化しました（${result.zonesCreated.toLocaleString()}件作成）`);
+      setNotice(`区域レイヤを作成しました（${result.zonesCreated.toLocaleString()}件作成）`);
+      return result;
     } catch (error) {
       setNotice(errorMessage(error));
+      return null;
+    } finally {
+      if (manageLoading) setCreatingZoneLayer(false);
     }
   };
 
-  const submitFacilityZoneLayer = async () => {
-    if (!selectedProject || !facilityZoneLayerId) return;
-    const bufferMeters = Number(facilityZoneBufferMeters || "1000");
-    if (!Number.isFinite(bufferMeters) || bufferMeters <= 0) {
-      setNotice("外縁距離は正の数値で入力してください");
-      return;
-    }
-    const distanceMeters = facilityZoneDistanceMeters.trim() ? Number(facilityZoneDistanceMeters) : null;
-    if (distanceMeters !== null && (!Number.isFinite(distanceMeters) || distanceMeters < 0)) {
-      setNotice("施設抽出距離は0以上の数値で入力してください");
-      return;
-    }
-    const sourceTypes: Array<"land" | "building"> =
-      facilityZoneSourceType === "all" ? ["land", "building"] : [facilityZoneSourceType];
-    try {
-      setCreatingFacilityZone(true);
-      const result = await createZoneLayerFromFacilities({
-        projectId: selectedProject,
-        facilityLayerId: facilityZoneLayerId,
-        name: nullableString(facilityZoneName),
-        bufferMeters,
-        facilityDistanceMeters: distanceMeters,
-        sourceTypes
-      });
-      await refreshLayers();
-      await refreshZones();
-      setZoneFilters((current) => ({ ...current, zoneLayerId: result.layer.id }));
-      setVisibleLayerIds((current) => new Set([...current, result.layer.id]));
-      setNotice(`施設起点区域を生成しました（${result.zonesCreated.toLocaleString()}件作成）`);
-    } catch (error) {
-      setNotice(errorMessage(error));
-    } finally {
-      setCreatingFacilityZone(false);
-    }
+  const submitZoneFromLayer = async () => {
+    if (!zoneSourceLayerId) return;
+    const result = await createZoneFromSourceLayer(zoneSourceLayerId, zoneMetadataFromDraft(zoneDraft));
+    if (result) openCreatedZoneFromOperation(result);
   };
 
   const submitZoneSearch = async () => {
@@ -1197,7 +1165,6 @@ export default function App() {
         operation: "condition_search",
         conditionQuery: query
       });
-      setAnalysisJobs((current) => upsertJob(current, job));
       pollAnalysisJob(job.id);
       setNotice("条件検索結果の保存を開始しました");
     } catch (error) {
@@ -1340,10 +1307,13 @@ export default function App() {
     const timer = window.setInterval(async () => {
       try {
         const job = await getAnalysisJob(id);
-        setAnalysisJobs((current) => upsertJob(current, job));
         if (job.status === "succeeded" || job.status === "failed") {
           window.clearInterval(timer);
-          void refreshLayers();
+          if (job.status === "failed") {
+            setNotice(job.errorMessage ?? "条件検索結果の保存に失敗しました");
+          } else {
+            void refreshLayers();
+          }
         }
       } catch (error) {
         window.clearInterval(timer);
@@ -1397,10 +1367,7 @@ export default function App() {
     setSelectedFeature((current) => (current && deletedLayerIds.has(current.layerId) ? null : current));
     setSelectedFeatureLayer((current) => (current && deletedLayerIds.has(current.id) ? null : current));
     setTargetLayerId((current) => (deletedLayerIds.has(current) ? remainingLayers[0]?.id ?? "" : current));
-    setOuterTargetLayerId((current) => (deletedLayerIds.has(current) ? remainingLayers.filter(isPolygonLayer)[0]?.id ?? "" : current));
-    setOuterBoundaryLayerId((current) =>
-      deletedLayerIds.has(current) ? remainingLayers.filter((layer) => isPolygonLayer(layer) || isLineLayer(layer))[0]?.id ?? "" : current
-    );
+    setZoneSourceLayerId((current) => (deletedLayerIds.has(current) ? remainingLayers.filter(canCreateZoneLayerFromSource)[0]?.id ?? "" : current));
   };
 
   const removeLayerFromState = (layerId: string) => {
@@ -1505,7 +1472,7 @@ export default function App() {
     setCreatingZone(true);
     setSelectedZoneId(null);
     setSelectedZone(null);
-    setZoneDraft(newZoneDraft(selectedFeature, selectedFeatureLayer, zoneLayers[0]));
+    setZoneDraft(newZoneDraft());
     window.history.pushState(null, "", "/zones");
     setRouteSelection({ tab: "zone", id: null });
   };
@@ -2100,6 +2067,18 @@ export default function App() {
             layers={layers}
             selectedFeature={selectedFeature}
             selectedFeatureLayer={selectedFeatureLayer}
+            zoneSourceLayerId={zoneSourceLayerId}
+            setZoneSourceLayerId={setZoneSourceLayerId}
+            zoneSourceLayers={zoneSourceLayers}
+            zoneUploadFile={zoneUploadFile}
+            setZoneUploadFile={setZoneUploadFile}
+            zoneUploadFormat={zoneUploadFormat}
+            setZoneUploadFormat={setZoneUploadFormat}
+            zoneUploadSrid={zoneUploadSrid}
+            setZoneUploadSrid={setZoneUploadSrid}
+            creatingZoneLayer={creatingZoneLayer}
+            onSubmitZoneFromLayer={() => void submitZoneFromLayer()}
+            onSubmitZoneUpload={() => void submitZoneUpload()}
             selectedProject={selectedProject}
             projects={projects}
             onProjectChange={setSelectedProject}
@@ -2295,7 +2274,6 @@ export default function App() {
           onToggleLayer={toggleLayer}
           onToggleLayerGroup={toggleLayerGroup}
           onRequestLayerDelete={(layer) => void requestLayerDelete(layer)}
-          onConvertLayerToZone={(layer) => void convertLayerToZoneLayer(layer)}
           onRequestResultSetDelete={(resultSet) => void requestResultSetDelete(resultSet)}
           onDragLayerStart={startLayerDrag}
           onDragLayerOver={dragLayerOver}
@@ -2313,41 +2291,6 @@ export default function App() {
           setFeatureGeometryDraft={setFeatureGeometryDraft}
           savingFeature={savingFeature}
           onSaveFeature={() => void saveSelectedFeature()}
-          uploadFile={uploadFile}
-          setUploadFile={setUploadFile}
-          uploadFormat={uploadFormat}
-          setUploadFormat={setUploadFormat}
-          uploadSrid={uploadSrid}
-          setUploadSrid={setUploadSrid}
-          uploadAsZoneLayer={uploadAsZoneLayer}
-          setUploadAsZoneLayer={setUploadAsZoneLayer}
-          onSubmitUpload={() => void submitUpload()}
-          outerBoundaryName={outerBoundaryName}
-          setOuterBoundaryName={setOuterBoundaryName}
-          outerTargetLayerId={outerTargetLayerId}
-          setOuterTargetLayerId={setOuterTargetLayerId}
-          outerBoundaryLayerId={outerBoundaryLayerId}
-          setOuterBoundaryLayerId={setOuterBoundaryLayerId}
-          outerBoundaryBufferMeters={outerBoundaryBufferMeters}
-          setOuterBoundaryBufferMeters={setOuterBoundaryBufferMeters}
-          polygonLayers={polygonLayers}
-          boundaryCandidateLayers={boundaryCandidateLayers}
-          onSubmitOuterBoundary={() => void submitOuterBoundary()}
-          facilityZoneName={facilityZoneName}
-          setFacilityZoneName={setFacilityZoneName}
-          facilityZoneLayerId={facilityZoneLayerId}
-          setFacilityZoneLayerId={setFacilityZoneLayerId}
-          facilityZoneBufferMeters={facilityZoneBufferMeters}
-          setFacilityZoneBufferMeters={setFacilityZoneBufferMeters}
-          facilityZoneDistanceMeters={facilityZoneDistanceMeters}
-          setFacilityZoneDistanceMeters={setFacilityZoneDistanceMeters}
-          facilityZoneSourceType={facilityZoneSourceType}
-          setFacilityZoneSourceType={setFacilityZoneSourceType}
-          pointLayers={pointLayers}
-          creatingFacilityZone={creatingFacilityZone}
-          onSubmitFacilityZone={() => void submitFacilityZoneLayer()}
-          importJobs={importJobs}
-          analysisJobs={analysisJobs}
         />
       </main>
 
@@ -2979,30 +2922,6 @@ function FeatureEditor({
   );
 }
 
-function JobList({ title, jobs }: { title: string; jobs: Array<ImportJob | AnalysisJob> }) {
-  return (
-    <div className="job-group">
-      <h3>{title}</h3>
-      {jobs.slice(0, 5).map((job) => (
-        <div className="job-row" key={job.id}>
-          <span className={`status-dot ${job.status}`} />
-          <div>
-            <strong>{"filename" in job ? job.filename : job.name}</strong>
-            <span>
-              {job.status}
-              {"resultCount" in job && job.resultCount !== null && job.resultCount !== undefined
-                ? ` · ${job.resultCount.toLocaleString()}件`
-                : ""}
-            </span>
-            {job.errorMessage ? <em>{job.errorMessage}</em> : null}
-          </div>
-        </div>
-      ))}
-      {!jobs.length ? <p className="empty-state compact">ジョブはありません</p> : null}
-    </div>
-  );
-}
-
 function BusinessLinksPanel({ links, loading }: { links: BusinessLinks; loading: boolean }) {
   const hasLinks = links.lands.length > 0 || links.buildings.length > 0;
   return (
@@ -3248,6 +3167,18 @@ function ZoneWorkspace({
   layers,
   selectedFeature,
   selectedFeatureLayer,
+  zoneSourceLayerId,
+  setZoneSourceLayerId,
+  zoneSourceLayers,
+  zoneUploadFile,
+  setZoneUploadFile,
+  zoneUploadFormat,
+  setZoneUploadFormat,
+  zoneUploadSrid,
+  setZoneUploadSrid,
+  creatingZoneLayer,
+  onSubmitZoneFromLayer,
+  onSubmitZoneUpload,
   selectedProject,
   projects,
   onProjectChange,
@@ -3285,6 +3216,18 @@ function ZoneWorkspace({
   layers: Layer[];
   selectedFeature: Feature | null;
   selectedFeatureLayer: Layer | null;
+  zoneSourceLayerId: string;
+  setZoneSourceLayerId: (value: string) => void;
+  zoneSourceLayers: Layer[];
+  zoneUploadFile: File | null;
+  setZoneUploadFile: (file: File | null) => void;
+  zoneUploadFormat: string;
+  setZoneUploadFormat: (value: string) => void;
+  zoneUploadSrid: string;
+  setZoneUploadSrid: (value: string) => void;
+  creatingZoneLayer: boolean;
+  onSubmitZoneFromLayer: () => void;
+  onSubmitZoneUpload: () => void;
   selectedProject: string;
   projects: Project[];
   onProjectChange: (id: string) => void;
@@ -3332,6 +3275,54 @@ function ZoneWorkspace({
   }, [draft.zoneLayerId, selectedProject]);
 
   const featureOptionIds = new Set(featureOptions.map((option) => option.featureId));
+  const zoneFeatureFields = (
+    <>
+      <label>
+        区域レイヤ
+        <select
+          value={draft.zoneLayerId ?? ""}
+          onChange={(event) =>
+            setDraft((current) => ({
+              ...current,
+              zoneLayerId: event.target.value,
+              zoneFeatureId: ""
+            }))
+          }
+        >
+          <option value="">選択</option>
+          {sourceLayers.map((layer) => (
+            <option key={layer.id} value={layer.id}>
+              {layer.name} ({layer.geometryType})
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        区域地物
+        <select
+          value={draft.zoneFeatureId ?? ""}
+          onChange={(event) => setDraft((current) => ({ ...current, zoneFeatureId: event.target.value }))}
+          disabled={!draft.zoneLayerId || loadingFeatureOptions || Boolean(featureOptionsError)}
+        >
+          <option value="">{loadingFeatureOptions ? "取得中" : "選択"}</option>
+          {draft.zoneFeatureId && !featureOptionIds.has(draft.zoneFeatureId) ? (
+            <option value={draft.zoneFeatureId}>ID {draft.zoneFeatureId}</option>
+          ) : null}
+          {featureOptions.map((result) => (
+            <option key={`${result.layerId}:${result.featureId}`} value={result.featureId}>
+              ID {result.featureId} · {featureResultSummary(result)}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+  const selectedFeatureAction = (
+    <button className="subtle-button" type="button" onClick={onUseSelectedFeature} disabled={!selectedFeatureUsable}>
+      <Layers size={15} />
+      選択中の地物を設定
+    </button>
+  );
   return (
     <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
       {!detailOpen ? (
@@ -3413,10 +3404,12 @@ function ZoneWorkspace({
                 onBack={creating ? onCancelCreate : onBackToList}
               />
               <div className="object-form">
-                <label>
-                  ID
-                  <input value={draft.id} disabled={!creating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
-                </label>
+                {!creating ? (
+                  <label>
+                    ID
+                    <input value={draft.id} disabled onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
+                  </label>
+                ) : null}
                 <label>
                   区域名
                   <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
@@ -3439,64 +3432,102 @@ function ZoneWorkspace({
                     emptyLabel="選択"
                   />
                 </label>
-                <label>
-                  区域レイヤ
-                  <select
-                    value={draft.zoneLayerId ?? ""}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        zoneLayerId: event.target.value,
-                        zoneFeatureId: ""
-                      }))
-                    }
-                  >
-                    <option value="">選択</option>
-                    {sourceLayers.map((layer) => (
-                      <option key={layer.id} value={layer.id}>
-                        {layer.name} ({layer.geometryType})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  区域地物
-                  <select
-                    value={draft.zoneFeatureId ?? ""}
-                    onChange={(event) => setDraft((current) => ({ ...current, zoneFeatureId: event.target.value }))}
-                    disabled={!draft.zoneLayerId || loadingFeatureOptions || Boolean(featureOptionsError)}
-                  >
-                    <option value="">{loadingFeatureOptions ? "取得中" : "選択"}</option>
-                    {draft.zoneFeatureId && !featureOptionIds.has(draft.zoneFeatureId) ? (
-                      <option value={draft.zoneFeatureId}>ID {draft.zoneFeatureId}</option>
-                    ) : null}
-                    {featureOptions.map((result) => (
-                      <option key={`${result.layerId}:${result.featureId}`} value={result.featureId}>
-                        ID {result.featureId} · {featureResultSummary(result)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="wide-field">
-                  メモ
-                  <textarea value={draft.memo} onChange={(event) => setDraft((current) => ({ ...current, memo: event.target.value }))} />
-                </label>
-              </div>
-
-              <div className="button-row compact-actions">
-                <button className="subtle-button" type="button" onClick={onUseSelectedFeature} disabled={!selectedFeatureUsable}>
-                  <Layers size={15} />
-                  選択中の地物を設定
-                </button>
-                {selected ? (
-                  <button className="subtle-button" type="button" onClick={() => onShowOnMap(selected)}>
-                    <MapIcon size={15} />
-                    地図で表示
-                  </button>
+                {!creating ? zoneFeatureFields : null}
+                {!creating ? (
+                  <label className="wide-field">
+                    メモ
+                    <textarea value={draft.memo} onChange={(event) => setDraft((current) => ({ ...current, memo: event.target.value }))} />
+                  </label>
                 ) : null}
               </div>
 
-              <SourceLinkPanel layers={layers} layerId={draft.zoneLayerId} featureId={draft.zoneFeatureId} onOpen={onOpenSourceFeature} />
+              {creating ? (
+                <section className="object-related zone-data-panel">
+                  <h3>
+                    <Upload size={15} />
+                    区域データ
+                  </h3>
+                  <div className="zone-data-grid">
+                    <div className="zone-data-block">
+                      <div className="mini-heading">
+                        <span>ファイル</span>
+                      </div>
+                      <input type="file" onChange={(event) => setZoneUploadFile(event.target.files?.[0] ?? null)} />
+                      <div className="inline-fields">
+                        <label>
+                          形式
+                          <select value={zoneUploadFormat} onChange={(event) => setZoneUploadFormat(event.target.value)}>
+                            <option value="geojson">GeoJSON</option>
+                            <option value="shapefile">Shapefile zip</option>
+                            <option value="gml">GML</option>
+                            <option value="kml">KML</option>
+                            <option value="gpx">GPX</option>
+                          </select>
+                        </label>
+                        <label>
+                          SRID
+                          <input value={zoneUploadSrid} onChange={(event) => setZoneUploadSrid(event.target.value)} inputMode="numeric" />
+                        </label>
+                      </div>
+                      <button className="command-button" type="button" onClick={onSubmitZoneUpload} disabled={!zoneUploadFile || creatingZoneLayer}>
+                        {creatingZoneLayer ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
+                        アップロードして作成
+                      </button>
+                    </div>
+
+                    <div className="zone-data-block">
+                      <div className="mini-heading">
+                        <span>取込済みデータ</span>
+                      </div>
+                      <label>
+                        データ
+                        <select value={zoneSourceLayerId} onChange={(event) => setZoneSourceLayerId(event.target.value)}>
+                          <option value="">選択</option>
+                          {zoneSourceLayers.map((layer) => (
+                            <option key={layer.id} value={layer.id}>
+                              {layer.name} ({layer.geometryType})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="zone-data-note" role="note">
+                        <strong>対象レイヤに外縁を生成した区域レイヤを作成します</strong>
+                        <p>
+                          元のデータレイヤは変更せず、選択したポイント・ポリゴン地物から1000mバッファを作成し、
+                          その外縁で囲まれる区域面を新しい区域レイヤとして追加します。
+                        </p>
+                        <ol>
+                          <li>ポイントは点を中心に半径1000m、ポリゴンは形状の外側1000mまでをバッファ化します。</li>
+                          <li>距離計算はメートル単位の座標系に変換して行います。</li>
+                          <li>複数地物のバッファは重なりを統合し、1つの区域面として保存します。</li>
+                          <li>空形状や区域化できない形状は除外し、作成後に区域レコードへ紐づけます。</li>
+                        </ol>
+                      </div>
+                      <button className="command-button" type="button" onClick={onSubmitZoneFromLayer} disabled={!zoneSourceLayerId || creatingZoneLayer}>
+                        {creatingZoneLayer ? <Loader2 className="spin" size={16} /> : <Layers size={16} />}
+                        指定データから作成
+                      </button>
+                      {!zoneSourceLayers.length ? <p className="empty-state compact">対象データはありません</p> : null}
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+
+              {!creating ? (
+                <>
+                  <div className="button-row compact-actions">
+                    {selectedFeatureAction}
+                    {selected ? (
+                      <button className="subtle-button" type="button" onClick={() => onShowOnMap(selected)}>
+                        <MapIcon size={15} />
+                        地図で表示
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <SourceLinkPanel layers={layers} layerId={draft.zoneLayerId} featureId={draft.zoneFeatureId} onOpen={onOpenSourceFeature} />
+                </>
+              ) : null}
 
               {selected ? <ZonePartySummary zoneId={selected.id} onOpenParty={onOpenParty} /> : null}
 
@@ -3523,14 +3554,16 @@ function ZoneWorkspace({
                 </div>
               ) : null}
 
-              <ObjectActions
-                saving={saving}
-                deleting={deleting}
-                onSave={onSave}
-                onDelete={onDelete}
-                onCancel={onCancelCreate}
-                creating={creating}
-              />
+              {creating ? (
+                <div className="object-actions">
+                  <button className="subtle-button" type="button" onClick={onCancelCreate} disabled={creatingZoneLayer}>
+                    <X size={15} />
+                    キャンセル
+                  </button>
+                </div>
+              ) : (
+                <ObjectActions saving={saving} deleting={deleting} onSave={onSave} onDelete={onDelete} onCancel={onCancelCreate} creating={false} />
+              )}
             </>
           ) : (
             <p className="empty-state">区域を読み込み中です</p>
@@ -3615,7 +3648,6 @@ function MapSupportPane({
   onToggleLayer,
   onToggleLayerGroup,
   onRequestLayerDelete,
-  onConvertLayerToZone,
   onRequestResultSetDelete,
   onDragLayerStart,
   onDragLayerOver,
@@ -3632,42 +3664,7 @@ function MapSupportPane({
   featureGeometryDraft,
   setFeatureGeometryDraft,
   savingFeature,
-  onSaveFeature,
-  uploadFile,
-  setUploadFile,
-  uploadFormat,
-  setUploadFormat,
-  uploadSrid,
-  setUploadSrid,
-  uploadAsZoneLayer,
-  setUploadAsZoneLayer,
-  onSubmitUpload,
-  outerBoundaryName,
-  setOuterBoundaryName,
-  outerTargetLayerId,
-  setOuterTargetLayerId,
-  outerBoundaryLayerId,
-  setOuterBoundaryLayerId,
-  outerBoundaryBufferMeters,
-  setOuterBoundaryBufferMeters,
-  polygonLayers,
-  boundaryCandidateLayers,
-  onSubmitOuterBoundary,
-  facilityZoneName,
-  setFacilityZoneName,
-  facilityZoneLayerId,
-  setFacilityZoneLayerId,
-  facilityZoneBufferMeters,
-  setFacilityZoneBufferMeters,
-  facilityZoneDistanceMeters,
-  setFacilityZoneDistanceMeters,
-  facilityZoneSourceType,
-  setFacilityZoneSourceType,
-  pointLayers,
-  creatingFacilityZone,
-  onSubmitFacilityZone,
-  importJobs,
-  analysisJobs
+  onSaveFeature
 }: {
   open: boolean;
   onToggle: () => void;
@@ -3684,7 +3681,6 @@ function MapSupportPane({
   onToggleLayer: (layerId: string) => void;
   onToggleLayerGroup: (layerIds: string[]) => void;
   onRequestLayerDelete: (layer: Layer) => void;
-  onConvertLayerToZone: (layer: Layer) => void;
   onRequestResultSetDelete: (resultSet: Extract<LayerListItem, { type: "resultSet" }>) => void;
   onDragLayerStart: (event: DragEvent<HTMLDivElement>, layerId: string) => void;
   onDragLayerOver: (event: DragEvent<HTMLDivElement>) => void;
@@ -3702,41 +3698,6 @@ function MapSupportPane({
   setFeatureGeometryDraft: React.Dispatch<React.SetStateAction<string>>;
   savingFeature: boolean;
   onSaveFeature: () => void;
-  uploadFile: File | null;
-  setUploadFile: (file: File | null) => void;
-  uploadFormat: string;
-  setUploadFormat: (value: string) => void;
-  uploadSrid: string;
-  setUploadSrid: (value: string) => void;
-  uploadAsZoneLayer: boolean;
-  setUploadAsZoneLayer: (value: boolean) => void;
-  onSubmitUpload: () => void;
-  outerBoundaryName: string;
-  setOuterBoundaryName: (value: string) => void;
-  outerTargetLayerId: string;
-  setOuterTargetLayerId: (value: string) => void;
-  outerBoundaryLayerId: string;
-  setOuterBoundaryLayerId: (value: string) => void;
-  outerBoundaryBufferMeters: string;
-  setOuterBoundaryBufferMeters: (value: string) => void;
-  polygonLayers: Layer[];
-  boundaryCandidateLayers: Layer[];
-  onSubmitOuterBoundary: () => void;
-  facilityZoneName: string;
-  setFacilityZoneName: (value: string) => void;
-  facilityZoneLayerId: string;
-  setFacilityZoneLayerId: (value: string) => void;
-  facilityZoneBufferMeters: string;
-  setFacilityZoneBufferMeters: (value: string) => void;
-  facilityZoneDistanceMeters: string;
-  setFacilityZoneDistanceMeters: (value: string) => void;
-  facilityZoneSourceType: ZoneBusinessSourceType;
-  setFacilityZoneSourceType: (value: ZoneBusinessSourceType) => void;
-  pointLayers: Layer[];
-  creatingFacilityZone: boolean;
-  onSubmitFacilityZone: () => void;
-  importJobs: ImportJob[];
-  analysisJobs: AnalysisJob[];
 }) {
   return (
     <aside className={`map-support-pane${open ? "" : " closed"}`}>
@@ -3854,11 +3815,6 @@ function MapSupportPane({
                       {layer.geometryType} · {layer.rowCount.toLocaleString()}件{layer.isResult ? " · 結果" : ""}{layer.layerRole === "zone" ? " · 区域" : ""}
                     </span>
                   </div>
-                  {isPolygonLayer(layer) && layer.layerRole !== "zone" && !layer.isResult ? (
-                    <button className="icon-button" type="button" onClick={() => onConvertLayerToZone(layer)} title="区域レイヤ化">
-                      <MapIcon size={16} />
-                    </button>
-                  ) : null}
                   <button
                     className="icon-button danger-icon-button"
                     type="button"
@@ -3871,7 +3827,7 @@ function MapSupportPane({
                 </div>
               );
             })}
-            {!layerListItems.length ? <p className="empty-state">取込済みレイヤはありません</p> : null}
+            {!layerListItems.length ? <p className="empty-state">レイヤはありません</p> : null}
           </div>
         </section>
 
@@ -3919,133 +3875,6 @@ function MapSupportPane({
           ) : (
             <p className="empty-state">地図上の地物を選択してください</p>
           )}
-        </section>
-
-        <details className="map-tool-details">
-          <summary>
-            <Upload size={15} />
-            取込
-          </summary>
-          <section className="panel-section">
-            <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
-            <div className="inline-fields">
-              <label>
-                形式
-                <select value={uploadFormat} onChange={(event) => setUploadFormat(event.target.value)}>
-                  <option value="geojson">GeoJSON</option>
-                  <option value="shapefile">Shapefile zip</option>
-                  <option value="gml">GML</option>
-                  <option value="kml">KML</option>
-                  <option value="gpx">GPX</option>
-                </select>
-              </label>
-              <label>
-                SRID
-                <input value={uploadSrid} onChange={(event) => setUploadSrid(event.target.value)} inputMode="numeric" />
-              </label>
-            </div>
-            <label className="checkbox-field">
-              <input type="checkbox" checked={uploadAsZoneLayer} onChange={(event) => setUploadAsZoneLayer(event.target.checked)} />
-              <span>区域レイヤとして取り込む</span>
-            </label>
-            <button className="command-button" type="button" onClick={onSubmitUpload} disabled={!uploadFile}>
-              <Upload size={16} />
-              取込開始
-            </button>
-          </section>
-        </details>
-
-        <details className="map-tool-details">
-          <summary>
-            <MapIcon size={15} />
-            施設起点区域
-          </summary>
-          <section className="panel-section">
-            <label>
-              結果名
-              <input value={facilityZoneName} onChange={(event) => setFacilityZoneName(event.target.value)} />
-            </label>
-            <label>
-              施設ポイントレイヤ
-              <select value={facilityZoneLayerId} onChange={(event) => setFacilityZoneLayerId(event.target.value)}>
-                <option value="">選択</option>
-                {pointLayers.map((layer) => (
-                  <option key={layer.id} value={layer.id}>
-                    {layer.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="inline-fields">
-              <label>
-                外縁距離(m)
-                <input value={facilityZoneBufferMeters} onChange={(event) => setFacilityZoneBufferMeters(event.target.value)} inputMode="decimal" />
-              </label>
-              <label>
-                抽出距離(m)
-                <input value={facilityZoneDistanceMeters} onChange={(event) => setFacilityZoneDistanceMeters(event.target.value)} inputMode="decimal" />
-              </label>
-            </div>
-            <label>
-              対象
-              <select value={facilityZoneSourceType} onChange={(event) => setFacilityZoneSourceType(event.target.value as ZoneBusinessSourceType)}>
-                <option value="all">土地・建物</option>
-                <option value="land">土地</option>
-                <option value="building">建物</option>
-              </select>
-            </label>
-            <button className="command-button" type="button" onClick={onSubmitFacilityZone} disabled={!facilityZoneLayerId || creatingFacilityZone}>
-              {creatingFacilityZone ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-              生成開始
-            </button>
-          </section>
-        </details>
-
-        <details className="map-tool-details">
-          <summary>
-            <MapIcon size={15} />
-            外縁生成
-          </summary>
-          <section className="panel-section">
-            <label>
-              結果名
-              <input value={outerBoundaryName} onChange={(event) => setOuterBoundaryName(event.target.value)} />
-            </label>
-            <label>
-              ポリゴン1
-              <select value={outerTargetLayerId} onChange={(event) => setOuterTargetLayerId(event.target.value)}>
-                {polygonLayers.map((layer) => (
-                  <option key={layer.id} value={layer.id}>
-                    {layer.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              区域指定レイヤ
-              <select value={outerBoundaryLayerId} onChange={(event) => setOuterBoundaryLayerId(event.target.value)}>
-                {boundaryCandidateLayers.map((layer) => (
-                  <option key={layer.id} value={layer.id}>
-                    {layer.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              バッファ(m)
-              <input value={outerBoundaryBufferMeters} onChange={(event) => setOuterBoundaryBufferMeters(event.target.value)} inputMode="decimal" />
-            </label>
-            <button className="command-button" type="button" onClick={onSubmitOuterBoundary} disabled={!outerTargetLayerId || !outerBoundaryLayerId}>
-              <Play size={16} />
-              外縁生成開始
-            </button>
-          </section>
-        </details>
-
-        <section className="panel-section">
-          <h2>ジョブ</h2>
-          <JobList title="取込" jobs={importJobs} />
-          <JobList title="解析" jobs={analysisJobs} />
         </section>
       </div>
     </aside>
@@ -5792,11 +5621,6 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function upsertJob<T extends { id: string }>(jobs: T[], next: T): T[] {
-  const filtered = jobs.filter((job) => job.id !== next.id);
-  return [next, ...filtered];
-}
-
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "object") return JSON.stringify(value);
@@ -6110,20 +5934,17 @@ function isZoneSourceLayer(layer: Layer): boolean {
   return geometryType.includes("POLYGON") || geometryType === "GEOMETRY";
 }
 
+function canCreateZoneLayerFromSource(layer: Layer): boolean {
+  const geometryType = layer.geometryType.toUpperCase();
+  return layer.layerRole !== "zone" && (geometryType.includes("POINT") || geometryType.includes("POLYGON") || geometryType === "GEOMETRY");
+}
+
 function canUseSelectedFeatureAsZoneFeature(feature: Feature, layer: Layer): boolean {
   return isZoneLayer(layer) && isPolygonGeometry(feature.geometry);
 }
 
-function isPointLayer(layer: Layer): boolean {
-  return layer.geometryType.toUpperCase().includes("POINT");
-}
-
 function isPolygonGeometry(geometry: unknown): boolean {
   return isRecord(geometry) && typeof geometry.type === "string" && geometry.type.toUpperCase().includes("POLYGON");
-}
-
-function isLineLayer(layer: Layer): boolean {
-  return layer.geometryType.toUpperCase().includes("LINE");
 }
 
 type GeometryBounds = {
@@ -6322,17 +6143,10 @@ function newPartyDraft(): PartyDraft {
   return { ...emptyPartyDraft(), partyType: "法人" };
 }
 
-function newZoneDraft(selectedFeature?: Feature | null, selectedFeatureLayer?: Layer | null, fallbackLayer?: Layer): ZoneDraft {
-  const useSelectedFeature = Boolean(
-    selectedFeature && selectedFeatureLayer && canUseSelectedFeatureAsZoneFeature(selectedFeature, selectedFeatureLayer)
-  );
-  const zoneLayerId = useSelectedFeature && selectedFeatureLayer ? selectedFeatureLayer.id : fallbackLayer?.id ?? "";
-  const zoneFeatureId = useSelectedFeature && selectedFeature ? selectedFeature.featureId : "";
+function newZoneDraft(): ZoneDraft {
   return {
     ...emptyZoneDraft(),
-    status: "有効",
-    zoneLayerId,
-    zoneFeatureId
+    status: "有効"
   };
 }
 
@@ -6345,6 +6159,14 @@ function toZoneDraft(zone: Zone): ZoneDraft {
     memo: zone.memo ?? "",
     zoneLayerId: zoneLayerIdOf(zone),
     zoneFeatureId: zoneFeatureIdOf(zone)
+  };
+}
+
+function zoneMetadataFromDraft(draft: ZoneDraft): ZoneLayerCreateMetadata {
+  return {
+    name: nullableString(draft.name),
+    zoneType: nullableString(draft.zoneType),
+    status: nullableString(draft.status)
   };
 }
 

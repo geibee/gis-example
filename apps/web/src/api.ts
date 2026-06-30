@@ -275,28 +275,12 @@ export function deleteZone(id: string): Promise<void> {
 export function createZoneLayerFromImport(body: {
   projectId?: string;
   layerId: string;
+  name?: string | null;
   zoneType?: string | null;
   status?: string | null;
   nameField?: string | null;
 }): Promise<ZoneLayerOperation> {
   return requestJson<ZoneLayerOperation>("/api/zone-layers/from-import", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-}
-
-export function createZoneLayerFromFacilities(body: {
-  projectId?: string;
-  facilityLayerId: string;
-  name?: string | null;
-  bufferMeters?: number | null;
-  facilityDistanceMeters?: number | null;
-  sourceTypes?: Array<"land" | "building">;
-  zoneType?: string | null;
-  status?: string | null;
-}): Promise<ZoneLayerOperation> {
-  return requestJson<ZoneLayerOperation>("/api/zone-layers/from-facilities", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)

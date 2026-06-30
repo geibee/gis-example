@@ -114,8 +114,6 @@ data class AnalysisJobRequest(
     val name: String? = null,
     val targetLayerId: String? = null,
     val operation: String? = null,
-    val boundaryLayerId: String? = null,
-    val bufferMeters: Double? = null,
     val attributeConditions: List<AttributeConditionDto> = emptyList(),
     val spatialConditions: List<SpatialConditionDto> = emptyList(),
     val conditionQuery: ConditionQueryDto? = null
@@ -305,21 +303,10 @@ data class ZonePartySummaryDto(
 data class ZoneLayerFromImportRequest(
     val projectId: String? = null,
     val layerId: String,
+    val name: String? = null,
     val zoneType: String? = null,
     val status: String? = null,
     val nameField: String? = null
-)
-
-@Serializable
-data class ZoneLayerFromFacilitiesRequest(
-    val projectId: String? = null,
-    val facilityLayerId: String,
-    val name: String? = null,
-    val bufferMeters: Double? = null,
-    val facilityDistanceMeters: Double? = null,
-    val sourceTypes: List<String> = listOf("land", "building"),
-    val zoneType: String? = null,
-    val status: String? = null
 )
 
 @Serializable

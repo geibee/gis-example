@@ -330,10 +330,6 @@ fun Application.module() {
             call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(call.receive<ZoneLayerFromImportRequest>()))
         }
 
-        post("/api/zone-layers/from-facilities") {
-            call.respond(HttpStatusCode.Created, db.createZoneLayerFromFacilities(call.receive<ZoneLayerFromFacilitiesRequest>()))
-        }
-
         post("/api/party-relationships") {
             call.respond(HttpStatusCode.Created, db.createPartyRelationship(call.receive<JsonObject>()))
         }

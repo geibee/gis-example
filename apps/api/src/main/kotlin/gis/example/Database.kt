@@ -75,6 +75,8 @@ data class ZoneListQuery(
 
 class Database(private val dataSource: HikariDataSource) : AutoCloseable {
     companion object {
+        private const val SOURCE_ZONE_BUFFER_METERS = 1000.0
+
         private val json = Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
@@ -1992,119 +1994,25 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
     fun createZoneLayerFromImport(request: ZoneLayerFromImportRequest): ZoneLayerOperationDto {
         val requestedLayerId = request.layerId.trim().takeIf { it.isNotEmpty() }
             ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "layerId is required")
-        val layer = getLayer(requestedLayerId)
+        val sourceLayer = getLayer(requestedLayerId)
             ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
-        val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() } ?: layer.projectId
-        if (layer.projectId != projectId) {
+        val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() } ?: sourceLayer.projectId
+        if (sourceLayer.projectId != projectId) {
             throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Layer does not belong to the selected project")
         }
-        validateZoneLayerGeometry(layer)
+        validateZoneSourceLayerGeometry(sourceLayer)
 
+        val layerName = request.name?.trim()?.takeIf { it.isNotEmpty() } ?: "${sourceLayer.name} 区域"
+        val tableName = generatedTableName("zone_buffer")
         return dataSource.connection.use { connection ->
             val previousAutoCommit = connection.autoCommit
             connection.autoCommit = false
             try {
-                connection.prepareStatement("UPDATE app.layers SET layer_role = 'zone' WHERE id = ?::uuid").use { stmt ->
-                    stmt.setString(1, layer.id)
-                    stmt.executeUpdate()
-                }
-                val counts = syncZonesForLayer(
-                    connection = connection,
-                    layer = layer.copy(layerRole = "zone"),
-                    zoneType = request.zoneType,
-                    status = request.status,
-                    nameField = request.nameField
-                )
-                connection.commit()
-                val updatedLayer = getLayer(layer.id) ?: error("Updated layer disappeared")
-                ZoneLayerOperationDto(
-                    layer = updatedLayer,
-                    zonesCreated = counts.created,
-                    zonesUpdated = counts.updated,
-                    zones = listZones(
-                        ZoneListQuery(
-                            projectId = projectId,
-                            q = null,
-                            status = null,
-                            zoneType = null,
-                            linkedOnly = false,
-                            zoneLayerId = updatedLayer.id,
-                            sourceLayerId = null
-                        )
-                    )
-                )
-            } catch (exc: ApiException) {
-                connection.rollback()
-                throw exc
-            } catch (exc: SQLException) {
-                connection.rollback()
-                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone layer conversion failed: ${exc.message ?: "invalid zone layer conversion"}")
-            } finally {
-                connection.autoCommit = previousAutoCommit
-            }
-        }
-    }
-
-    fun createZoneLayerFromFacilities(request: ZoneLayerFromFacilitiesRequest): ZoneLayerOperationDto {
-        val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() } ?: defaultProjectId()
-        if (!projectExists(projectId)) {
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Project does not exist")
-        }
-        val facilityLayer = getLayer(request.facilityLayerId)
-            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "facilityLayerId not found")
-        if (facilityLayer.projectId != projectId) {
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "facilityLayerId belongs to another project")
-        }
-        val facilityGeometryType = facilityLayer.geometryType.uppercase()
-        if (!facilityGeometryType.contains("POINT") && facilityGeometryType != "GEOMETRY") {
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Facility layer must be a point layer")
-        }
-        val bufferMeters = request.bufferMeters ?: 1000.0
-        if (bufferMeters <= 0.0) {
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "bufferMeters must be positive")
-        }
-        val facilityDistanceMeters = request.facilityDistanceMeters?.takeIf { it > 0.0 }
-        val sourceTypes = request.sourceTypes
-            .mapNotNull { it.trim().lowercase().takeIf(String::isNotEmpty) }
-            .ifEmpty { listOf("land", "building") }
-            .distinct()
-        val invalidSourceTypes = sourceTypes.toSet() - setOf("land", "building")
-        if (invalidSourceTypes.isNotEmpty()) {
-            throw ApiException(
-                io.ktor.http.HttpStatusCode.BadRequest,
-                "Unsupported source type(s): ${invalidSourceTypes.joinToString(", ")}"
-            )
-        }
-        val sourceLayers = listLayers(projectId).filter { !it.isResult && it.layerRole != "zone" }
-        val businessGeoms = businessGeometrySql(
-            sourceLayers = sourceLayers,
-            projectId = projectId,
-            sourceTypes = sourceTypes.toSet(),
-            request = BusinessSpatialSearchRequest(
-                projectId = projectId,
-                targetLayerIds = emptyList(),
-                sourceTypes = sourceTypes
-            )
-        )
-        if (businessGeoms.sql.isBlank()) {
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "No linked land/building geometry exists")
-        }
-
-        val layerName = request.name?.trim()?.takeIf { it.isNotEmpty() } ?: "施設起点区域"
-        val tableName = generatedTableName("zone_facility")
-        return dataSource.connection.use { connection ->
-            val previousAutoCommit = connection.autoCommit
-            connection.autoCommit = false
-            try {
-                createFacilityZoneTable(
+                createSourceZoneBufferTable(
                     connection = connection,
                     tableName = tableName,
-                    facilityLayer = facilityLayer,
-                    businessGeoms = businessGeoms,
-                    layerName = layerName,
-                    bufferMeters = bufferMeters,
-                    facilityDistanceMeters = facilityDistanceMeters,
-                    sourceTypes = sourceTypes
+                    sourceLayer = sourceLayer,
+                    layerName = layerName
                 )
                 normalizeGeneratedTable(connection, "gis_data", tableName, "geom")
                 val count = connection.prepareStatement("SELECT count(*)::int FROM ${quoteIdent("gis_data")}.${quoteIdent(tableName)}").use { stmt ->
@@ -2114,7 +2022,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                     }
                 }
                 if (count == 0) {
-                    throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Facility points did not match linked land/building geometry")
+                    throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Source layer has no point or polygon geometry")
                 }
                 val layerId = insertLayerMetadata(
                     connection = connection,
@@ -2124,7 +2032,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                     sourceSrid = 3857,
                     isResult = false,
                     layerRole = "zone",
-                    sourceLayerId = facilityLayer.id
+                    sourceLayerId = sourceLayer.id
                 )
                 val layer = getLayerInConnection(connection, layerId)
                     ?: throw ApiException(io.ktor.http.HttpStatusCode.InternalServerError, "Created layer disappeared")
@@ -2158,7 +2066,7 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
                 throw exc
             } catch (exc: SQLException) {
                 connection.rollback()
-                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Facility zone layer generation failed: ${exc.message ?: "invalid facility zone generation"}")
+                throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone layer generation failed: ${exc.message ?: "invalid zone layer generation"}")
             } finally {
                 connection.autoCommit = previousAutoCommit
             }
@@ -2995,6 +2903,13 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         }
     }
 
+    private fun validateZoneSourceLayerGeometry(layer: LayerDto) {
+        val geometryType = layer.geometryType.uppercase()
+        if (!geometryType.contains("POINT") && !geometryType.contains("POLYGON") && geometryType != "GEOMETRY") {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Source layer must be point or polygon geometry")
+        }
+    }
+
     private fun syncZonesForLayer(
         connection: Connection,
         layer: LayerDto,
@@ -3078,75 +2993,61 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         return candidates.joinToString(", ") { "NULLIF(t.${quoteIdent(it)}::text, '')" }
     }
 
-    private fun createFacilityZoneTable(
+    private fun createSourceZoneBufferTable(
         connection: Connection,
         tableName: String,
-        facilityLayer: LayerDto,
-        businessGeoms: SqlFragment,
-        layerName: String,
-        bufferMeters: Double,
-        facilityDistanceMeters: Double?,
-        sourceTypes: List<String>
+        sourceLayer: LayerDto,
+        layerName: String
     ) {
         val tableRef = "${quoteIdent("gis_data")}.${quoteIdent(tableName)}"
-        val facilityRef = "${quoteIdent(facilityLayer.schemaName)}.${quoteIdent(facilityLayer.tableName)}"
-        val facilityGeom = "f.${quoteIdent(facilityLayer.geometryColumn)}"
-        val facilityPredicate = if (facilityDistanceMeters != null) {
-            "ST_DWithin(bg.geom, fp.geom, ?::double precision)"
-        } else {
-            "bg.geom && fp.geom AND ST_Intersects(bg.geom, fp.geom)"
-        }
+        val sourceRef = "${quoteIdent(sourceLayer.schemaName)}.${quoteIdent(sourceLayer.tableName)}"
+        val rawSourceGeom = "s.${quoteIdent(sourceLayer.geometryColumn)}"
+        val sourceGeom = if (sourceLayer.displaySrid == 3857) rawSourceGeom else "ST_Transform($rawSourceGeom, 3857)"
         connection.createStatement().use { stmt ->
             stmt.execute("DROP TABLE IF EXISTS $tableRef")
         }
         val sql = """
             CREATE TABLE $tableRef AS
-            WITH facility_points AS (
-                SELECT $facilityGeom AS geom
-                FROM $facilityRef AS f
-                WHERE $facilityGeom IS NOT NULL
+            WITH source_parts AS (
+                SELECT ST_CollectionExtract(ST_MakeValid($sourceGeom), 3) AS geom
+                FROM $sourceRef AS s
+                WHERE $rawSourceGeom IS NOT NULL
+
+                UNION ALL
+
+                SELECT ST_CollectionExtract(ST_MakeValid($sourceGeom), 1) AS geom
+                FROM $sourceRef AS s
+                WHERE $rawSourceGeom IS NOT NULL
             ),
-            business_geoms AS (
-                ${businessGeoms.sql}
-            ),
-            selected_business AS (
-                SELECT DISTINCT bg.business_type, bg.business_id, bg.business_label, bg.geom
-                FROM business_geoms AS bg
-                JOIN facility_points AS fp ON $facilityPredicate
-                WHERE bg.geom IS NOT NULL AND fp.geom IS NOT NULL
+            source_geoms AS (
+                SELECT geom
+                FROM source_parts
+                WHERE geom IS NOT NULL
+                  AND NOT ST_IsEmpty(geom)
             ),
             merged AS (
-                SELECT count(*)::integer AS source_business_count,
+                SELECT count(*)::integer AS source_feature_count,
                        ST_MemUnion(ST_Buffer(geom, ?::double precision)) AS geom
-                FROM selected_business
+                FROM source_geoms
             )
             SELECT
                 1::integer AS fid,
                 ?::text AS name,
-                'facility_boundary'::text AS operation,
+                'source_buffer'::text AS operation,
                 ?::double precision AS buffer_meters,
-                ?::uuid AS facility_layer_id,
-                ?::text AS source_types,
-                source_business_count,
+                ?::uuid AS source_layer_id,
+                source_feature_count,
                 ST_Multi(ST_CollectionExtract(ST_MakeValid(geom), 3))::geometry(MultiPolygon, 3857) AS geom
             FROM merged
             WHERE geom IS NOT NULL
               AND NOT ST_IsEmpty(geom)
-              AND source_business_count > 0
+              AND source_feature_count > 0
         """.trimIndent()
         connection.prepareStatement(sql).use { stmt ->
-            var index = 1
-            for (binder in businessGeoms.binders) {
-                binder(stmt, index++)
-            }
-            if (facilityDistanceMeters != null) {
-                stmt.setDouble(index++, facilityDistanceMeters)
-            }
-            stmt.setDouble(index++, bufferMeters)
-            stmt.setString(index++, layerName)
-            stmt.setDouble(index++, bufferMeters)
-            stmt.setString(index++, facilityLayer.id)
-            stmt.setString(index, sourceTypes.joinToString(","))
+            stmt.setDouble(1, SOURCE_ZONE_BUFFER_METERS)
+            stmt.setString(2, layerName)
+            stmt.setDouble(3, SOURCE_ZONE_BUFFER_METERS)
+            stmt.setString(4, sourceLayer.id)
             stmt.execute()
         }
     }
