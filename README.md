@@ -108,6 +108,23 @@ Allowed spatial operators: `intersects`, `contains`, `within`, `dwithin`.
 
 Allowed attribute operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `LIKE`, `IN`, `IS NULL`.
 
+## Quality Gate
+
+コミット前の統合ゲートは `scripts/verify.sh`(api / worker / web を変更スコープで自動判定、fail-closed)。GitHub Actions の `verify` ワークフローも同じスクリプトに委譲する。
+
+```bash
+bash scripts/verify.sh              # 変更スコープを自動判定 (基準: origin/main)
+VERIFY_SCOPE=all bash scripts/verify.sh
+```
+
+| スコープ | 内容 |
+|---|---|
+| api | `gradle build`(Kotlin 警告エラー化 + 単体テスト) |
+| worker | `ruff check` / `ruff format --check` / `mypy --strict` / `pytest` |
+| web | `tsc --noEmit` + `vite build` |
+
+開発規約・アーキテクチャの分担は [`AGENTS.md`](AGENTS.md) を参照。
+
 ## Notes
 
 - Initial authentication/authorization is intentionally omitted for single-admin use.

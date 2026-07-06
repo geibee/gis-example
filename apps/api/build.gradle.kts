@@ -13,6 +13,10 @@ application {
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        // fail-closed: 警告を残したままマージさせない
+        allWarningsAsErrors.set(true)
+    }
 }
 
 dependencies {
@@ -27,4 +31,10 @@ dependencies {
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.4")
     implementation("ch.qos.logback:logback-classic:1.5.12")
+
+    testImplementation(kotlin("test"))
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }
