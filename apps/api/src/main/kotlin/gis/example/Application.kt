@@ -49,7 +49,14 @@ fun Application.module() {
     val apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/')
     val webOrigin = System.getenv("WEB_ORIGIN")
 
+    val analysisJobRunner = AnalysisJobRunner(
+        db = db,
+        pollIntervalMillis = ((System.getenv("ANALYSIS_POLL_INTERVAL_SECONDS") ?: "2").toDouble() * 1000).toLong()
+    )
+    analysisJobRunner.start()
+
     environment.monitor.subscribe(ApplicationStopped) {
+        analysisJobRunner.stop()
         db.close()
     }
 
