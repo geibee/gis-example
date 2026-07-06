@@ -1,0 +1,32 @@
+[project]
+name = "worker-gis"
+version = "0.1.0"
+description = "GIS import worker (GDAL/OGR ingestion into PostGIS)"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "S608", # SQL injection via string concatenation (quote_ident 経由以外の埋め込みを検知)
+]
+[tool.ruff.lint.per-file-ignores]
+# worker は quote_ident / qtable で識別子をクォートした上で f-string SQL を組む設計のため、
+# S608 はテストで担保しつつ src では許容する
+"src/worker.py" = ["S608"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
