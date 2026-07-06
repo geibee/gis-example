@@ -5,8 +5,8 @@ PostGIS を正本データストアにした OSS ベースの Web GIS MVP です
 ## Stack
 
 - Web: React + TypeScript + MapLibre GL JS
-- API: Ktor + PostgreSQL JDBC
-- GIS worker: Python + GDAL/OGR + psycopg
+- API: Ktor + PostgreSQL JDBC (business/query layer: condition search preview and analysis-job execution)
+- GIS worker: Python + GDAL/OGR + psycopg (GIS ingestion only: file import into PostGIS)
 - Tile server: API dynamic MVT endpoint for newly created layers, with Martin included in the stack for PostGIS tile serving
 - DB: PostgreSQL + PostGIS
 - Local runtime: Docker Compose
@@ -86,7 +86,9 @@ Supported initial formats are Shapefile zip, GML, KML, GPX, and GeoJSON. The wor
 
 ## Analysis Criteria
 
-`POST /api/features/condition-search` accepts a `ConditionQuery` and returns temporary feature matches grouped by `layerId`/`layerName` for UI review and map highlighting. `POST /api/analysis-jobs` also accepts `operation: "condition_search"` with the same `ConditionQuery`; the worker saves a result set and child result layers per source layer. Conditions are joined with AND in v1.
+`POST /api/features/condition-search` accepts a `ConditionQuery` and returns temporary feature matches grouped by `layerId`/`layerName` for UI review and map highlighting. `POST /api/analysis-jobs` also accepts `operation: "condition_search"` with the same `ConditionQuery`; a background runner inside the API claims the job from `app.analysis_jobs` and saves a result set and child result layers per source layer. The preview and the saved analysis share the same SQL predicate builder, so their results always match. Conditions are joined with AND in v1.
+
+Analysis jobs are executed by the API process (`AnalysisJobRunner`, poll interval `ANALYSIS_POLL_INTERVAL_SECONDS`, default 2s). The Python worker handles import jobs only: format conversion via GDAL/OGR, reprojection to EPSG:3857, geometry normalization, and layer metadata registration. The PostGIS layer tables are the contract between the two: the worker produces normalized layers, the API queries them.
 
 ```json
 {
