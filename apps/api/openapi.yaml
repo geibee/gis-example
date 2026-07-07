@@ -15,6 +15,7 @@ security:
   - bearerAuth: []
 tags:
   - name: system
+  - name: admin
   - name: layers
   - name: features
   - name: business
@@ -57,6 +58,131 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Project"
+
+  /api/me:
+    get:
+      tags: [admin]
+      operationId: getMe
+      summary: 自分のユーザー情報とメンバーシップ
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+
+  /api/users:
+    get:
+      tags: [admin]
+      operationId: listUsers
+      summary: ユーザー一覧 (system admin 専用)
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+  /api/users/{id}:
+    patch:
+      tags: [admin]
+      operationId: updateUser
+      summary: ユーザーのロール・有効状態の変更 (system admin 専用。自分自身は変更不可)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserPatchRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 更新後のユーザー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/members:
+    get:
+      tags: [admin]
+      operationId: listProjectMembers
+      summary: プロジェクトのメンバー一覧 (system admin 専用)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectMember"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/members/{userId}:
+    put:
+      tags: [admin]
+      operationId: putProjectMember
+      summary: メンバーの追加・ロール変更 (system admin 専用)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberPutRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 追加・更新後のメンバー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMember"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [admin]
+      operationId: deleteProjectMember
+      summary: メンバーの削除 (system admin 専用)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/layers:
     get:
@@ -1076,6 +1202,61 @@ components:
         name: { type: string }
         createdAt: { type: string }
       required: [id, name, createdAt]
+
+    Membership:
+      type: object
+      properties:
+        projectId: { type: string }
+        role: { type: string, enum: [editor, viewer] }
+      required: [projectId, role]
+
+    Me:
+      type: object
+      properties:
+        userId: { type: string }
+        subject: { type: string }
+        email: { type: [string, "null"] }
+        displayName: { type: [string, "null"] }
+        systemRole: { type: string, enum: [admin, user] }
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/Membership"
+      required: [userId, subject, systemRole, memberships]
+
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        subject: { type: string }
+        email: { type: [string, "null"] }
+        displayName: { type: [string, "null"] }
+        systemRole: { type: string, enum: [admin, user] }
+        isActive: { type: boolean }
+        createdAt: { type: string }
+      required: [id, subject, systemRole, isActive, createdAt]
+
+    UserPatchRequest:
+      type: object
+      properties:
+        systemRole: { type: string, enum: [admin, user] }
+        isActive: { type: boolean }
+
+    ProjectMember:
+      type: object
+      properties:
+        userId: { type: string }
+        projectId: { type: string }
+        role: { type: string, enum: [editor, viewer] }
+        email: { type: [string, "null"] }
+        displayName: { type: [string, "null"] }
+      required: [userId, projectId, role]
+
+    MemberPutRequest:
+      type: object
+      properties:
+        role: { type: string, enum: [editor, viewer] }
+      required: [role]
 
     LayerAttribute:
       type: object

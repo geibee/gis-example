@@ -25,6 +25,7 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.routing
 import io.ktor.utils.io.core.readAvailable
 import io.ktor.http.content.PartData
@@ -90,6 +91,7 @@ fun Application.module(
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Patch)
+        allowMethod(HttpMethod.Put)
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Options)
         allowHeader(HttpHeaders.ContentType)
@@ -125,6 +127,80 @@ fun Application.module(
                     if (principal.systemRole == SystemRole.ADMIN) projects
                     else projects.filter { it.id in principal.memberships }
                 )
+            }
+
+            get("/api/me") {
+                val principal = call.appPrincipal()
+                call.respond(
+                    MeDto(
+                        userId = principal.userId,
+                        subject = principal.subject,
+                        email = principal.email,
+                        displayName = principal.displayName,
+                        systemRole = if (principal.systemRole == SystemRole.ADMIN) "admin" else "user",
+                        memberships = principal.memberships.map { (projectId, role) ->
+                            MembershipDto(projectId = projectId, role = role.name.lowercase())
+                        }.sortedBy { it.projectId }
+                    )
+                )
+            }
+
+            get("/api/users") {
+                call.requireSystemPermission(Action.USER_ADMIN)
+                call.respond(db.listUsers())
+            }
+
+            patch("/api/users/{id}") {
+                call.requireSystemPermission(Action.USER_ADMIN)
+                val id = requireUuid(
+                    call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "User id is required"),
+                    "User id"
+                )
+                // 自分自身の降格・無効化は禁止する (管理者のロックアウト防止)
+                if (id == call.appPrincipal().userId) {
+                    throw ApiException(HttpStatusCode.BadRequest, "Cannot change your own role or active status")
+                }
+                call.respond(db.updateUser(id, call.receive<UserPatchRequest>()))
+            }
+
+            get("/api/projects/{id}/members") {
+                call.requireSystemPermission(Action.MEMBER_ADMIN)
+                val projectId = requireUuid(
+                    call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Project id is required"),
+                    "Project id"
+                )
+                if (!db.projectExists(projectId)) {
+                    throw ApiException(HttpStatusCode.NotFound, "Project not found")
+                }
+                call.respond(db.listProjectMembers(projectId))
+            }
+
+            put("/api/projects/{id}/members/{userId}") {
+                call.requireSystemPermission(Action.MEMBER_ADMIN)
+                val projectId = requireUuid(
+                    call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Project id is required"),
+                    "Project id"
+                )
+                val userId = requireUuid(
+                    call.parameters["userId"] ?: throw ApiException(HttpStatusCode.BadRequest, "User id is required"),
+                    "User id"
+                )
+                val request = call.receive<MemberPutRequest>()
+                call.respond(db.putProjectMember(projectId, userId, request.role))
+            }
+
+            delete("/api/projects/{id}/members/{userId}") {
+                call.requireSystemPermission(Action.MEMBER_ADMIN)
+                val projectId = requireUuid(
+                    call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Project id is required"),
+                    "Project id"
+                )
+                val userId = requireUuid(
+                    call.parameters["userId"] ?: throw ApiException(HttpStatusCode.BadRequest, "User id is required"),
+                    "User id"
+                )
+                db.deleteProjectMember(projectId, userId)
+                call.respond(HttpStatusCode.NoContent)
             }
 
             get("/api/layers") {

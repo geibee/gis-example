@@ -18,6 +18,16 @@
 - 業務条件の解釈を worker に書かない。分析・検索 SQL は Kotlin 側の単一実装 (`conditionSearchFilters`) に寄せる
 - ジオメトリを JVM / Python プロセス内で解釈しない。空間演算は PostGIS の SQL で行う
 
+## 認証・認可
+
+- 認証は OIDC の Bearer JWT (`Auth.kt`)。`/health` 以外のルートは必ず `authenticate(OIDC_AUTH_NAME)` の内側に置く
+- 認可の設計原則は **「可変データは DB、ポリシーはコード」**:
+  - 誰がどのプロジェクトのメンバーか (`app.users` / `app.project_members`) は DB
+  - ロールが何をできるか (`Action` × ロールのマトリクス) は `Authorization.kt` の純粋関数 `AccessPolicy.allows`。判定に I/O を持ち込まない
+- エンドポイントを追加するときは必ず: (1) いずれかの `Action` へ割り当てて PEP (`requireProjectPermission` / `requireResourcePermission` / `requireSystemPermission`) を呼ぶ、(2) `AccessPolicyTest` の期待表を更新する、(3) openapi.yaml に 401/403 を記載する
+- ステータスの使い分け: 非メンバーへの個別リソースは 404 (存在を隠す)、メンバーのロール不足と projectId 明示操作の拒否は 403
+- 監査ログ (`AuditLog.kt`) は mutate 成功と 401/403 を記録する。PEP が action / projectId を call attributes へ残す前提を崩さない
+
 ## GIS 規約
 
 - 格納 SRID は **3857**、公開する bbox は **4326** (`bbox_4326`)

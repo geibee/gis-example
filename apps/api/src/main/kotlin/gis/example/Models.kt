@@ -340,3 +340,52 @@ data class TileJsonDto(
     val minzoom: Int = 0,
     val maxzoom: Int = 22
 )
+
+// ---------------------------------------------------------------- 認証・認可 (管理 API)
+
+@Serializable
+data class MembershipDto(
+    val projectId: String,
+    val role: String
+)
+
+@Serializable
+data class MeDto(
+    val userId: String,
+    val subject: String,
+    val email: String? = null,
+    val displayName: String? = null,
+    val systemRole: String,
+    val memberships: List<MembershipDto> = emptyList()
+)
+
+@Serializable
+data class UserDto(
+    val id: String,
+    val subject: String,
+    val email: String? = null,
+    val displayName: String? = null,
+    val systemRole: String,
+    val isActive: Boolean,
+    val createdAt: String
+)
+
+@Serializable
+data class UserPatchRequest(
+    val systemRole: String? = null,
+    val isActive: Boolean? = null
+)
+
+@Serializable
+data class ProjectMemberDto(
+    val userId: String,
+    val projectId: String,
+    val role: String,
+    val email: String? = null,
+    val displayName: String? = null
+)
+
+@Serializable
+data class MemberPutRequest(
+    val role: String
+)

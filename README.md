@@ -176,6 +176,7 @@ web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-
 - 一覧 API (`/api/layers` `/api/lands` `/api/buildings` `/api/parties` `/api/zones` `/api/features/search`) は `projectId` が必須
 - `/api/projects` はメンバーであるプロジェクトのみ返す (admin は全件)
 - 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。閲覧成功は記録しない。書込みはベストエフォートで、失敗してもリクエストは落とさない
+- 管理 API: `GET /api/me`(自分のロールとメンバーシップ)、admin 専用の `GET /api/users`・`PATCH /api/users/{id}`(system_role / is_active。自分自身は変更不可)・`GET/PUT/DELETE /api/projects/{id}/members/{userId}`。メンバーシップの変更は次のリクエストから即時反映される
 
 ## Notes
 

@@ -8,6 +8,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -87,7 +88,8 @@ class AuthzIntegrationTest {
                       ('c0000000-0000-4000-8000-000000000001', 'authz-admin', 'authz-admin@gis.example', 'admin'),
                       ('c0000000-0000-4000-8000-000000000002', 'authz-editor', 'authz-editor@gis.example', 'user'),
                       ('c0000000-0000-4000-8000-000000000003', 'authz-viewer', 'authz-viewer@gis.example', 'user'),
-                      ('c0000000-0000-4000-8000-000000000004', 'authz-outsider', 'authz-outsider@gis.example', 'user');
+                      ('c0000000-0000-4000-8000-000000000004', 'authz-outsider', 'authz-outsider@gis.example', 'user'),
+                      ('c0000000-0000-4000-8000-000000000005', 'authz-target', 'authz-target@gis.example', 'user');
 
                     INSERT INTO app.project_members (user_id, project_id, role)
                     VALUES
@@ -212,6 +214,76 @@ class AuthzIntegrationTest {
         assertEquals(
             HttpStatusCode.OK,
             client.get("/api/tiles/$parcelsLayerId/15/29104/12902") { header(HttpHeaders.Authorization, viewerBearer) }.status
+        )
+    }
+
+    @Test
+    fun `me は自分のロールとメンバーシップを返す`() = withApp { client ->
+        val response = client.get("/api/me") { header(HttpHeaders.Authorization, viewerBearer) }
+        assertEquals(HttpStatusCode.OK, response.status)
+        val me = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals("user", me.getValue("systemRole").jsonPrimitive.content)
+        val memberships = me.getValue("memberships").jsonArray.map { it.jsonObject }
+        assertEquals(1, memberships.size)
+        assertEquals(defaultProject, memberships[0].getValue("projectId").jsonPrimitive.content)
+        assertEquals("viewer", memberships[0].getValue("role").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `管理 API は admin 専用で自分自身の変更は拒否される`() = withApp { client ->
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.get("/api/users") { header(HttpHeaders.Authorization, editorBearer) }.status,
+            "editor でもシステム操作は 403"
+        )
+        assertEquals(
+            HttpStatusCode.OK,
+            client.get("/api/users") { header(HttpHeaders.Authorization, adminBearer) }.status
+        )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.patch("/api/users/c0000000-0000-4000-8000-000000000001") {
+                header(HttpHeaders.Authorization, adminBearer)
+                contentType(ContentType.Application.Json)
+                setBody("""{"isActive": false}""")
+            }.status,
+            "自分自身の無効化はロックアウト防止のため拒否"
+        )
+    }
+
+    @Test
+    fun `メンバーの付与と剥奪は次のリクエストから即時反映される`() = withApp { client ->
+        val targetBearer = "Bearer ${OidcTestSupport.token("authz-target")}"
+        val targetUserId = "c0000000-0000-4000-8000-000000000005"
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.get("/api/lands?projectId=$otherProject") { header(HttpHeaders.Authorization, targetBearer) }.status,
+            "付与前は非メンバー"
+        )
+        assertEquals(
+            HttpStatusCode.OK,
+            client.put("/api/projects/$otherProject/members/$targetUserId") {
+                header(HttpHeaders.Authorization, adminBearer)
+                contentType(ContentType.Application.Json)
+                setBody("""{"role": "viewer"}""")
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.OK,
+            client.get("/api/lands?projectId=$otherProject") { header(HttpHeaders.Authorization, targetBearer) }.status,
+            "付与後は viewer として閲覧できる"
+        )
+        assertEquals(
+            HttpStatusCode.NoContent,
+            client.delete("/api/projects/$otherProject/members/$targetUserId") {
+                header(HttpHeaders.Authorization, adminBearer)
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.get("/api/lands?projectId=$otherProject") { header(HttpHeaders.Authorization, targetBearer) }.status,
+            "剥奪後は再び拒否される"
         )
     }
 
