@@ -1,0 +1,1392 @@
+openapi: 3.1.0
+info:
+  title: Web GIS MVP API
+  version: 0.1.0
+  description: |
+    Web GIS MVP の API 契約 (SSoT)。実装は apps/api (Ktor)。
+
+    - この仕様は Spectral で lint され、apps/web/src/contracts/generated.ts が
+      本ファイルから生成される (ドリフトは scripts/verify.sh の web スコープで検査)
+    - 認可は初期スコープ外 (シングル管理者運用)
+    - ジオメトリは EPSG:3857 で格納され、bbox は EPSG:4326 で公開される
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: system
+  - name: layers
+  - name: features
+  - name: business
+  - name: zones
+  - name: jobs
+  - name: tiles
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: ヘルスチェック
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                required: [status]
+
+  /api/projects:
+    get:
+      tags: [system]
+      operationId: listProjects
+      summary: プロジェクト一覧
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+
+  /api/layers:
+    get:
+      tags: [layers]
+      operationId: listLayers
+      summary: レイヤ一覧
+      parameters:
+        - name: projectId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Layer"
+
+  /api/layers/{id}:
+    delete:
+      tags: [layers]
+      operationId: deleteLayer
+      summary: レイヤ削除 (結果セットが空になれば結果セットも削除)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/layers/{id}/attribute-values:
+    get:
+      tags: [layers]
+      operationId: listLayerAttributeValues
+      summary: 属性の値候補一覧 (条件検索 UI 用)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - name: field
+          in: query
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 80 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/result-sets/{id}:
+    delete:
+      tags: [layers]
+      operationId: deleteResultSet
+      summary: 結果セット削除 (子の結果レイヤも削除)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/layers/{id}/features/{featureId}:
+    get:
+      tags: [features]
+      operationId: getFeature
+      summary: フィーチャ取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - $ref: "#/components/parameters/PathFeatureId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feature"
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [features]
+      operationId: updateFeature
+      summary: フィーチャ属性・ジオメトリ更新
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - $ref: "#/components/parameters/PathFeatureId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeatureUpdateRequest"
+      responses:
+        "200":
+          description: 更新後のフィーチャ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feature"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/features/search:
+    get:
+      tags: [features]
+      operationId: searchFeatures
+      summary: フィーチャ検索 (キーワード / 単一属性条件)
+      parameters:
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: layerId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: field, in: query, schema: { type: string } }
+        - { name: operator, in: query, schema: { type: string } }
+        - { name: value, in: query, schema: { type: string } }
+        - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeatureSearchResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/features/business-spatial-search:
+    post:
+      tags: [features]
+      operationId: businessSpatialSearch
+      summary: 業務エンティティ起点の空間検索
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessSpatialSearchRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeatureSearchResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/features/condition-search:
+    post:
+      tags: [features]
+      operationId: conditionSearch
+      summary: 条件検索プレビュー (保存は analysis-jobs の condition_search)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConditionQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeatureSearchResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/features/{layerId}/{featureId}/business-links:
+    get:
+      tags: [features]
+      operationId: getFeatureBusinessLinks
+      summary: フィーチャに紐づく業務エンティティ
+      parameters:
+        - { name: layerId, in: path, required: true, schema: { type: string } }
+        - $ref: "#/components/parameters/PathFeatureId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusinessLinks"
+
+  /api/lands:
+    get:
+      tags: [business]
+      operationId: listLands
+      summary: 土地一覧
+      parameters:
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: landUse, in: query, schema: { type: string } }
+        - { name: partyType, in: query, schema: { type: string } }
+        - { name: relationType, in: query, schema: { type: string } }
+        - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
+        - { name: sourceLayerId, in: query, schema: { type: string } }
+        - { name: bbox, in: query, schema: { type: string }, description: "west,south,east,north (EPSG:4326)" }
+        - { name: intersectsLayerId, in: query, schema: { type: string } }
+        - { name: intersectsFeatureId, in: query, schema: { type: string } }
+        - { name: distanceMeters, in: query, schema: { type: number } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Land"
+    post:
+      tags: [business]
+      operationId: createLand
+      summary: 土地作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LandWriteRequest"
+      responses:
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Land"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/lands/{id}:
+    get:
+      tags: [business]
+      operationId: getLand
+      summary: 土地取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Land"
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [business]
+      operationId: updateLand
+      summary: 土地更新
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LandWriteRequest"
+      responses:
+        "200":
+          description: 更新後
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Land"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [business]
+      operationId: deleteLand
+      summary: 土地削除
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/buildings:
+    get:
+      tags: [business]
+      operationId: listBuildings
+      summary: 建物一覧
+      parameters:
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: landId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: buildingUse, in: query, schema: { type: string } }
+        - { name: partyType, in: query, schema: { type: string } }
+        - { name: relationType, in: query, schema: { type: string } }
+        - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
+        - { name: sourceLayerId, in: query, schema: { type: string } }
+        - { name: bbox, in: query, schema: { type: string } }
+        - { name: intersectsLayerId, in: query, schema: { type: string } }
+        - { name: intersectsFeatureId, in: query, schema: { type: string } }
+        - { name: distanceMeters, in: query, schema: { type: number } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Building"
+    post:
+      tags: [business]
+      operationId: createBuilding
+      summary: 建物作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BuildingWriteRequest"
+      responses:
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Building"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/buildings/{id}:
+    get:
+      tags: [business]
+      operationId: getBuilding
+      summary: 建物取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Building"
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [business]
+      operationId: updateBuilding
+      summary: 建物更新
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BuildingWriteRequest"
+      responses:
+        "200":
+          description: 更新後
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Building"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [business]
+      operationId: deleteBuilding
+      summary: 建物削除
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/parties:
+    get:
+      tags: [business]
+      operationId: listParties
+      summary: 関係者一覧
+      parameters:
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: partyType, in: query, schema: { type: string } }
+        - { name: relationType, in: query, schema: { type: string } }
+        - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
+        - { name: targetType, in: query, schema: { type: string, enum: [land, building] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Party"
+    post:
+      tags: [business]
+      operationId: createParty
+      summary: 関係者作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PartyWriteRequest"
+      responses:
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Party"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/parties/{id}:
+    get:
+      tags: [business]
+      operationId: getParty
+      summary: 関係者取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Party"
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [business]
+      operationId: updateParty
+      summary: 関係者更新
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PartyWriteRequest"
+      responses:
+        "200":
+          description: 更新後
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Party"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [business]
+      operationId: deleteParty
+      summary: 関係者削除
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/party-relationships:
+    post:
+      tags: [business]
+      operationId: createPartyRelationship
+      summary: 関係者リレーション作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PartyRelationshipWriteRequest"
+      responses:
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PartyRelationship"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/party-relationships/{id}:
+    patch:
+      tags: [business]
+      operationId: updatePartyRelationship
+      summary: 関係者リレーション更新
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PartyRelationshipWriteRequest"
+      responses:
+        "200":
+          description: 更新後
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PartyRelationship"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [business]
+      operationId: deletePartyRelationship
+      summary: 関係者リレーション削除
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/zones:
+    get:
+      tags: [zones]
+      operationId: listZones
+      summary: 区域一覧
+      parameters:
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: zoneType, in: query, schema: { type: string } }
+        - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
+        - { name: zoneLayerId, in: query, schema: { type: string } }
+        - { name: sourceLayerId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Zone"
+    post:
+      tags: [zones]
+      operationId: createZone
+      summary: 区域作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneWriteRequest"
+      responses:
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Zone"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/zones/{id}:
+    get:
+      tags: [zones]
+      operationId: getZone
+      summary: 区域取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Zone"
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [zones]
+      operationId: updateZone
+      summary: 区域更新
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneWriteRequest"
+      responses:
+        "200":
+          description: 更新後
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Zone"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [zones]
+      operationId: deleteZone
+      summary: 区域削除
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/zones/{id}/party-summary:
+    get:
+      tags: [zones]
+      operationId: getZonePartySummary
+      summary: 区域の関係者サマリ
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZonePartySummary"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/zone-layers/from-import:
+    post:
+      tags: [zones]
+      operationId: createZoneLayerFromImport
+      summary: 取込レイヤから区域レイヤを生成 (バッファリング + 区域同期)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneLayerFromImportRequest"
+      responses:
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZoneLayerOperation"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/import-jobs:
+    post:
+      tags: [jobs]
+      operationId: createImportJob
+      summary: GIS ファイル取込ジョブ作成 (worker-gis が GDAL で実行)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                projectId: { type: string }
+                format:
+                  type: string
+                  enum: [shapefile, geojson, gml, kml, gpx]
+                sourceSrid: { type: integer }
+                layerRole:
+                  type: string
+                  enum: [generic, zone]
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "201":
+          description: 受付済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJob"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/import-jobs/{id}:
+    get:
+      tags: [jobs]
+      operationId: getImportJob
+      summary: 取込ジョブ取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJob"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/analysis-jobs:
+    post:
+      tags: [jobs]
+      operationId: createAnalysisJob
+      summary: 分析ジョブ作成 (API 内の AnalysisJobRunner が実行)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisJobRequest"
+      responses:
+        "201":
+          description: 受付済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisJob"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/analysis-jobs/{id}:
+    get:
+      tags: [jobs]
+      operationId: getAnalysisJob
+      summary: 分析ジョブ取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisJob"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/tilejson/{layerId}:
+    get:
+      tags: [tiles]
+      operationId: getTileJson
+      summary: レイヤの TileJSON
+      parameters:
+        - { name: layerId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TileJson"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/tiles/{layerId}/{z}/{x}/{y}:
+    get:
+      tags: [tiles]
+      operationId: getTile
+      summary: MVT タイル (空タイルは 0 バイト)
+      parameters:
+        - { name: layerId, in: path, required: true, schema: { type: string } }
+        - { name: z, in: path, required: true, schema: { type: integer, minimum: 0, maximum: 24 } }
+        - { name: x, in: path, required: true, schema: { type: integer, minimum: 0 } }
+        - { name: y, in: path, required: true, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/vnd.mapbox-vector-tile:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    PathFeatureId:
+      name: featureId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: リクエスト不正
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 対象が存在しない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+      required: [error]
+
+    Project:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        createdAt: { type: string }
+      required: [id, name, createdAt]
+
+    LayerAttribute:
+      type: object
+      properties:
+        name: { type: string }
+        dataType: { type: string }
+        ordinalPosition: { type: integer }
+      required: [name, dataType, ordinalPosition]
+
+    Layer:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        name: { type: string }
+        schemaName: { type: string }
+        tableName: { type: string }
+        geometryColumn: { type: string }
+        geometryType: { type: string }
+        sourceSrid: { type: [integer, "null"] }
+        displaySrid: { type: integer }
+        featureIdColumn: { type: string }
+        bbox4326:
+          type: [array, "null"]
+          items: { type: number }
+          description: "[west, south, east, north] (EPSG:4326)"
+        rowCount: { type: integer }
+        isResult: { type: boolean }
+        layerRole: { type: string, enum: [generic, zone] }
+        resultSetId: { type: [string, "null"] }
+        resultSetName: { type: [string, "null"] }
+        sourceLayerId: { type: [string, "null"] }
+        tileSourceId: { type: string }
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/LayerAttribute"
+        createdAt: { type: string }
+      required:
+        [id, projectId, name, schemaName, tableName, geometryColumn, geometryType,
+         displaySrid, featureIdColumn, rowCount, isResult, layerRole, tileSourceId, createdAt]
+
+    Feature:
+      type: object
+      properties:
+        layerId: { type: string }
+        featureId: { type: string }
+        properties:
+          type: object
+          additionalProperties: true
+        geometry:
+          description: GeoJSON geometry (EPSG:4326)
+      required: [layerId, featureId, properties]
+
+    FeatureUpdateRequest:
+      type: object
+      properties:
+        properties:
+          type: object
+          additionalProperties: true
+        geometry:
+          description: GeoJSON geometry (EPSG:4326)
+
+    BusinessEntityLink:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+      required: [id, label]
+
+    BusinessLinks:
+      type: object
+      properties:
+        lands:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessEntityLink"
+        buildings:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessEntityLink"
+      required: [lands, buildings]
+
+    FeatureSearchResult:
+      type: object
+      properties:
+        layerId: { type: string }
+        layerName: { type: string }
+        featureId: { type: string }
+        properties:
+          type: object
+          additionalProperties: true
+        geometry:
+          description: GeoJSON geometry (EPSG:4326)
+        matchSummary: { type: [string, "null"] }
+        businessLinks:
+          $ref: "#/components/schemas/BusinessLinks"
+        matchedBusinessLinks:
+          $ref: "#/components/schemas/BusinessLinks"
+      required: [layerId, layerName, featureId, properties]
+
+    BusinessSpatialSearchRequest:
+      type: object
+      properties:
+        projectId: { type: [string, "null"] }
+        targetLayerIds:
+          type: array
+          items: { type: string }
+        sourceTypes:
+          type: array
+          items: { type: string, enum: [land, building] }
+        businessQuery: { type: [string, "null"] }
+        status: { type: [string, "null"] }
+        landUse: { type: [string, "null"] }
+        buildingUse: { type: [string, "null"] }
+        partyQuery: { type: [string, "null"] }
+        partyType: { type: [string, "null"] }
+        relationType: { type: [string, "null"] }
+        spatialOperator:
+          type: [string, "null"]
+          description: "intersects | contains | within | dwithin"
+        distanceMeters: { type: [number, "null"] }
+        limit: { type: integer, default: 100 }
+
+    ConditionQueryCondition:
+      type: object
+      properties:
+        type: { type: string, enum: [attribute, spatial, business] }
+        layerId: { type: [string, "null"] }
+        field: { type: [string, "null"] }
+        operator:
+          type: [string, "null"]
+          description: "attribute: =, !=, <, <=, >, >=, LIKE, IN, IS NULL"
+        value: {}
+        values:
+          type: [array, "null"]
+          items: { type: string }
+        comparisonTarget:
+          type: [string, "null"]
+          description: "layer | business"
+        sourceTypes:
+          type: [array, "null"]
+          items: { type: string, enum: [land, building] }
+        businessQuery: { type: [string, "null"] }
+        status: { type: [string, "null"] }
+        landUse: { type: [string, "null"] }
+        buildingUse: { type: [string, "null"] }
+        partyQuery: { type: [string, "null"] }
+        partyType: { type: [string, "null"] }
+        relationType: { type: [string, "null"] }
+        spatialOperator:
+          type: [string, "null"]
+          description: "intersects | contains | within | dwithin"
+        distanceMeters: { type: [number, "null"] }
+      required: [type]
+
+    ConditionQuery:
+      type: object
+      properties:
+        projectId: { type: [string, "null"] }
+        targetLayerIds:
+          type: array
+          items: { type: string }
+        keyword: { type: [string, "null"] }
+        conditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConditionQueryCondition"
+        limit: { type: integer, default: 100 }
+      required: [targetLayerIds]
+
+    PartyRelationship:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        partyId: { type: string }
+        partyName: { type: [string, "null"] }
+        targetType: { type: string, enum: [land, building] }
+        targetId: { type: string }
+        targetLabel: { type: [string, "null"] }
+        relationType: { type: string }
+        note: { type: [string, "null"] }
+      required: [id, projectId, partyId, targetType, targetId, relationType]
+
+    PartyRelationshipWriteRequest:
+      type: object
+      description: 作成時は partyId / targetType / targetId / relationType が必要。更新は差分のみ
+      properties:
+        projectId: { type: string }
+        partyId: { type: string }
+        targetType: { type: string, enum: [land, building] }
+        targetId: { type: string }
+        relationType: { type: string }
+        note: { type: [string, "null"] }
+      additionalProperties: true
+
+    Land:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        lotNumber: { type: string }
+        address: { type: string }
+        landUse: { type: [string, "null"] }
+        areaSqm: { type: [number, "null"] }
+        registeredOwner: { type: [string, "null"] }
+        rightType: { type: [string, "null"] }
+        registrationCause: { type: [string, "null"] }
+        registrationAcceptedOn: { type: [string, "null"] }
+        status: { type: string }
+        memo: { type: [string, "null"] }
+        sourceLayerId: { type: [string, "null"] }
+        sourceFeatureId: { type: [string, "null"] }
+        buildings:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessEntityLink"
+        relationships:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartyRelationship"
+      required: [id, projectId, lotNumber, address, status]
+
+    LandWriteRequest:
+      type: object
+      description: 作成時は lotNumber / address が必要。更新は差分のみ
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        lotNumber: { type: string }
+        address: { type: string }
+        landUse: { type: [string, "null"] }
+        areaSqm: { type: [number, "null"] }
+        registeredOwner: { type: [string, "null"] }
+        rightType: { type: [string, "null"] }
+        registrationCause: { type: [string, "null"] }
+        registrationAcceptedOn: { type: [string, "null"] }
+        status: { type: string }
+        memo: { type: [string, "null"] }
+        sourceLayerId: { type: [string, "null"] }
+        sourceFeatureId: { type: [string, "null"] }
+      additionalProperties: true
+
+    Building:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        landId: { type: [string, "null"] }
+        landLabel: { type: [string, "null"] }
+        name: { type: string }
+        buildingLocation: { type: [string, "null"] }
+        houseNumber: { type: [string, "null"] }
+        buildingUse: { type: [string, "null"] }
+        floors: { type: [integer, "null"] }
+        totalFloorAreaSqm: { type: [number, "null"] }
+        structure: { type: [string, "null"] }
+        registeredOwner: { type: [string, "null"] }
+        rightType: { type: [string, "null"] }
+        registrationAcceptedOn: { type: [string, "null"] }
+        status: { type: string }
+        memo: { type: [string, "null"] }
+        sourceLayerId: { type: [string, "null"] }
+        sourceFeatureId: { type: [string, "null"] }
+        relationships:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartyRelationship"
+      required: [id, projectId, name, status]
+
+    BuildingWriteRequest:
+      type: object
+      description: 作成時は name が必要。更新は差分のみ
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        landId: { type: [string, "null"] }
+        name: { type: string }
+        buildingLocation: { type: [string, "null"] }
+        houseNumber: { type: [string, "null"] }
+        buildingUse: { type: [string, "null"] }
+        floors: { type: [integer, "null"] }
+        totalFloorAreaSqm: { type: [number, "null"] }
+        structure: { type: [string, "null"] }
+        registeredOwner: { type: [string, "null"] }
+        rightType: { type: [string, "null"] }
+        registrationAcceptedOn: { type: [string, "null"] }
+        status: { type: string }
+        memo: { type: [string, "null"] }
+        sourceLayerId: { type: [string, "null"] }
+        sourceFeatureId: { type: [string, "null"] }
+      additionalProperties: true
+
+    Party:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        name: { type: string }
+        partyType: { type: string }
+        contact: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        memo: { type: [string, "null"] }
+        tags:
+          type: array
+          items: { type: string }
+        relationships:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartyRelationship"
+      required: [id, projectId, name, partyType]
+
+    PartyWriteRequest:
+      type: object
+      description: 作成時は name / partyType が必要。更新は差分のみ
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        name: { type: string }
+        partyType: { type: string }
+        contact: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        memo: { type: [string, "null"] }
+        tags:
+          type: array
+          items: { type: string }
+      additionalProperties: true
+
+    Zone:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        name: { type: string }
+        zoneType: { type: [string, "null"] }
+        status: { type: string }
+        memo: { type: [string, "null"] }
+        zoneLayerId: { type: string }
+        zoneFeatureId: { type: string }
+        sourceLayerId: { type: string }
+        sourceFeatureId: { type: string }
+        landCount: { type: integer }
+        buildingCount: { type: integer }
+        lands:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessEntityLink"
+        buildings:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessEntityLink"
+      required:
+        [id, projectId, name, status, zoneLayerId, zoneFeatureId, sourceLayerId, sourceFeatureId]
+
+    ZoneWriteRequest:
+      type: object
+      description: 作成時は name と区域フィーチャ参照が必要。更新は差分のみ
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        name: { type: string }
+        zoneType: { type: [string, "null"] }
+        status: { type: string }
+        memo: { type: [string, "null"] }
+        zoneLayerId: { type: string }
+        zoneFeatureId: { type: string }
+        sourceLayerId: { type: string }
+        sourceFeatureId: { type: string }
+      additionalProperties: true
+
+    ZonePartyBreakdown:
+      type: object
+      properties:
+        key: { type: string }
+        count: { type: integer }
+      required: [key, count]
+
+    ZonePartySummaryEntry:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        partyType: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        zoneInvolvement: { type: integer }
+        projectInvolvement: { type: integer }
+        relationTypes:
+          type: array
+          items: { type: string }
+        coverageRatio: { type: number }
+      required: [id, name, partyType, zoneInvolvement, projectInvolvement, coverageRatio]
+
+    ZonePartySummary:
+      type: object
+      properties:
+        zoneId: { type: string }
+        containedCount: { type: integer }
+        partyCount: { type: integer }
+        typeBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZonePartyBreakdown"
+        tagBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZonePartyBreakdown"
+        parties:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZonePartySummaryEntry"
+      required: [zoneId, containedCount, partyCount]
+
+    ZoneLayerFromImportRequest:
+      type: object
+      properties:
+        projectId: { type: [string, "null"] }
+        layerId: { type: string }
+        name: { type: [string, "null"] }
+        zoneType: { type: [string, "null"] }
+        status: { type: [string, "null"] }
+        nameField: { type: [string, "null"] }
+      required: [layerId]
+
+    ZoneLayerOperation:
+      type: object
+      properties:
+        layer:
+          $ref: "#/components/schemas/Layer"
+        zonesCreated: { type: integer }
+        zonesUpdated: { type: integer }
+        zones:
+          type: array
+          items:
+            $ref: "#/components/schemas/Zone"
+      required: [layer, zonesCreated, zonesUpdated]
+
+    ImportJob:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        filename: { type: string }
+        format: { type: string, enum: [shapefile, geojson, gml, kml, gpx] }
+        sourceSrid: { type: [integer, "null"] }
+        status: { type: string, enum: [pending, running, succeeded, failed] }
+        errorMessage: { type: [string, "null"] }
+        layerId: { type: [string, "null"] }
+        layerRole: { type: string, enum: [generic, zone] }
+        createdAt: { type: string }
+        startedAt: { type: [string, "null"] }
+        finishedAt: { type: [string, "null"] }
+      required: [id, projectId, filename, format, status, layerRole, createdAt]
+
+    AnalysisJobRequest:
+      type: object
+      properties:
+        projectId: { type: [string, "null"] }
+        name: { type: [string, "null"] }
+        targetLayerId:
+          type: [string, "null"]
+          description: operation=and_filter (旧形式) の対象レイヤ
+        operation:
+          type: [string, "null"]
+          description: "and_filter | condition_search"
+        attributeConditions:
+          type: array
+          items:
+            type: object
+            properties:
+              layerId: { type: string }
+              field: { type: string }
+              operator: { type: string }
+              value: {}
+              values:
+                type: [array, "null"]
+                items: { type: string }
+            required: [layerId, field, operator]
+        spatialConditions:
+          type: array
+          items:
+            type: object
+            properties:
+              layerId: { type: string }
+              operator: { type: string, enum: [intersects, contains, within, dwithin] }
+              distanceMeters: { type: [number, "null"] }
+            required: [layerId, operator]
+        conditionQuery:
+          $ref: "#/components/schemas/ConditionQuery"
+
+    AnalysisJob:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        name: { type: string }
+        criteria:
+          type: object
+          additionalProperties: true
+        status: { type: string, enum: [pending, running, succeeded, failed] }
+        errorMessage: { type: [string, "null"] }
+        resultLayerId: { type: [string, "null"] }
+        resultSetId: { type: [string, "null"] }
+        resultCount: { type: [integer, "null"] }
+        createdAt: { type: string }
+        startedAt: { type: [string, "null"] }
+        finishedAt: { type: [string, "null"] }
+      required: [id, projectId, name, criteria, status, createdAt]
+
+    VectorLayer:
+      type: object
+      properties:
+        id: { type: string }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+      required: [id, fields]
+
+    TileJson:
+      type: object
+      properties:
+        tilejson: { type: string }
+        name: { type: string }
+        tiles:
+          type: array
+          items: { type: string }
+        vector_layers:
+          type: array
+          items:
+            $ref: "#/components/schemas/VectorLayer"
+        bounds:
+          type: [array, "null"]
+          items: { type: number }
+        minzoom: { type: integer }
+        maxzoom: { type: integer }
+      required: [tilejson, name, tiles, vector_layers]

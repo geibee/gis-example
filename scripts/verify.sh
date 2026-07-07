@@ -42,6 +42,9 @@ classify_paths() {
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     case "$path" in
+      apps/api/openapi.yaml | .spectral.yaml)
+        # API 契約は api 実装と web クライアント (Spectral lint / 生成型ドリフト) の両方に影響する
+        NEED_API=1; NEED_WEB=1 ;;
       apps/api/*)
         NEED_API=1 ;;
       apps/worker-gis/*)
@@ -162,6 +165,9 @@ verify_web() {
   # lockfile は npm workspaces のルートにあるため、ルートで npm ci を実行する
   npm ci
   npm --workspace apps/web run typecheck
+  # API 契約: Spectral lint + 生成型 (generated.ts) が openapi.yaml と同期しているか
+  npm --workspace apps/web run lint:contracts
+  npm --workspace apps/web run check:contracts-drift
   npm --workspace apps/web run build
   log "web PASS"
 }
