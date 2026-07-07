@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
             time.sleep(poll_interval)
 
 
-def connect() -> psycopg.Connection:
+def connect() -> psycopg.Connection[DictRow]:
     return psycopg.connect(
         host=os.getenv("PGHOST", "localhost"),
         port=int(os.getenv("PGPORT", "5432")),
@@ -42,7 +42,7 @@ def connect() -> psycopg.Connection:
     )
 
 
-def claim_import_job(conn: psycopg.Connection) -> dict[str, Any] | None:
+def claim_import_job(conn: psycopg.Connection[DictRow]) -> dict[str, Any] | None:
     with conn.transaction():
         row = conn.execute(
             """
@@ -62,7 +62,7 @@ def claim_import_job(conn: psycopg.Connection) -> dict[str, Any] | None:
     return row
 
 
-def run_import_job(conn: psycopg.Connection, job: dict[str, Any]) -> None:
+def run_import_job(conn: psycopg.Connection[DictRow], job: dict[str, Any]) -> None:
     try:
         table_name = make_table_name(job["filename"], job["id"])
         source_srid = int(job["source_srid"] or 4326)
@@ -133,7 +133,7 @@ def run_ogr2ogr(source: str, table_name: str, source_srid: int) -> None:
         raise RuntimeError(f"ogr2ogr failed: {result.stderr.strip() or result.stdout.strip()}")
 
 
-def normalize_imported_table(conn: psycopg.Connection, table_name: str) -> None:
+def normalize_imported_table(conn: psycopg.Connection[DictRow], table_name: str) -> None:
     table_ref = qtable("gis_data", table_name)
     index_name = quote_ident(f"{table_name[:48]}_geom_gix")
     conn.execute(f"UPDATE {table_ref} SET geom = ST_MakeValid(geom) WHERE geom IS NOT NULL AND NOT ST_IsValid(geom)")
@@ -143,7 +143,7 @@ def normalize_imported_table(conn: psycopg.Connection, table_name: str) -> None:
 
 
 def insert_layer_metadata(
-    conn: psycopg.Connection,
+    conn: psycopg.Connection[DictRow],
     project_id: str,
     name: str,
     table_name: str,
@@ -154,14 +154,15 @@ def insert_layer_metadata(
     source_layer_id: str | None = None,
 ) -> str:
     stats = table_stats(conn, table_name)
-    layer_id = conn.execute(
+    row = conn.execute(
         """
         INSERT INTO app.layers (
             project_id, name, schema_name, table_name, geometry_column, geometry_type,
             source_srid, display_srid, feature_id_column, bbox_4326, row_count,
             is_result, layer_role, result_set_id, source_layer_id, tile_source_id
         )
-        VALUES (%s::uuid, %s, 'gis_data', %s, 'geom', %s, %s, 3857, 'fid', %s::jsonb, %s, %s, %s, %s::uuid, %s::uuid, %s)
+        VALUES (%s::uuid, %s, 'gis_data', %s, 'geom', %s, %s, 3857, 'fid',
+                %s::jsonb, %s, %s, %s, %s::uuid, %s::uuid, %s)
         RETURNING id::text
         """,
         (
@@ -178,12 +179,15 @@ def insert_layer_metadata(
             source_layer_id,
             table_name,
         ),
-    ).fetchone()["id"]
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"Layer metadata insert returned no row for {table_name}")
+    layer_id: str = row["id"]
     insert_layer_attributes(conn, layer_id, table_name)
     return layer_id
 
 
-def sync_zones_for_layer(conn: psycopg.Connection, layer_id: str, project_id: str, table_name: str) -> None:
+def sync_zones_for_layer(conn: psycopg.Connection[DictRow], layer_id: str, project_id: str, table_name: str) -> None:
     columns = {
         row["column_name"]
         for row in conn.execute(
@@ -205,19 +209,19 @@ def sync_zones_for_layer(conn: psycopg.Connection, layer_id: str, project_id: st
             zone_layer_id, zone_feature_id, source_layer_id, source_feature_id
         )
         SELECT
-            concat('Z-', replace(%s::text, '-', ''), '-', t.{quote_ident('fid')}::text) AS id,
+            concat('Z-', replace(%s::text, '-', ''), '-', t.{quote_ident("fid")}::text) AS id,
             %s::uuid AS project_id,
-            COALESCE({name_expr}, concat('区域 ', t.{quote_ident('fid')}::text)) AS name,
+            COALESCE({name_expr}, concat('区域 ', t.{quote_ident("fid")}::text)) AS name,
             NULL::text AS zone_type,
             '有効'::text AS status,
             NULL::text AS memo,
             %s::uuid AS zone_layer_id,
-            t.{quote_ident('fid')}::text AS zone_feature_id,
+            t.{quote_ident("fid")}::text AS zone_feature_id,
             %s::uuid AS source_layer_id,
-            t.{quote_ident('fid')}::text AS source_feature_id
+            t.{quote_ident("fid")}::text AS source_feature_id
         FROM {table_ref} AS t
-        WHERE t.{quote_ident('geom')} IS NOT NULL
-          AND GeometryType(t.{quote_ident('geom')}) ILIKE '%%POLYGON%%'
+        WHERE t.{quote_ident("geom")} IS NOT NULL
+          AND GeometryType(t.{quote_ident("geom")}) ILIKE '%%POLYGON%%'
         ON CONFLICT (zone_layer_id, zone_feature_id) DO UPDATE
         SET name = EXCLUDED.name,
             source_layer_id = EXCLUDED.source_layer_id,
@@ -228,14 +232,15 @@ def sync_zones_for_layer(conn: psycopg.Connection, layer_id: str, project_id: st
     )
 
 
-def table_stats(conn: psycopg.Connection, table_name: str) -> dict[str, Any]:
+def table_stats(conn: psycopg.Connection[DictRow], table_name: str) -> dict[str, Any]:
     table_ref = qtable("gis_data", table_name)
     row = conn.execute(
         f"""
         WITH stats AS (
             SELECT
                 count(*)::bigint AS row_count,
-                (array_agg(GeometryType(geom) ORDER BY GeometryType(geom)) FILTER (WHERE geom IS NOT NULL))[1] AS geometry_type,
+                (array_agg(GeometryType(geom) ORDER BY GeometryType(geom))
+                    FILTER (WHERE geom IS NOT NULL))[1] AS geometry_type,
                 ST_Extent(ST_Transform(geom, 4326)) AS bbox
             FROM {table_ref}
         )
@@ -249,6 +254,8 @@ def table_stats(conn: psycopg.Connection, table_name: str) -> dict[str, Any]:
         FROM stats
         """
     ).fetchone()
+    if row is None:
+        raise RuntimeError(f"table_stats returned no row for {table_name}")
     return {
         "row_count": row["row_count"],
         "geometry_type": row["geometry_type"],
@@ -256,7 +263,7 @@ def table_stats(conn: psycopg.Connection, table_name: str) -> dict[str, Any]:
     }
 
 
-def insert_layer_attributes(conn: psycopg.Connection, layer_id: str, table_name: str) -> None:
+def insert_layer_attributes(conn: psycopg.Connection[DictRow], layer_id: str, table_name: str) -> None:
     rows = conn.execute(
         """
         SELECT column_name, data_type, udt_name, ordinal_position
@@ -282,7 +289,7 @@ def insert_layer_attributes(conn: psycopg.Connection, layer_id: str, table_name:
         )
 
 
-def mark_import_failed(conn: psycopg.Connection, job_id: str, exc: Exception) -> None:
+def mark_import_failed(conn: psycopg.Connection[DictRow], job_id: str, exc: Exception) -> None:
     message = str(exc)[:4000]
     with conn.transaction():
         conn.execute(

@@ -1,0 +1,114 @@
+# nightly の重量ゲート。push / PR の軽量ゲート (verify.yml) が扱わない検査を回す:
+#   - security: gitleaks (git 履歴全体のシークレット検出) / Trivy (HIGH,CRITICAL 脆弱性) / SBOM
+#   - smoke-e2e: docker compose スタック全体で「取込 → 検索 → 分析 → タイル」の実データフロー
+# 失敗時は ci-nightly ラベル付き Issue に起票する (既存 open Issue があればコメント追記)
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # 03:00 JST
+  workflow_dispatch:
+  # workflow_dispatch を叩けない環境 (actions:write の無いエージェント) 向けの起動経路。
+  # .ci/nightly-request の内容を変えて push すると起動する
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths:
+      - ".ci/nightly-request"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  security:
+    name: セキュリティスキャン (gitleaks / Trivy / SBOM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks が git 履歴全体を走査する
+
+      - name: gitleaks をインストール
+        run: |
+          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz \
+            | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+          gitleaks version
+
+      - name: シークレット検出 (git 履歴全体)
+        run: |
+          mkdir -p ci-results/sarif
+          gitleaks detect --source . \
+            --report-format sarif \
+            --report-path ci-results/sarif/gitleaks.sarif
+
+      - name: Trivy をインストール (脆弱性スキャン / SBOM)
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: 脆弱性スキャン (HIGH / CRITICAL で失敗)
+        run: |
+          trivy fs --scanners vuln --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --format sarif --output ci-results/sarif/trivy.sarif .
+
+      - name: SBOM 生成 (CycloneDX)
+        if: always()
+        run: trivy fs --format cyclonedx --output ci-results/sbom.cdx.json .
+
+      - name: スキャン成果物をアップロード (SARIF / SBOM)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-results
+          path: ci-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+  smoke-e2e:
+    name: スモーク E2E (docker compose 全スタック)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: 取込 → 検索 → 分析 → タイルのスモーク実行
+        run: bash scripts/smoke-e2e.sh
+      - name: compose ログをアップロード (失敗時)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-compose-logs
+          path: /tmp/smoke-compose.log
+          if-no-files-found: ignore
+
+  escalate:
+    name: 失敗時に Issue へエスカレーション
+    needs: [security, smoke-e2e]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: ci-nightly Issue を起票 / 追記
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create ci-nightly --color d73a4a \
+            --description "nightly CI の失敗" --force || true
+          existing=$(gh issue list --label ci-nightly --state open \
+            --json number --jq '.[0].number' || true)
+          body=$(printf '%s\n\n%s' \
+            "nightly CI が失敗しました: ${RUN_URL}" \
+            "SARIF / SBOM / compose ログは run のアーティファクトを参照。")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "nightly CI 失敗 ($(date -u +%Y-%m-%d))" \
+              --label ci-nightly --body "$body"
+          fi

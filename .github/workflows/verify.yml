@@ -1,0 +1,195 @@
+# push / PR 時の軽量ゲート。scripts/verify.sh を SSoT として再利用する。
+#
+# - scope ジョブが verify.sh のスコープ判定 (VERIFY_DETECT_ONLY=1) を実行し、
+#   api / worker / web ジョブを変更スコープに応じて条件起動する
+# - main への push は「変更なし = 全スコープ」判定になり、常にフル検証される
+# - PostGIS を要する統合テスト・E2E は本ワークフローの対象外 (将来 nightly に配置する)
+name: verify
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  # main は途中コミットも検証したいのでキャンセルしない
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: 変更スコープ判定
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      api: ${{ steps.detect.outputs.api }}
+      worker: ${{ steps.detect.outputs.worker }}
+      web: ${{ steps.detect.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # merge-base 計算に main の履歴が必要
+      - name: verify.sh のスコープ判定を実行
+        id: detect
+        env:
+          VERIFY_BASE_REF: origin/main
+          VERIFY_DETECT_ONLY: "1"
+        run: bash scripts/verify.sh
+
+  api:
+    name: api verify (Kotlin)
+    needs: scope
+    if: needs.scope.outputs.api == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 統合 verify (api スコープ)
+        env:
+          VERIFY_SCOPE: api
+        run: bash scripts/verify.sh
+
+  worker:
+    name: worker verify (Python)
+    needs: scope
+    if: needs.scope.outputs.worker == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/worker-gis/requirements.txt
+      - name: worker のツールチェーンをインストール
+        run: pip install -r apps/worker-gis/requirements.txt ruff mypy pytest
+      - name: 統合 verify (worker スコープ)
+        env:
+          VERIFY_SCOPE: worker
+        run: bash scripts/verify.sh
+
+  api-integration:
+    name: api integration (PostGIS)
+    needs: scope
+    if: needs.scope.outputs.api == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      db:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: gis
+          POSTGRES_PASSWORD: gis
+          POSTGRES_DB: gis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gis -d gis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 統合 verify (api / PostGIS)
+        env:
+          VERIFY_SCOPE: api
+          VERIFY_INTEGRATION: "1"
+          DATABASE_URL: jdbc:postgresql://localhost:5432/gis
+          DATABASE_USER: gis
+          DATABASE_PASSWORD: gis
+        run: bash scripts/verify.sh
+
+  worker-integration:
+    name: worker integration (GDAL + PostGIS)
+    needs: scope
+    if: needs.scope.outputs.worker == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      db:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: gis
+          POSTGRES_PASSWORD: gis
+          POSTGRES_DB: gis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gis -d gis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/worker-gis/requirements.txt
+      - name: GDAL (ogr2ogr) をインストール
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gdal-bin
+      - name: worker のツールチェーンをインストール
+        run: pip install -r apps/worker-gis/requirements.txt ruff mypy pytest
+      - name: 統合 verify (worker / GDAL + PostGIS)
+        env:
+          VERIFY_SCOPE: worker
+          VERIFY_INTEGRATION: "1"
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGDATABASE: gis
+          PGUSER: gis
+          PGPASSWORD: gis
+        run: bash scripts/verify.sh
+
+  web:
+    name: web verify (TypeScript)
+    needs: scope
+    if: needs.scope.outputs.web == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 統合 verify (web スコープ)
+        env:
+          VERIFY_SCOPE: web
+        run: bash scripts/verify.sh
+
+  # branch protection の required check はこのジョブ 1 つを指定すればよい
+  # (スコープ外でスキップされたジョブは成功扱い、失敗・キャンセルのみ落とす)
+  verify-result:
+    name: verify 結果集約
+    needs: [scope, api, worker, web, api-integration, worker-integration]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 依存ジョブの結果を判定
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "results: $results"
+          case "$results" in
+            *failure* | *cancelled*) echo "verify 失敗"; exit 1 ;;
+            *) echo "verify 成功 (skipped はスコープ外)" ;;
+          esac
