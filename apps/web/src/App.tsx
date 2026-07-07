@@ -75,6 +75,8 @@ import {
   defaultMapZoom,
   emptyBusinessLinks,
   imperialPalaceCenter,
+  jobPollIntervalMs,
+  jobPollTimeoutMs,
   layerColors
 } from "./constants";
 import {
@@ -142,6 +144,7 @@ export default function App() {
   const seenLayerIds = useRef<Set<string>>(new Set());
   const loadedLayerProjectId = useRef<string | null>(null);
   const layersRef = useRef<Layer[]>([]);
+  const activePollTimersRef = useRef<Set<number>>(new Set());
 
   const [activeTab, setActiveTab] = useState<BusinessTab>(() => parseRoute(window.location.pathname).tab);
   const [routeSelection, setRouteSelection] = useState<RouteSelection>(() => parseRoute(window.location.pathname));
@@ -911,39 +914,72 @@ export default function App() {
     }
   };
 
-  const pollImportJob = (id: string, options: { createZoneLayer?: boolean; metadata?: ZoneLayerCreateMetadata } = {}) => {
+  // ジョブポーリングの共通化: タイマーを ref で追跡してアンマウント時に解放し、
+  // ジョブが進まない場合は上限時間で打ち切る (放置すると無限ポーリングになる)
+  const startJobPolling = (tick: (stop: () => void) => Promise<void>, onTimeout: () => void) => {
+    const startedAt = Date.now();
+    const stop = () => {
+      window.clearInterval(timer);
+      activePollTimersRef.current.delete(timer);
+    };
     const timer = window.setInterval(async () => {
-      try {
-        const job = await getImportJob(id);
-        if (job.status === "succeeded" || job.status === "failed") {
-          window.clearInterval(timer);
-          if (job.status === "failed") {
-            if (options.createZoneLayer) setCreatingZoneLayer(false);
-            setNotice(job.errorMessage ?? "区域データの取込に失敗しました");
-            return;
-          }
-          if (options.createZoneLayer) {
-            if (job.layerId) {
-              const result = await createZoneFromSourceLayer(job.layerId, {
-                ...options.metadata,
-                manageLoading: false
-              });
-              if (result) openCreatedZoneFromOperation(result);
-            } else {
-              setNotice("区域データの取込結果を取得できませんでした");
-            }
-            setCreatingZoneLayer(false);
-          } else {
-            void refreshLayers();
-            void refreshZones();
-          }
-        }
-      } catch (error) {
-        window.clearInterval(timer);
-        if (options.createZoneLayer) setCreatingZoneLayer(false);
-        setNotice(errorMessage(error));
+      if (Date.now() - startedAt > jobPollTimeoutMs) {
+        stop();
+        onTimeout();
+        return;
       }
-    }, 1500);
+      await tick(stop);
+    }, jobPollIntervalMs);
+    activePollTimersRef.current.add(timer);
+  };
+
+  useEffect(() => {
+    const timers = activePollTimersRef.current;
+    return () => {
+      for (const timer of timers) window.clearInterval(timer);
+      timers.clear();
+    };
+  }, []);
+
+  const pollImportJob = (id: string, options: { createZoneLayer?: boolean; metadata?: ZoneLayerCreateMetadata } = {}) => {
+    startJobPolling(
+      async (stop) => {
+        try {
+          const job = await getImportJob(id);
+          if (job.status === "succeeded" || job.status === "failed") {
+            stop();
+            if (job.status === "failed") {
+              if (options.createZoneLayer) setCreatingZoneLayer(false);
+              setNotice(job.errorMessage ?? "区域データの取込に失敗しました");
+              return;
+            }
+            if (options.createZoneLayer) {
+              if (job.layerId) {
+                const result = await createZoneFromSourceLayer(job.layerId, {
+                  ...options.metadata,
+                  manageLoading: false
+                });
+                if (result) openCreatedZoneFromOperation(result);
+              } else {
+                setNotice("区域データの取込結果を取得できませんでした");
+              }
+              setCreatingZoneLayer(false);
+            } else {
+              void refreshLayers();
+              void refreshZones();
+            }
+          }
+        } catch (error) {
+          stop();
+          if (options.createZoneLayer) setCreatingZoneLayer(false);
+          setNotice(errorMessage(error));
+        }
+      },
+      () => {
+        if (options.createZoneLayer) setCreatingZoneLayer(false);
+        setNotice("取込ジョブの完了確認がタイムアウトしました。時間をおいてレイヤ一覧を確認してください");
+      }
+    );
   };
 
   const submitAnalysis = async () => {
@@ -1184,22 +1220,27 @@ export default function App() {
   };
 
   const pollAnalysisJob = (id: string) => {
-    const timer = window.setInterval(async () => {
-      try {
-        const job = await getAnalysisJob(id);
-        if (job.status === "succeeded" || job.status === "failed") {
-          window.clearInterval(timer);
-          if (job.status === "failed") {
-            setNotice(job.errorMessage ?? "条件検索結果の保存に失敗しました");
-          } else {
-            void refreshLayers();
+    startJobPolling(
+      async (stop) => {
+        try {
+          const job = await getAnalysisJob(id);
+          if (job.status === "succeeded" || job.status === "failed") {
+            stop();
+            if (job.status === "failed") {
+              setNotice(job.errorMessage ?? "条件検索結果の保存に失敗しました");
+            } else {
+              void refreshLayers();
+            }
           }
+        } catch (error) {
+          stop();
+          setNotice(errorMessage(error));
         }
-      } catch (error) {
-        window.clearInterval(timer);
-        setNotice(errorMessage(error));
+      },
+      () => {
+        setNotice("分析ジョブの完了確認がタイムアウトしました。時間をおいてレイヤ一覧を確認してください");
       }
-    }, 1500);
+    );
   };
 
   const toggleLayer = (layerId: string) => {
