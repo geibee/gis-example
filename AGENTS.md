@@ -44,7 +44,11 @@ VERIFY_SCOPE=all bash scripts/verify.sh
   - api: `gradle integrationTest`(`@Tag("integration")` の JUnit テスト。`DATABASE_URL` 必須)
   - worker: `pytest -m integration`(GDAL 実取込。`PG*` 環境変数 + `ogr2ogr` 必須)
   - 統合テストは接続先の `app` / `gis_data` スキーマを DROP して作り直す。開発 DB に向けない
-- E2E・ビジュアルリグレッション・重量級検査(fuzz / セキュリティスキャン)は今後 nightly ゲートとして追加する。verify.sh の軽量ゲートに混ぜない
+- **nightly 重量ゲート** (`.github/workflows/nightly.yml`、03:00 JST + workflow_dispatch):
+  - security: gitleaks(git 履歴全体)/ Trivy(HIGH,CRITICAL で失敗)/ SBOM(CycloneDX)。SARIF は run のアーティファクト
+  - smoke-e2e: `scripts/smoke-e2e.sh` が docker compose 全スタックで「取込 → 検索プレビュー → 分析実体化(プレビューと件数一致)→ タイル配信」を検証。ローカルは `SMOKE_MANAGE_COMPOSE=0` で起動済みスタックに対して実行できる
+  - 失敗時は `ci-nightly` ラベルの Issue に自動起票(既存 open Issue にはコメント追記)。**Issue を閉じる前に原因への恒久対応(ゲート強化・依存更新)を済ませること**
+- ビジュアルリグレッション・API fuzz(Schemathesis)は OpenAPI 導入後に nightly へ追加予定。verify.sh の軽量ゲートに混ぜない
 
 ## テスト方針
 

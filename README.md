@@ -134,6 +134,8 @@ PGHOST=localhost PGDATABASE=gis PGUSER=gis PGPASSWORD=gis \
 
 注意: 統合テストは接続先 DB の `app` / `gis_data` スキーマを削除して作り直す。開発データの入った DB に向けないこと。
 
+nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セキュリティスキャン(gitleaks / Trivy / SBOM)と、docker compose 全スタックに対するスモーク E2E(`scripts/smoke-e2e.sh`: 取込 → 検索 → 分析 → タイル)を実行し、失敗時は `ci-nightly` ラベルの Issue に自動起票する。
+
 開発規約・アーキテクチャの分担は [`AGENTS.md`](AGENTS.md) を参照。
 
 ## Notes
