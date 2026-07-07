@@ -20,6 +20,15 @@ fun Database.ensureBusinessSchema() {
                     updated_at timestamptz NOT NULL DEFAULT now()
                 );
 
+                CREATE TABLE IF NOT EXISTS app.project_members (
+                    user_id uuid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+                    project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
+                    role text NOT NULL CHECK (role IN ('editor', 'viewer')),
+                    created_at timestamptz NOT NULL DEFAULT now(),
+                    PRIMARY KEY (user_id, project_id)
+                );
+                CREATE INDEX IF NOT EXISTS project_members_project_idx ON app.project_members(project_id);
+
                 CREATE TABLE IF NOT EXISTS app.lands (
                     id text PRIMARY KEY,
                     project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,

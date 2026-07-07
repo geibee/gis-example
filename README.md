@@ -158,7 +158,21 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 
 認証に成功した subject は `app.users` へ初回アクセス時に自動登録 (JIT) される。`is_active = false` にすると即時にアクセスを止められる。
 
-開発 realm (`infra/keycloak/realm-gis.json`) のユーザー: `gis-admin` / `gis-editor` / `gis-viewer` (パスワードはユーザー名と同じ)。
+開発 realm (`infra/keycloak/realm-gis.json`) のユーザー: `gis-admin` / `gis-editor` / `gis-viewer` (パスワードはユーザー名と同じ)。compose のシード (`infra/postgres/070-seed-dev-users.sql`) が gis-editor / gis-viewer を Default project のメンバーとして登録済み。
+
+## Authorization
+
+認可は「メンバーシップ (誰がどのプロジェクトで何のロールか) は DB、ポリシー (ロールが何をできるか) はコード」の分離で実装している (`apps/api` の `AccessPolicy`)。判定は I/O を持たない純粋関数で、Cedar と同型の (principal, action, resource) モデルを取り、ロール × アクションの全組合せを単体テストが検査する。
+
+| ロール | 範囲 | できること |
+|---|---|---|
+| system admin (`app.users.system_role`) | 全プロジェクト | すべて + ユーザー・メンバー管理 |
+| editor (`app.project_members.role`) | プロジェクト単位 | 閲覧に加えて取込・分析・レイヤ / フィーチャ編集・業務データ編集 |
+| viewer (`app.project_members.role`) | プロジェクト単位 | 閲覧のみ (一覧・検索・タイル・ジョブ状態) |
+
+- メンバーでないプロジェクトのリソースへの個別アクセスは 404 (ID の存在自体を隠す)。メンバーだがロール不足の場合と、projectId を明示した操作の拒否は 403
+- 一覧 API (`/api/layers` `/api/lands` `/api/buildings` `/api/parties` `/api/zones` `/api/features/search`) は `projectId` が必須
+- `/api/projects` はメンバーであるプロジェクトのみ返す (admin は全件)
 
 ## Notes
 

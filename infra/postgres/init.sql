@@ -23,6 +23,16 @@ CREATE TABLE IF NOT EXISTS app.users (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- プロジェクト単位のメンバーシップ (認可の可変データ)。
+-- ロールが何をできるかは API コード側の権限マトリクスが定義する
+CREATE TABLE IF NOT EXISTS app.project_members (
+    user_id uuid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+    project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
+    role text NOT NULL CHECK (role IN ('editor', 'viewer')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, project_id)
+);
+
 CREATE TABLE IF NOT EXISTS app.result_sets (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
@@ -175,6 +185,7 @@ CREATE TABLE IF NOT EXISTS app.party_relationships (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS project_members_project_idx ON app.project_members(project_id);
 CREATE INDEX IF NOT EXISTS import_jobs_status_idx ON app.import_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS analysis_jobs_status_idx ON app.analysis_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS layers_project_idx ON app.layers(project_id, created_at);

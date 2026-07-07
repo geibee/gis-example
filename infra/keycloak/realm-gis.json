@@ -37,6 +37,7 @@
   ],
   "users": [
     {
+      "id": "a0000000-0000-4000-8000-000000000001",
       "username": "gis-admin",
       "email": "admin@gis.example",
       "emailVerified": true,
@@ -46,6 +47,7 @@
       "credentials": [{ "type": "password", "value": "gis-admin", "temporary": false }]
     },
     {
+      "id": "a0000000-0000-4000-8000-000000000002",
       "username": "gis-editor",
       "email": "editor@gis.example",
       "emailVerified": true,
@@ -55,6 +57,7 @@
       "credentials": [{ "type": "password", "value": "gis-editor", "temporary": false }]
     },
     {
+      "id": "a0000000-0000-4000-8000-000000000003",
       "username": "gis-viewer",
       "email": "viewer@gis.example",
       "emailVerified": true,

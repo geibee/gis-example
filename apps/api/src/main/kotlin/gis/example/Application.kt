@@ -117,11 +117,23 @@ fun Application.module(
         // /health 以外の全ルートは認証必須 (fail-closed)。認可は各ルート内で判定する
         authenticate(OIDC_AUTH_NAME) {
             get("/api/projects") {
-                call.respond(db.listProjects())
+                // 非 admin にはメンバーであるプロジェクトのみ返す (テナント列挙の防止)
+                val principal = call.appPrincipal()
+                val projects = db.listProjects()
+                call.respond(
+                    if (principal.systemRole == SystemRole.ADMIN) projects
+                    else projects.filter { it.id in principal.memberships }
+                )
             }
 
             get("/api/layers") {
-                call.respond(db.listLayers(optionalUuid(call.request.queryParameters["projectId"], "projectId")))
+                val params = call.request.queryParameters
+                val projectId = requireUuid(
+                    params["projectId"] ?: throw ApiException(HttpStatusCode.BadRequest, "projectId is required"),
+                    "projectId"
+                )
+                call.requireProjectPermission(Action.LAYER_READ, projectId)
+                call.respond(db.listLayers(projectId))
             }
 
             get("/api/layers/{id}/attribute-values") {
@@ -132,6 +144,7 @@ fun Application.module(
                 val field = call.request.queryParameters["field"]
                     ?: throw ApiException(HttpStatusCode.BadRequest, "Attribute field is required")
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 80
+                call.requireResourcePermission(db, Action.LAYER_READ, ProjectResourceType.LAYER, layerId)
                 call.respond(db.listAttributeValues(layerId, field, limit))
             }
 
@@ -140,6 +153,7 @@ fun Application.module(
                     call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
                     "Layer id"
                 )
+                call.requireResourcePermission(db, Action.LAYER_WRITE, ProjectResourceType.LAYER, id)
                 db.deleteLayer(id)
                 call.respond(HttpStatusCode.NoContent)
             }
@@ -149,6 +163,7 @@ fun Application.module(
                     call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Result set id is required"),
                     "Result set id"
                 )
+                call.requireResourcePermission(db, Action.LAYER_WRITE, ProjectResourceType.RESULT_SET, id)
                 db.deleteResultSet(id)
                 call.respond(HttpStatusCode.NoContent)
             }
@@ -159,6 +174,7 @@ fun Application.module(
                     "Layer id"
                 )
                 val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
+                call.requireResourcePermission(db, Action.FEATURE_READ, ProjectResourceType.LAYER, layerId)
                 call.respond(db.getFeature(layerId, featureId))
             }
 
@@ -168,15 +184,21 @@ fun Application.module(
                     "Layer id"
                 )
                 val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
+                call.requireResourcePermission(db, Action.FEATURE_WRITE, ProjectResourceType.LAYER, layerId)
                 val request = call.receive<FeatureUpdateRequest>()
                 call.respond(db.updateFeature(layerId, featureId, request))
             }
 
             get("/api/features/search") {
                 val params = call.request.queryParameters
+                val projectId = requireUuid(
+                    params["projectId"] ?: throw ApiException(HttpStatusCode.BadRequest, "projectId is required"),
+                    "projectId"
+                )
+                call.requireProjectPermission(Action.FEATURE_READ, projectId)
                 call.respond(
                     db.searchFeatures(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
+                        projectId = projectId,
                         layerId = optionalUuid(params["layerId"], "layerId"),
                         q = params["q"],
                         field = params["field"],
@@ -190,11 +212,15 @@ fun Application.module(
 
             post("/api/features/business-spatial-search") {
                 val request = call.receive<BusinessSpatialSearchRequest>()
+                val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() } ?: db.defaultProjectId()
+                call.requireProjectPermission(Action.FEATURE_READ, projectId)
                 call.respond(db.searchBusinessSpatialFeatures(request))
             }
 
             post("/api/features/condition-search") {
                 val request = call.receive<ConditionQueryDto>()
+                val projectId = request.projectId?.trim()?.takeIf { it.isNotEmpty() } ?: db.defaultProjectId()
+                call.requireProjectPermission(Action.FEATURE_READ, projectId)
                 call.respond(db.conditionSearchFeatures(request))
             }
 
@@ -204,14 +230,20 @@ fun Application.module(
                     "Layer id"
                 )
                 val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
+                call.requireResourcePermission(db, Action.FEATURE_READ, ProjectResourceType.LAYER, layerId)
                 call.respond(db.getBusinessLinks(layerId, featureId))
             }
 
             get("/api/lands") {
                 val params = call.request.queryParameters
+                val projectId = requireUuid(
+                    params["projectId"] ?: throw ApiException(HttpStatusCode.BadRequest, "projectId is required"),
+                    "projectId"
+                )
+                call.requireProjectPermission(Action.BUSINESS_READ, projectId)
                 val result = db.listLands(
                     LandListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
+                        projectId = projectId,
                         q = params["q"],
                         status = params["status"],
                         landUse = params["landUse"],
@@ -232,30 +264,40 @@ fun Application.module(
             }
 
             post("/api/lands") {
-                call.respond(HttpStatusCode.Created, db.createLand(call.receive<JsonObject>()))
+                val body = call.receive<JsonObject>()
+                call.requireProjectPermission(Action.BUSINESS_WRITE, readRequiredUuid(body, "projectId"))
+                call.respond(HttpStatusCode.Created, db.createLand(body))
             }
 
             get("/api/lands/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Land id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_READ, ProjectResourceType.LAND, id)
                 call.respond(db.getLand(id) ?: throw ApiException(HttpStatusCode.NotFound, "Land not found"))
             }
 
             patch("/api/lands/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Land id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.LAND, id)
                 call.respond(db.updateLand(id, call.receive<JsonObject>()))
             }
 
             delete("/api/lands/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Land id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.LAND, id)
                 db.deleteLand(id)
                 call.respond(HttpStatusCode.NoContent)
             }
 
             get("/api/buildings") {
                 val params = call.request.queryParameters
+                val projectId = requireUuid(
+                    params["projectId"] ?: throw ApiException(HttpStatusCode.BadRequest, "projectId is required"),
+                    "projectId"
+                )
+                call.requireProjectPermission(Action.BUSINESS_READ, projectId)
                 val result = db.listBuildings(
                     BuildingListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
+                        projectId = projectId,
                         q = params["q"],
                         landId = params["landId"],
                         status = params["status"],
@@ -277,30 +319,40 @@ fun Application.module(
             }
 
             post("/api/buildings") {
-                call.respond(HttpStatusCode.Created, db.createBuilding(call.receive<JsonObject>()))
+                val body = call.receive<JsonObject>()
+                call.requireProjectPermission(Action.BUSINESS_WRITE, readRequiredUuid(body, "projectId"))
+                call.respond(HttpStatusCode.Created, db.createBuilding(body))
             }
 
             get("/api/buildings/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Building id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_READ, ProjectResourceType.BUILDING, id)
                 call.respond(db.getBuilding(id) ?: throw ApiException(HttpStatusCode.NotFound, "Building not found"))
             }
 
             patch("/api/buildings/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Building id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.BUILDING, id)
                 call.respond(db.updateBuilding(id, call.receive<JsonObject>()))
             }
 
             delete("/api/buildings/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Building id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.BUILDING, id)
                 db.deleteBuilding(id)
                 call.respond(HttpStatusCode.NoContent)
             }
 
             get("/api/parties") {
                 val params = call.request.queryParameters
+                val projectId = requireUuid(
+                    params["projectId"] ?: throw ApiException(HttpStatusCode.BadRequest, "projectId is required"),
+                    "projectId"
+                )
+                call.requireProjectPermission(Action.BUSINESS_READ, projectId)
                 val result = db.listParties(
                     PartyListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
+                        projectId = projectId,
                         q = params["q"],
                         partyType = params["partyType"],
                         relationType = params["relationType"],
@@ -315,30 +367,40 @@ fun Application.module(
             }
 
             post("/api/parties") {
-                call.respond(HttpStatusCode.Created, db.createParty(call.receive<JsonObject>()))
+                val body = call.receive<JsonObject>()
+                call.requireProjectPermission(Action.BUSINESS_WRITE, readRequiredUuid(body, "projectId"))
+                call.respond(HttpStatusCode.Created, db.createParty(body))
             }
 
             get("/api/parties/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Party id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_READ, ProjectResourceType.PARTY, id)
                 call.respond(db.getParty(id) ?: throw ApiException(HttpStatusCode.NotFound, "Party not found"))
             }
 
             patch("/api/parties/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Party id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.PARTY, id)
                 call.respond(db.updateParty(id, call.receive<JsonObject>()))
             }
 
             delete("/api/parties/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Party id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.PARTY, id)
                 db.deleteParty(id)
                 call.respond(HttpStatusCode.NoContent)
             }
 
             get("/api/zones") {
                 val params = call.request.queryParameters
+                val projectId = requireUuid(
+                    params["projectId"] ?: throw ApiException(HttpStatusCode.BadRequest, "projectId is required"),
+                    "projectId"
+                )
+                call.requireProjectPermission(Action.BUSINESS_READ, projectId)
                 val result = db.listZones(
                     ZoneListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
+                        projectId = projectId,
                         q = params["q"],
                         status = params["status"],
                         zoneType = params["zoneType"],
@@ -354,45 +416,59 @@ fun Application.module(
             }
 
             post("/api/zones") {
-                call.respond(HttpStatusCode.Created, db.createZone(call.receive<JsonObject>()))
+                val body = call.receive<JsonObject>()
+                call.requireProjectPermission(Action.BUSINESS_WRITE, readRequiredUuid(body, "projectId"))
+                call.respond(HttpStatusCode.Created, db.createZone(body))
             }
 
             get("/api/zones/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_READ, ProjectResourceType.ZONE, id)
                 call.respond(db.getZone(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
             }
 
             get("/api/zones/{id}/party-summary") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_READ, ProjectResourceType.ZONE, id)
                 call.respond(db.getZonePartySummary(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
             }
 
             patch("/api/zones/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.ZONE, id)
                 call.respond(db.updateZone(id, call.receive<JsonObject>()))
             }
 
             delete("/api/zones/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.ZONE, id)
                 db.deleteZone(id)
                 call.respond(HttpStatusCode.NoContent)
             }
 
             post("/api/zone-layers/from-import") {
-                call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(call.receive<ZoneLayerFromImportRequest>()))
+                val request = call.receive<ZoneLayerFromImportRequest>()
+                val layerId = request.layerId.trim().takeIf { it.isNotEmpty() }
+                    ?: throw ApiException(HttpStatusCode.BadRequest, "layerId is required")
+                call.requireResourcePermission(db, Action.LAYER_WRITE, ProjectResourceType.LAYER, layerId)
+                call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(request))
             }
 
             post("/api/party-relationships") {
-                call.respond(HttpStatusCode.Created, db.createPartyRelationship(call.receive<JsonObject>()))
+                val body = call.receive<JsonObject>()
+                call.requireProjectPermission(Action.BUSINESS_WRITE, readRequiredUuid(body, "projectId"))
+                call.respond(HttpStatusCode.Created, db.createPartyRelationship(body))
             }
 
             patch("/api/party-relationships/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Relationship id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.PARTY_RELATIONSHIP, id)
                 call.respond(db.updatePartyRelationship(id, call.receive<JsonObject>()))
             }
 
             delete("/api/party-relationships/{id}") {
                 val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Relationship id is required")
+                call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.PARTY_RELATIONSHIP, id)
                 db.deletePartyRelationship(id)
                 call.respond(HttpStatusCode.NoContent)
             }
@@ -433,11 +509,18 @@ fun Application.module(
 
                 val actualFilename = filename ?: throw ApiException(HttpStatusCode.BadRequest, "File is required")
                 val actualUploadPath = uploadPath ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
+                val resolvedProjectId = projectId ?: db.defaultProjectId()
+                try {
+                    call.requireProjectPermission(Action.IMPORT_EXECUTE, resolvedProjectId)
+                } catch (exc: Exception) {
+                    withContext(Dispatchers.IO) { Files.deleteIfExists(Path.of(actualUploadPath)) }
+                    throw exc
+                }
                 val actualFormat = format ?: inferFormat(actualFilename)
                 validateImportFormat(actualFormat)
 
                 val job = db.createImportJob(
-                    projectId = projectId,
+                    projectId = resolvedProjectId,
                     filename = actualFilename,
                     format = actualFormat,
                     sourceSrid = sourceSrid,
@@ -452,11 +535,13 @@ fun Application.module(
                     call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
                     "Job id"
                 )
+                call.requireResourcePermission(db, Action.JOB_READ, ProjectResourceType.IMPORT_JOB, id)
                 call.respond(db.getImportJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Import job not found"))
             }
 
             post("/api/analysis-jobs") {
                 val request = call.receive<AnalysisJobRequest>()
+                call.requireProjectPermission(Action.ANALYSIS_EXECUTE, request.projectId ?: db.defaultProjectId())
                 validateAnalysisRequest(db, request)
                 call.respond(HttpStatusCode.Created, db.createAnalysisJob(request))
             }
@@ -466,6 +551,7 @@ fun Application.module(
                     call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
                     "Job id"
                 )
+                call.requireResourcePermission(db, Action.JOB_READ, ProjectResourceType.ANALYSIS_JOB, id)
                 call.respond(db.getAnalysisJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Analysis job not found"))
             }
 
@@ -474,6 +560,7 @@ fun Application.module(
                     call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
                     "Layer id"
                 )
+                call.requireResourcePermission(db, Action.TILE_READ, ProjectResourceType.LAYER, id)
                 val layer = db.getLayer(id) ?: throw ApiException(HttpStatusCode.NotFound, "Layer not found")
                 call.respond(
                     TileJsonDto(
@@ -502,6 +589,7 @@ fun Application.module(
                     ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid x")
                 val y = call.parameters["y"]?.toIntOrNull()?.takeIf { it in 0 until tileExtent }
                     ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid y")
+                call.requireResourcePermission(db, Action.TILE_READ, ProjectResourceType.LAYER, layerId)
                 call.respondBytes(
                     bytes = db.getMvtTile(layerId, z, x, y),
                     contentType = ContentType.parse("application/vnd.mapbox-vector-tile")

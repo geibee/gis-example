@@ -20,6 +20,7 @@ services:
       - ./postgres/040-seed-tokyo-commercial-zoning.sql.gz:/docker-entrypoint-initdb.d/040-seed-tokyo-commercial-zoning.sql.gz:ro
       - ./postgres/050-seed-business-data.sql:/docker-entrypoint-initdb.d/050-seed-business-data.sql:ro
       - ./postgres/060-seed-dense-tokyo-business-demo.sql:/docker-entrypoint-initdb.d/060-seed-dense-tokyo-business-demo.sql:ro
+      - ./postgres/070-seed-dev-users.sql:/docker-entrypoint-initdb.d/070-seed-dev-users.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gis -d gis"]
       interval: 5s

@@ -1,9 +1,6 @@
 package gis.example.integration
 
-import com.auth0.jwt.JWT
-import com.auth0.jwt.algorithms.Algorithm
 import gis.example.Database
-import gis.example.OidcSettings
 import gis.example.module
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -15,12 +12,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.TestInstance
 import java.nio.file.Files
 import java.nio.file.Path
-import java.security.KeyPairGenerator
-import java.security.interfaces.RSAPrivateKey
-import java.security.interfaces.RSAPublicKey
 import java.sql.Connection
 import java.sql.DriverManager
-import java.util.Date
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.fail
@@ -31,12 +24,6 @@ import kotlin.test.fail
 @Tag("integration")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuthIntegrationTest {
-
-    private val issuer = "https://test-idp.example/realms/gis"
-    private val audience = "gis-api"
-    private val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
-    private val publicKey = keyPair.public as RSAPublicKey
-    private val privateKey = keyPair.private as RSAPrivateKey
 
     private fun rawConnection(): Connection {
         val url = System.getenv("DATABASE_URL") ?: "jdbc:postgresql://localhost:5432/gis"
@@ -66,36 +53,24 @@ class AuthIntegrationTest {
         }
     }
 
-    private fun settings(adminEmails: Set<String> = setOf("admin@gis.example")) =
-        OidcSettings(adminEmails = adminEmails) {
-            verifier(
-                JWT.require(Algorithm.RSA256(publicKey, null))
-                    .withIssuer(issuer)
-                    .withAudience(audience)
-                    .build()
-            )
-        }
-
     private fun token(
         subject: String,
         email: String? = null,
         name: String? = null,
-        tokenIssuer: String = issuer,
-        tokenAudience: String = audience,
+        tokenIssuer: String = OidcTestSupport.ISSUER,
+        tokenAudience: String = OidcTestSupport.AUDIENCE,
         expiresInSeconds: Long = 600
-    ): String {
-        val builder = JWT.create()
-            .withIssuer(tokenIssuer)
-            .withAudience(tokenAudience)
-            .withSubject(subject)
-            .withExpiresAt(Date(System.currentTimeMillis() + expiresInSeconds * 1000))
-        if (email != null) builder.withClaim("email", email)
-        if (name != null) builder.withClaim("name", name)
-        return builder.sign(Algorithm.RSA256(null, privateKey))
-    }
+    ): String = OidcTestSupport.token(
+        subject = subject,
+        email = email,
+        name = name,
+        issuer = tokenIssuer,
+        audience = tokenAudience,
+        expiresInSeconds = expiresInSeconds
+    )
 
     private fun withApp(block: suspend (io.ktor.client.HttpClient) -> Unit) = testApplication {
-        application { module(db = Database.fromEnv(), oidcSettings = settings()) }
+        application { module(db = Database.fromEnv(), oidcSettings = OidcTestSupport.settings(adminEmails = setOf("admin@gis.example"))) }
         block(client)
     }
 

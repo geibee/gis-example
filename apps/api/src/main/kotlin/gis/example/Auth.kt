@@ -18,13 +18,15 @@ internal const val OIDC_AUTH_NAME = "oidc"
 
 enum class SystemRole { ADMIN, USER }
 
-// 認証済みユーザー。認可判定 (PDP) への principal になる
+// 認証済みユーザー。認可判定 (PDP) への principal になる。
+// memberships は projectId → ロール (system admin は空でも全プロジェクトへ許可される)
 data class AppPrincipal(
     val userId: String,
     val subject: String,
     val email: String?,
     val displayName: String?,
-    val systemRole: SystemRole
+    val systemRole: SystemRole,
+    val memberships: Map<String, ProjectRole>
 ) : Principal
 
 // OIDC の検証設定。verifier の構築を差し替え可能にして、

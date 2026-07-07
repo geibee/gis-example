@@ -66,10 +66,13 @@ paths:
       parameters:
         - name: projectId
           in: query
+          required: true
           schema: { type: string }
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -89,6 +92,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -109,6 +114,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -128,6 +135,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -142,6 +151,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -165,6 +176,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後のフィーチャ
           content:
@@ -180,7 +193,7 @@ paths:
       operationId: searchFeatures
       summary: フィーチャ検索 (キーワード / 単一属性条件)
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: layerId, in: query, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: field, in: query, schema: { type: string } }
@@ -191,6 +204,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -215,6 +230,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -239,6 +256,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -260,6 +279,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -273,7 +294,7 @@ paths:
       operationId: listLands
       summary: 土地一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string } }
         - { name: landUse, in: query, schema: { type: string } }
@@ -290,6 +311,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           headers:
@@ -314,6 +337,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -332,6 +357,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -354,6 +381,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -371,6 +400,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -380,7 +411,7 @@ paths:
       operationId: listBuildings
       summary: 建物一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: landId, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string } }
@@ -398,6 +429,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           headers:
@@ -422,6 +455,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -440,6 +475,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -462,6 +499,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -479,6 +518,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -488,7 +529,7 @@ paths:
       operationId: listParties
       summary: 関係者一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: partyType, in: query, schema: { type: string } }
         - { name: relationType, in: query, schema: { type: string } }
@@ -499,6 +540,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           headers:
@@ -523,6 +566,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -541,6 +586,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -563,6 +610,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -580,6 +629,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -597,6 +648,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -621,6 +674,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -638,6 +693,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -647,7 +704,7 @@ paths:
       operationId: listZones
       summary: 区域一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string } }
         - { name: zoneType, in: query, schema: { type: string } }
@@ -659,6 +716,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           headers:
@@ -683,6 +742,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -701,6 +762,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -723,6 +786,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -740,6 +805,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -753,6 +820,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -775,6 +844,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -811,6 +882,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 受付済み
           content:
@@ -829,6 +902,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -851,6 +926,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 受付済み
           content:
@@ -869,6 +946,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -887,6 +966,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -908,6 +989,8 @@ paths:
       responses:
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -954,6 +1037,12 @@ components:
       schema: { type: integer, format: int64 }
 
   responses:
+    Forbidden:
+      description: 認可されていない (プロジェクトのメンバーだがロールの権限が不足)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     Unauthorized:
       description: 認証されていない (トークン欠落・無効・失効、または無効化されたユーザー)
       content:

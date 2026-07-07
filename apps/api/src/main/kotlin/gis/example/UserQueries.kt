@@ -35,9 +35,31 @@ fun Database.resolveUser(
         subject = subject,
         email = user.email,
         displayName = user.displayName,
-        systemRole = user.systemRole
+        systemRole = user.systemRole,
+        memberships = selectMemberships(connection, user.id)
     )
 }
+
+private fun selectMemberships(connection: Connection, userId: String): Map<String, ProjectRole> =
+    connection.prepareStatement(
+        """
+        SELECT project_id::text, role
+        FROM app.project_members
+        WHERE user_id = ?::uuid
+        """.trimIndent()
+    ).use { stmt ->
+        stmt.setString(1, userId)
+        stmt.executeQuery().use { rs ->
+            buildMap {
+                while (rs.next()) {
+                    put(
+                        rs.getString(1),
+                        if (rs.getString(2) == "editor") ProjectRole.EDITOR else ProjectRole.VIEWER
+                    )
+                }
+            }
+        }
+    }
 
 private fun selectUser(connection: Connection, subject: String): UserRecord? =
     connection.prepareStatement(
