@@ -8,8 +8,10 @@ services:
       POSTGRES_DB: gis
       POSTGRES_USER: gis
       POSTGRES_PASSWORD: gis
+    # ホストへの公開はローカル開発用にループバックのみ。本番では公開しないこと
+    # (API の認可を迂回して DB へ直接アクセスできてしまう)
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
@@ -30,13 +32,28 @@ services:
     environment:
       DATABASE_URL: postgres://gis:gis@postgres:5432/gis
     command: ["--config", "/config/martin.yaml"]
+    # タイルは API (/api/tiles) 経由で配信する。Martin の直接公開は API の認可を
+    # 迂回する経路になるため、ローカル開発用にループバックのみに限定する
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./martin/martin.yaml:/config/martin.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
+
+  keycloak:
+    restart: unless-stopped
+    image: quay.io/keycloak/keycloak:26.2
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: "8080"
+    command: ["start-dev", "--import-realm"]
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
 
   api:
     restart: unless-stopped

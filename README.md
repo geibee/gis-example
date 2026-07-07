@@ -21,8 +21,11 @@ Services:
 
 - Web: http://localhost:5173
 - API health: http://localhost:8080/health
-- Martin: http://localhost:3000
-- PostgreSQL: localhost:5432 (`gis` / `gis`)
+- Keycloak (OIDC IdP): http://localhost:8081 (管理コンソール `admin` / `admin`)
+- Martin: http://localhost:3000 (ループバックのみ)
+- PostgreSQL: localhost:5432 (`gis` / `gis`、ループバックのみ)
+
+Martin と PostgreSQL のホスト公開はローカル開発用に `127.0.0.1` バインドへ限定している。どちらも API の認可を迂回できる経路になるため、本番環境ではホストへ公開しないこと。
 
 Uploaded files and generated runtime data are stored under `./data`.
 

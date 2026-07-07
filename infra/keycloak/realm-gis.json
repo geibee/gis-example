@@ -1,0 +1,67 @@
+{
+  "realm": "gis",
+  "enabled": true,
+  "displayName": "Web GIS",
+  "registrationAllowed": false,
+  "sslRequired": "external",
+  "accessTokenLifespan": 900,
+  "clients": [
+    {
+      "clientId": "gis-web",
+      "name": "GIS Web (SPA)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:5173"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "gis-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "gis-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "gis-admin",
+      "email": "admin@gis.example",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Admin",
+      "lastName": "GIS",
+      "credentials": [{ "type": "password", "value": "gis-admin", "temporary": false }]
+    },
+    {
+      "username": "gis-editor",
+      "email": "editor@gis.example",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Editor",
+      "lastName": "GIS",
+      "credentials": [{ "type": "password", "value": "gis-editor", "temporary": false }]
+    },
+    {
+      "username": "gis-viewer",
+      "email": "viewer@gis.example",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Viewer",
+      "lastName": "GIS",
+      "credentials": [{ "type": "password", "value": "gis-viewer", "temporary": false }]
+    }
+  ]
+}
