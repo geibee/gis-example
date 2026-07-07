@@ -10,9 +10,12 @@ import type {
   ImportJob,
   Land,
   Layer,
+  Me,
   Party,
   PartyRelationship,
   Project,
+  ProjectMember,
+  UserAccount,
   Zone,
   ZoneLayerOperation,
   ZonePartySummary
@@ -345,4 +348,51 @@ export function createAnalysisJob(body: unknown): Promise<AnalysisJob> {
 
 export function getAnalysisJob(id: string): Promise<AnalysisJob> {
   return requestJson<AnalysisJob>(`/api/analysis-jobs/${id}`);
+}
+
+// ---------------------------------------------------------------- 認証・管理
+
+export function getMe(): Promise<Me> {
+  return requestJson<Me>("/api/me");
+}
+
+export function getUsers(): Promise<UserAccount[]> {
+  return requestJson<UserAccount[]>("/api/users");
+}
+
+export function updateUser(
+  id: string,
+  patch: { systemRole?: "admin" | "user"; isActive?: boolean }
+): Promise<UserAccount> {
+  return requestJson<UserAccount>(`/api/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch)
+  });
+}
+
+export function getProjectMembers(projectId: string): Promise<ProjectMember[]> {
+  return requestJson<ProjectMember[]>(`/api/projects/${encodeURIComponent(projectId)}/members`);
+}
+
+export function putProjectMember(
+  projectId: string,
+  userId: string,
+  role: "editor" | "viewer"
+): Promise<ProjectMember> {
+  return requestJson<ProjectMember>(
+    `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role })
+    }
+  );
+}
+
+export function deleteProjectMember(projectId: string, userId: string): Promise<void> {
+  return requestVoid(
+    `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
+  );
 }

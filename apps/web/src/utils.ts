@@ -828,6 +828,7 @@ export function parseRoute(pathname: string): RouteSelection {
   if (segment === "lands") return { tab: "lands", id };
   if (segment === "buildings") return { tab: "buildings", id };
   if (segment === "parties") return { tab: "parties", id };
+  if (segment === "admin") return { tab: "admin", id: null };
   return { tab: "zone", id: null };
 }
 
@@ -836,6 +837,7 @@ export function tabPath(tab: BusinessTab): string {
   if (tab === "lands") return "/lands";
   if (tab === "buildings") return "/buildings";
   if (tab === "parties") return "/parties";
+  if (tab === "admin") return "/admin";
   return "/zones";
 }
 

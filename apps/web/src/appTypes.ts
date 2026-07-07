@@ -10,7 +10,7 @@ export type LayerListItem =
   | { type: "layer"; layer: Layer }
   | { type: "resultSet"; id: string; name: string; layers: Layer[] };
 
-export type BusinessTab = "zone" | "lands" | "buildings" | "parties";
+export type BusinessTab = "zone" | "lands" | "buildings" | "parties" | "admin";
 export type ZoneBusinessSourceType = "all" | "land" | "building";
 
 export type RouteSelection = {

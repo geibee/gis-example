@@ -1,8 +1,9 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type MapLayerMouseEvent, type Map as MapLibreMap } from "maplibre-gl";
-import { Building2, EyeOff, FileText, LogOut, Map as MapIcon, Users } from "lucide-react";
+import { Building2, EyeOff, FileText, LogOut, Map as MapIcon, ShieldCheck, Users } from "lucide-react";
 import { useAuth } from "react-oidc-context";
 import { getAccessToken } from "./auth";
+import { AdminWorkspace } from "./components/AdminWorkspace";
 import {
   conditionSearchFeatures,
   createAnalysisJob,
@@ -29,6 +30,7 @@ import {
   getLand,
   getLands,
   getLayers,
+  getMe,
   getParties,
   getParty,
   getProjects,
@@ -52,6 +54,7 @@ import type {
   FeatureSearchResult,
   Land,
   Layer,
+  Me,
   Party,
   Project,
   SpatialConditionDraft,
@@ -153,6 +156,7 @@ export default function App() {
   const [routeSelection, setRouteSelection] = useState<RouteSelection>(() => parseRoute(window.location.pathname));
   const [mapReady, setMapReady] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [me, setMe] = useState<Me | null>(null);
   const [selectedProject, setSelectedProject] = useState("");
   const [layers, setLayers] = useState<Layer[]>([]);
   const [baseMapVisible, setBaseMapVisible] = useState(true);
@@ -537,6 +541,9 @@ export default function App() {
         setProjects(items);
         if (items[0]) setSelectedProject(items[0].id);
       })
+      .catch((error) => setNotice(errorMessage(error)));
+    getMe()
+      .then(setMe)
       .catch((error) => setNotice(errorMessage(error)));
   }, []);
 
@@ -1949,6 +1956,12 @@ export default function App() {
             <Users size={17} />
             関係者
           </button>
+          {me?.systemRole === "admin" ? (
+            <button className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
+              <ShieldCheck size={17} />
+              管理
+            </button>
+          ) : null}
         </nav>
         <button className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
           {mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
@@ -2199,6 +2212,13 @@ export default function App() {
             projects={projects}
             onProjectChange={setSelectedProject}
           />
+        </section>
+        <section className={`tab-pane admin-tab${activeTab === "admin" ? " active" : ""}`} aria-hidden={activeTab !== "admin"}>
+          {me?.systemRole === "admin" ? (
+            <AdminWorkspace projects={projects} meUserId={me.userId} onNotice={setNotice} />
+          ) : (
+            <p className="admin-hint">この画面は system admin 専用です。</p>
+          )}
         </section>
         </div>
 
