@@ -18,11 +18,16 @@
 #   VERIFY_SCOPE        auto | all | api | worker | web   (default: auto)
 #   VERIFY_BASE_REF     auto 判定の基準 ref                (default: origin/main)
 #   VERIFY_DETECT_ONLY  1 ならスコープ判定だけ行い GITHUB_OUTPUT に出力して終了
+#   VERIFY_INTEGRATION  1 なら軽量ゲートの代わりに統合ティアを実行する。
+#                       api: gradle integrationTest (PostGIS を DATABASE_URL で指定)
+#                       worker: pytest -m integration (PG* 環境変数 + ogr2ogr が必要)
+#                       いずれも前提が無ければ失敗する (fail-closed)
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 SCOPE="${VERIFY_SCOPE:-auto}"
 BASE_REF="${VERIFY_BASE_REF:-origin/main}"
+INTEGRATION="${VERIFY_INTEGRATION:-0}"
 
 log() { echo "[verify] $*"; }
 fail() { echo "[verify] FAIL: $*" >&2; exit 1; }
@@ -102,9 +107,17 @@ verify_api() {
     || fail "gradle が見つかりません (fail-closed: api 変更は gradle なしで合格にできない)"
 
   pushd apps/api >/dev/null
-  # build = compile (警告エラー化) + test (単体テスト)
-  gradle build --no-daemon
-  log "api PASS"
+  if [[ "$INTEGRATION" == "1" ]]; then
+    # 統合ティア: PostGIS 実体に対する integrationTest
+    [[ -n "${DATABASE_URL:-}" ]] \
+      || fail "DATABASE_URL が未設定です (fail-closed: 統合テストは接続先なしで合格にできない)"
+    gradle integrationTest --no-daemon
+    log "api integration PASS"
+  else
+    # 軽量ゲート: build = compile (警告エラー化) + test (単体テスト)
+    gradle build --no-daemon
+    log "api PASS"
+  fi
   popd >/dev/null
 }
 
@@ -120,16 +133,28 @@ verify_worker() {
   done
 
   pushd apps/worker-gis >/dev/null
-  "$py" -m ruff check src tests
-  "$py" -m ruff format --check src tests
-  "$py" -m mypy
-  "$py" -m pytest -q
-  log "worker PASS"
+  if [[ "$INTEGRATION" == "1" ]]; then
+    # 統合ティア: GDAL + PostGIS 実体に対する取込ラウンドトリップ
+    command -v ogr2ogr >/dev/null 2>&1 \
+      || fail "ogr2ogr が見つかりません (fail-closed: apt install gdal-bin)"
+    "$py" -m pytest -q -m integration
+    log "worker integration PASS"
+  else
+    "$py" -m ruff check src tests
+    "$py" -m ruff format --check src tests
+    "$py" -m mypy
+    "$py" -m pytest -q
+    log "worker PASS"
+  fi
   popd >/dev/null
 }
 
 # ---------------------------------------------------------------- web (TypeScript)
 verify_web() {
+  if [[ "$INTEGRATION" == "1" ]]; then
+    log "web に統合ティアは未定義のためスキップします (E2E は今後 nightly に配置)"
+    return 0
+  fi
   log "=== web (apps/web) ==="
   command -v npm >/dev/null 2>&1 \
     || fail "npm が見つかりません (fail-closed: web 変更は npm なしで合格にできない)"

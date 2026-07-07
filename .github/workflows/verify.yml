@@ -81,6 +81,84 @@ jobs:
           VERIFY_SCOPE: worker
         run: bash scripts/verify.sh
 
+  api-integration:
+    name: api integration (PostGIS)
+    needs: scope
+    if: needs.scope.outputs.api == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      db:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: gis
+          POSTGRES_PASSWORD: gis
+          POSTGRES_DB: gis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gis -d gis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 統合 verify (api / PostGIS)
+        env:
+          VERIFY_SCOPE: api
+          VERIFY_INTEGRATION: "1"
+          DATABASE_URL: jdbc:postgresql://localhost:5432/gis
+          DATABASE_USER: gis
+          DATABASE_PASSWORD: gis
+        run: bash scripts/verify.sh
+
+  worker-integration:
+    name: worker integration (GDAL + PostGIS)
+    needs: scope
+    if: needs.scope.outputs.worker == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      db:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: gis
+          POSTGRES_PASSWORD: gis
+          POSTGRES_DB: gis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gis -d gis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/worker-gis/requirements.txt
+      - name: GDAL (ogr2ogr) をインストール
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gdal-bin
+      - name: worker のツールチェーンをインストール
+        run: pip install -r apps/worker-gis/requirements.txt ruff mypy pytest
+      - name: 統合 verify (worker / GDAL + PostGIS)
+        env:
+          VERIFY_SCOPE: worker
+          VERIFY_INTEGRATION: "1"
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGDATABASE: gis
+          PGUSER: gis
+          PGPASSWORD: gis
+        run: bash scripts/verify.sh
+
   web:
     name: web verify (TypeScript)
     needs: scope
@@ -102,7 +180,7 @@ jobs:
   # (スコープ外でスキップされたジョブは成功扱い、失敗・キャンセルのみ落とす)
   verify-result:
     name: verify 結果集約
-    needs: [scope, api, worker, web]
+    needs: [scope, api, worker, web, api-integration, worker-integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

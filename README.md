@@ -117,11 +117,22 @@ bash scripts/verify.sh              # 変更スコープを自動判定 (基準:
 VERIFY_SCOPE=all bash scripts/verify.sh
 ```
 
-| スコープ | 内容 |
-|---|---|
-| api | `gradle build`(Kotlin 警告エラー化 + 単体テスト) |
-| worker | `ruff check` / `ruff format --check` / `mypy --strict` / `pytest` |
-| web | `tsc --noEmit` + `vite build` |
+| スコープ | 軽量ゲート | 統合ティア (`VERIFY_INTEGRATION=1`) |
+|---|---|---|
+| api | `gradle build`(Kotlin 警告エラー化 + 単体テスト) | `gradle integrationTest`: PostGIS 実体で空間演算子の境界ケース、プレビューと分析ジョブの一致、結果レイヤ契約、MVT 配信、失敗時ロールバックを検証 |
+| worker | `ruff check` / `ruff format --check` / `mypy --strict` / `pytest` | `pytest -m integration`: GDAL 実取込のラウンドトリップ(レイヤ契約・zone 同期・破損入力の failed 記録) |
+| web | `tsc --noEmit` + `vite build` | (未定義。E2E は今後 nightly に配置) |
+
+統合ティアは CI では PostGIS サービスコンテナに対して実行される。ローカルで回す場合は接続情報を渡す:
+
+```bash
+DATABASE_URL=jdbc:postgresql://localhost:5432/gis DATABASE_USER=gis DATABASE_PASSWORD=gis \
+  VERIFY_SCOPE=api VERIFY_INTEGRATION=1 bash scripts/verify.sh
+PGHOST=localhost PGDATABASE=gis PGUSER=gis PGPASSWORD=gis \
+  VERIFY_SCOPE=worker VERIFY_INTEGRATION=1 bash scripts/verify.sh   # 要 ogr2ogr (gdal-bin)
+```
+
+注意: 統合テストは接続先 DB の `app` / `gis_data` スキーマを削除して作り直す。開発データの入った DB に向けないこと。
 
 開発規約・アーキテクチャの分担は [`AGENTS.md`](AGENTS.md) を参照。
 

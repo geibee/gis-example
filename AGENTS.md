@@ -40,7 +40,11 @@ VERIFY_SCOPE=all bash scripts/verify.sh
   - api: `gradle build`(警告エラー化 + 単体テスト)
   - worker: `ruff check` / `ruff format --check` / `mypy --strict` / `pytest`
   - web: `tsc --noEmit` + `vite build`
-- PostGIS を要する統合テスト(Testcontainers)・E2E・ビジュアルリグレッションは今後 nightly ゲートとして追加する。verify.sh に混ぜない
+- **統合ティア** (`VERIFY_INTEGRATION=1`): PostGIS 実体に対するテスト。CI ではサービスコンテナで自動実行される
+  - api: `gradle integrationTest`(`@Tag("integration")` の JUnit テスト。`DATABASE_URL` 必須)
+  - worker: `pytest -m integration`(GDAL 実取込。`PG*` 環境変数 + `ogr2ogr` 必須)
+  - 統合テストは接続先の `app` / `gis_data` スキーマを DROP して作り直す。開発 DB に向けない
+- E2E・ビジュアルリグレッション・重量級検査(fuzz / セキュリティスキャン)は今後 nightly ゲートとして追加する。verify.sh の軽量ゲートに混ぜない
 
 ## テスト方針
 

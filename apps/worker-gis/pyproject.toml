@@ -22,6 +22,8 @@ select = [
 # worker は quote_ident / qtable で識別子をクォートした上で f-string SQL を組む設計のため、
 # S608 はテストで担保しつつ src では許容する
 "src/worker.py" = ["S608"]
+# 統合テストは自分で作ったテーブル名を qtable でクォートして検証する
+"tests/integration/*" = ["S608"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -30,3 +32,8 @@ files = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: PostGIS + GDAL を要する統合テスト (CI の integration ジョブで実行)",
+]
+# 既定では単体テストのみ。統合テストは `pytest -m integration` で明示的に実行する
+addopts = "-m 'not integration'"

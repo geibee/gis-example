@@ -35,6 +35,27 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
-tasks.withType<Test> {
-    useJUnitPlatform()
+// test = 単体テストのみ (DB 不要、軽量ゲート scripts/verify.sh が実行)
+tasks.test {
+    useJUnitPlatform {
+        excludeTags("integration")
+    }
+}
+
+// integrationTest = PostGIS を要する統合テスト。
+// DATABASE_URL / DATABASE_USER / DATABASE_PASSWORD で接続先を渡す
+// (VERIFY_INTEGRATION=1 の scripts/verify.sh と CI の integration ジョブが実行)
+val integrationTest by tasks.registering(Test::class) {
+    description = "PostGIS を要する統合テスト (DATABASE_URL が必要)"
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    // DB 状態に依存するため Gradle キャッシュで省略させない
+    outputs.upToDateWhen { false }
+    testLogging {
+        events("passed", "failed", "skipped")
+    }
 }
