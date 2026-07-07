@@ -8,6 +8,14 @@ on:
   schedule:
     - cron: "0 18 * * *" # 03:00 JST
   workflow_dispatch:
+  # workflow_dispatch を叩けない環境 (actions:write の無いエージェント) 向けの起動経路。
+  # .ci/nightly-request の内容を変えて push すると起動する
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths:
+      - ".ci/nightly-request"
 
 permissions:
   contents: read
