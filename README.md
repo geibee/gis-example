@@ -145,9 +145,23 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 
 開発規約・アーキテクチャの分担は [`AGENTS.md`](AGENTS.md) を参照。
 
+## Authentication
+
+`/health` を除く全 API は OIDC の Bearer JWT による認証が必須。IdP は Keycloak を想定している (compose に開発用 realm 込みで含まれる。他の IdP も OIDC 準拠なら利用可)。
+
+| 環境変数 (API) | 説明 |
+|---|---|
+| `OIDC_ISSUER` | トークンの `iss` クレームと一致すべき issuer (例 `http://localhost:8081/realms/gis`)。必須 |
+| `OIDC_AUDIENCE` | トークンの `aud` に要求する値 (例 `gis-api`)。必須 |
+| `OIDC_JWKS_URL` | JWKS の取得先。未設定時は Keycloak の既定パス (`$OIDC_ISSUER/protocol/openid-connect/certs`) |
+| `AUTH_ADMIN_EMAILS` | カンマ区切り。この email のユーザーは初回ログイン時に system admin として登録される (初期管理者のブートストラップ用) |
+
+認証に成功した subject は `app.users` へ初回アクセス時に自動登録 (JIT) される。`is_active = false` にすると即時にアクセスを止められる。
+
+開発 realm (`infra/keycloak/realm-gis.json`) のユーザー: `gis-admin` / `gis-editor` / `gis-viewer` (パスワードはユーザー名と同じ)。
+
 ## Notes
 
-- Initial authentication/authorization is intentionally omitted for single-admin use.
 - API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。
 - CORS の許可オリジンは `WEB_ORIGIN`(未設定時は `http://localhost:5173` のみ)。全開放 (`anyHost`) にはならない。
 - アップロード上限は API 側 `UPLOAD_MAX_BYTES`(既定 200MB)と web の nginx `client_max_body_size 200m` で揃えている。

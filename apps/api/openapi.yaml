@@ -7,10 +7,12 @@ info:
 
     - この仕様は Spectral で lint され、apps/web/src/contracts/generated.ts が
       本ファイルから生成される (ドリフトは scripts/verify.sh の web スコープで検査)
-    - 認可は初期スコープ外 (シングル管理者運用)
+    - /health を除く全 API は OIDC IdP が発行した Bearer JWT による認証が必須
     - ジオメトリは EPSG:3857 で格納され、bbox は EPSG:4326 で公開される
 servers:
   - url: http://localhost:8080
+security:
+  - bearerAuth: []
 tags:
   - name: system
   - name: layers
@@ -26,6 +28,7 @@ paths:
       tags: [system]
       operationId: getHealth
       summary: ヘルスチェック
+      security: []
       responses:
         "200":
           description: OK
@@ -44,6 +47,8 @@ paths:
       operationId: listProjects
       summary: プロジェクト一覧
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -63,6 +68,8 @@ paths:
           in: query
           schema: { type: string }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -80,6 +87,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -98,6 +107,8 @@ paths:
           in: query
           schema: { type: integer, default: 80 }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -115,6 +126,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -127,6 +140,8 @@ paths:
         - $ref: "#/components/parameters/PathId"
         - $ref: "#/components/parameters/PathFeatureId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -148,6 +163,8 @@ paths:
             schema:
               $ref: "#/components/schemas/FeatureUpdateRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: 更新後のフィーチャ
           content:
@@ -172,6 +189,8 @@ paths:
         - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
         - { name: limit, in: query, schema: { type: integer, default: 50 } }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -194,6 +213,8 @@ paths:
             schema:
               $ref: "#/components/schemas/BusinessSpatialSearchRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -216,6 +237,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ConditionQuery"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -235,6 +258,8 @@ paths:
         - { name: layerId, in: path, required: true, schema: { type: string } }
         - $ref: "#/components/parameters/PathFeatureId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -263,6 +288,8 @@ paths:
         - { $ref: "#/components/parameters/ListLimit" }
         - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           headers:
@@ -285,6 +312,8 @@ paths:
             schema:
               $ref: "#/components/schemas/LandWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 作成済み
           content:
@@ -301,6 +330,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -321,6 +352,8 @@ paths:
             schema:
               $ref: "#/components/schemas/LandWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: 更新後
           content:
@@ -336,6 +369,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -361,6 +396,8 @@ paths:
         - { $ref: "#/components/parameters/ListLimit" }
         - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           headers:
@@ -383,6 +420,8 @@ paths:
             schema:
               $ref: "#/components/schemas/BuildingWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 作成済み
           content:
@@ -399,6 +438,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -419,6 +460,8 @@ paths:
             schema:
               $ref: "#/components/schemas/BuildingWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: 更新後
           content:
@@ -434,6 +477,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -452,6 +497,8 @@ paths:
         - { $ref: "#/components/parameters/ListLimit" }
         - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           headers:
@@ -474,6 +521,8 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 作成済み
           content:
@@ -490,6 +539,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -510,6 +561,8 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: 更新後
           content:
@@ -525,6 +578,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -540,6 +595,8 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyRelationshipWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 作成済み
           content:
@@ -562,6 +619,8 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyRelationshipWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: 更新後
           content:
@@ -577,6 +636,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -596,6 +657,8 @@ paths:
         - { $ref: "#/components/parameters/ListLimit" }
         - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           headers:
@@ -618,6 +681,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ZoneWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 作成済み
           content:
@@ -634,6 +699,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -654,6 +721,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ZoneWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: 更新後
           content:
@@ -669,6 +738,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -680,6 +751,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -700,6 +773,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ZoneLayerFromImportRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 作成済み
           content:
@@ -734,6 +809,8 @@ paths:
                   format: binary
               required: [file]
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 受付済み
           content:
@@ -750,6 +827,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -770,6 +849,8 @@ paths:
             schema:
               $ref: "#/components/schemas/AnalysisJobRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "201":
           description: 受付済み
           content:
@@ -786,6 +867,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -802,6 +885,8 @@ paths:
       parameters:
         - { name: layerId, in: path, required: true, schema: { type: string } }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -821,6 +906,8 @@ paths:
         - { name: x, in: path, required: true, schema: { type: integer, minimum: 0 } }
         - { name: y, in: path, required: true, schema: { type: integer, minimum: 0 } }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -832,6 +919,13 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OIDC IdP が発行したアクセストークン
+
   parameters:
     PathId:
       name: id
@@ -860,6 +954,12 @@ components:
       schema: { type: integer, format: int64 }
 
   responses:
+    Unauthorized:
+      description: 認証されていない (トークン欠落・無効・失効、または無効化されたユーザー)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     BadRequest:
       description: リクエスト不正
       content:

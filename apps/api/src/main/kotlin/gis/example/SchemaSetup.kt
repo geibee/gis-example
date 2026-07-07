@@ -9,6 +9,17 @@ fun Database.ensureBusinessSchema() {
                 """
                 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+                CREATE TABLE IF NOT EXISTS app.users (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    subject text NOT NULL UNIQUE,
+                    email text,
+                    display_name text,
+                    system_role text NOT NULL DEFAULT 'user' CHECK (system_role IN ('admin', 'user')),
+                    is_active boolean NOT NULL DEFAULT true,
+                    created_at timestamptz NOT NULL DEFAULT now(),
+                    updated_at timestamptz NOT NULL DEFAULT now()
+                );
+
                 CREATE TABLE IF NOT EXISTS app.lands (
                     id text PRIMARY KEY,
                     project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,

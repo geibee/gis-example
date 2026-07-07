@@ -9,12 +9,14 @@
 #                                                # 起動済みスタックに対して検証 (ローカル開発)
 # Env:
 #   SMOKE_BASE_URL        API のベース URL (default: http://localhost:8080)
+#   SMOKE_KEYCLOAK_URL    Keycloak のベース URL (default: http://localhost:8081)
 #   SMOKE_MANAGE_COMPOSE  1 なら compose の up/down を本スクリプトが行う (default: 1)
 #   SMOKE_STARTUP_TIMEOUT /health 待ちの秒数 (default: 420。初回はイメージビルド+シード投入が走る)
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 BASE="${SMOKE_BASE_URL:-http://localhost:8080}"
+KEYCLOAK_BASE="${SMOKE_KEYCLOAK_URL:-http://localhost:8081}"
 MANAGE_COMPOSE="${SMOKE_MANAGE_COMPOSE:-1}"
 STARTUP_TIMEOUT="${SMOKE_STARTUP_TIMEOUT:-420}"
 
@@ -44,17 +46,36 @@ for _ in $(seq 1 $((STARTUP_TIMEOUT / 5))); do
 done
 curl -sf --max-time 3 "$BASE/health" >/dev/null || fail "API が起動しません"
 
-PROJECT_ID=$(curl -sf "$BASE/api/projects" | json_get "j[0]['id']")
+# 全 API が認証必須のため、開発 realm の gis-admin でアクセストークンを取得する
+# (realm import 完了まで待つ)
+log "Keycloak からアクセストークン取得: $KEYCLOAK_BASE"
+TOKEN=""
+for _ in $(seq 1 24); do
+  TOKEN=$(curl -sf --max-time 5 -X POST \
+    "$KEYCLOAK_BASE/realms/gis/protocol/openid-connect/token" \
+    -d grant_type=password -d client_id=gis-web \
+    -d username=gis-admin -d password=gis-admin \
+    | json_get "j['access_token']" 2>/dev/null) && [[ -n "$TOKEN" ]] && break
+  sleep 5
+done
+[[ -n "$TOKEN" ]] || fail "Keycloak からトークンを取得できません"
+AUTH=(-H "Authorization: Bearer $TOKEN")
+
+# 認証必須が機能していることも兼ねて検証する (トークンなしは 401)
+NOAUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/projects")
+[[ "$NOAUTH_STATUS" == "401" ]] || fail "トークンなしのアクセスが 401 になりません (got: $NOAUTH_STATUS)"
+
+PROJECT_ID=$(curl -sf "${AUTH[@]}" "$BASE/api/projects" | json_get "j[0]['id']")
 log "プロジェクト: $PROJECT_ID"
 
 # ---------------------------------------------------------------- 1. 取込
 log "1. GeoJSON 取込 (worker の GDAL パイプライン)"
-IMPORT_ID=$(curl -sf -F "projectId=$PROJECT_ID" -F "format=geojson" -F "sourceSrid=4326" \
+IMPORT_ID=$(curl -sf "${AUTH[@]}" -F "projectId=$PROJECT_ID" -F "format=geojson" -F "sourceSrid=4326" \
   -F "file=@samples/geojson/parcels.geojson" "$BASE/api/import-jobs" | json_get "j['id']")
 
 LAYER_ID=""
 for _ in $(seq 1 24); do
-  STATUS_JSON=$(curl -sf "$BASE/api/import-jobs/$IMPORT_ID")
+  STATUS_JSON=$(curl -sf "${AUTH[@]}" "$BASE/api/import-jobs/$IMPORT_ID")
   STATUS=$(echo "$STATUS_JSON" | json_get "j['status']")
   if [[ "$STATUS" == "succeeded" ]]; then
     LAYER_ID=$(echo "$STATUS_JSON" | json_get "j['layerId']")
@@ -79,20 +100,20 @@ QUERY=$(cat <<EOF
 }
 EOF
 )
-PREVIEW_COUNT=$(curl -sf -X POST -H 'Content-Type: application/json' -d "$QUERY" \
+PREVIEW_COUNT=$(curl -sf "${AUTH[@]}" -X POST -H 'Content-Type: application/json' -d "$QUERY" \
   "$BASE/api/features/condition-search" | json_get "len(j)")
 [[ "$PREVIEW_COUNT" -ge 1 ]] || fail "プレビューが 0 件 (landuse LIKE residential)"
 log "  プレビュー: ${PREVIEW_COUNT} 件"
 
 # ---------------------------------------------------------------- 3. 分析ジョブ実体化
 log "3. condition_search 分析ジョブ"
-ANALYSIS_ID=$(curl -sf -X POST -H 'Content-Type: application/json' \
+ANALYSIS_ID=$(curl -sf "${AUTH[@]}" -X POST -H 'Content-Type: application/json' \
   -d "{\"projectId\": \"$PROJECT_ID\", \"name\": \"smoke\", \"operation\": \"condition_search\", \"conditionQuery\": $QUERY}" \
   "$BASE/api/analysis-jobs" | json_get "j['id']")
 
 RESULT_LAYER_ID=""
 for _ in $(seq 1 24); do
-  JOB_JSON=$(curl -sf "$BASE/api/analysis-jobs/$ANALYSIS_ID")
+  JOB_JSON=$(curl -sf "${AUTH[@]}" "$BASE/api/analysis-jobs/$ANALYSIS_ID")
   STATUS=$(echo "$JOB_JSON" | json_get "j['status']")
   if [[ "$STATUS" == "succeeded" ]]; then
     RESULT_COUNT=$(echo "$JOB_JSON" | json_get "j['resultCount']")
@@ -109,11 +130,11 @@ log "  実体化: ${RESULT_COUNT} 件 (プレビューと一致) layer=$RESULT_L
 
 # ---------------------------------------------------------------- 4. タイル配信
 log "4. 結果レイヤのタイル配信"
-curl -sf "$BASE/api/tilejson/$RESULT_LAYER_ID" | json_get "j['tiles'][0]" >/dev/null \
+curl -sf "${AUTH[@]}" "$BASE/api/tilejson/$RESULT_LAYER_ID" | json_get "j['tiles'][0]" >/dev/null \
   || fail "tilejson が取得できません"
 
 # 結果レイヤの bbox 中心を覆う z15 タイル座標を計算して非空を確認する
-read -r TILE_X TILE_Y <<<"$(curl -sf "$BASE/api/layers" | python3 -c "
+read -r TILE_X TILE_Y <<<"$(curl -sf "${AUTH[@]}" "$BASE/api/layers" | python3 -c "
 import json, math, sys
 layers = json.load(sys.stdin)
 layer = next(l for l in layers if l['id'] == '$RESULT_LAYER_ID')
@@ -125,7 +146,7 @@ lat_rad = math.radians(lat)
 y = int((1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n)
 print(x, y)
 ")"
-TILE_BYTES=$(curl -sf -o /dev/null -w "%{size_download}" "$BASE/api/tiles/$RESULT_LAYER_ID/15/$TILE_X/$TILE_Y")
+TILE_BYTES=$(curl -sf "${AUTH[@]}" -o /dev/null -w "%{size_download}" "$BASE/api/tiles/$RESULT_LAYER_ID/15/$TILE_X/$TILE_Y")
 [[ "$TILE_BYTES" -gt 0 ]] || fail "結果レイヤの z15 タイルが空です (15/$TILE_X/$TILE_Y)"
 log "  MVT 非空: 15/$TILE_X/$TILE_Y (${TILE_BYTES} bytes)"
 

@@ -67,6 +67,11 @@ services:
       API_PUBLIC_URL: http://localhost:8080
       MARTIN_PUBLIC_URL: http://localhost:3000
       WEB_ORIGIN: http://localhost:5173
+      # iss クレームはブラウザから見た Keycloak の URL、JWKS の取得はコンテナ間ネットワーク経由
+      OIDC_ISSUER: http://localhost:8081/realms/gis
+      OIDC_AUDIENCE: gis-api
+      OIDC_JWKS_URL: http://keycloak:8080/realms/gis/protocol/openid-connect/certs
+      AUTH_ADMIN_EMAILS: admin@gis.example
     ports:
       - "8080:8080"
     volumes:
