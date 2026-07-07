@@ -289,3 +289,37 @@ export type SpatialConditionDraft = {
   operator: string;
   distanceMeters: string;
 };
+
+// ---------------------------------------------------------------- 認証・管理
+
+export type Membership = {
+  projectId: string;
+  role: "editor" | "viewer";
+};
+
+export type Me = {
+  userId: string;
+  subject: string;
+  email: string | null;
+  displayName: string | null;
+  systemRole: "admin" | "user";
+  memberships: Membership[];
+};
+
+export type UserAccount = {
+  id: string;
+  subject: string;
+  email: string | null;
+  displayName: string | null;
+  systemRole: "admin" | "user";
+  isActive: boolean;
+  createdAt: string;
+};
+
+export type ProjectMember = {
+  userId: string;
+  projectId: string;
+  role: "editor" | "viewer";
+  email: string | null;
+  displayName: string | null;
+};

@@ -1709,3 +1709,74 @@ input[type="file"] {
   font-size: 15px;
   color: #334155;
 }
+
+/* 管理画面 (system admin 専用タブ) */
+.admin-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px;
+  overflow-y: auto;
+  max-width: 960px;
+}
+
+.admin-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-section-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  margin: 0;
+}
+
+.admin-hint {
+  font-size: 12px;
+  color: #64748b;
+  margin: 6px 0 10px;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.admin-table th {
+  color: #475569;
+  font-weight: 600;
+  background: #f8fafc;
+}
+
+.admin-row-inactive td {
+  color: #94a3b8;
+}
+
+.admin-self-mark {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.admin-add-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
