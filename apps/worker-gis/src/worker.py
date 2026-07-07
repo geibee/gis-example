@@ -31,13 +31,21 @@ def main() -> None:
             time.sleep(poll_interval)
 
 
+def require_pgpassword() -> str:
+    # 既定パスワードへのフォールバックはしない (本番で弱い資格情報のまま起動させない)
+    password = os.getenv("PGPASSWORD")
+    if not password:
+        raise RuntimeError("PGPASSWORD が未設定です")
+    return password
+
+
 def connect() -> psycopg.Connection[DictRow]:
     return psycopg.connect(
         host=os.getenv("PGHOST", "localhost"),
         port=int(os.getenv("PGPORT", "5432")),
         dbname=os.getenv("PGDATABASE", "gis"),
         user=os.getenv("PGUSER", "gis"),
-        password=os.getenv("PGPASSWORD", "gis"),
+        password=require_pgpassword(),
         row_factory=dict_row,
     )
 
@@ -102,7 +110,7 @@ def run_ogr2ogr(source: str, table_name: str, source_srid: int) -> None:
         f"port={os.getenv('PGPORT', '5432')} "
         f"dbname={os.getenv('PGDATABASE', 'gis')} "
         f"user={os.getenv('PGUSER', 'gis')} "
-        f"password={os.getenv('PGPASSWORD', 'gis')}"
+        f"password={require_pgpassword()}"
     )
     command = [
         "ogr2ogr",

@@ -145,5 +145,8 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 ## Notes
 
 - Initial authentication/authorization is intentionally omitted for single-admin use.
+- API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。
+- CORS の許可オリジンは `WEB_ORIGIN`(未設定時は `http://localhost:5173` のみ)。全開放 (`anyHost`) にはならない。
+- アップロード上限は API 側 `UPLOAD_MAX_BYTES`(既定 200MB)と web の nginx `client_max_body_size 200m` で揃えている。
 - Imported and result geometries are stored in EPSG:3857 for Martin tile serving. Bboxes are exposed in EPSG:4326.
 - Layer IDs, table names, geometry columns, attribute names, and operators are validated against DB metadata before jobs are accepted or executed.

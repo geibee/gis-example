@@ -87,12 +87,19 @@ class Database(private val dataSource: HikariDataSource) : AutoCloseable {
         private val logger = org.slf4j.LoggerFactory.getLogger(Database::class.java)
 
         fun fromEnv(): Database {
+            // 既定パスワードへのフォールバックはしない (本番で弱い資格情報のまま起動させない)
+            val databasePassword = System.getenv("DATABASE_PASSWORD") ?: System.getenv("PGPASSWORD")
+                ?: error("DATABASE_PASSWORD (または PGPASSWORD) が未設定です")
             val config = HikariConfig().apply {
                 jdbcUrl = System.getenv("DATABASE_URL") ?: "jdbc:postgresql://localhost:5432/gis"
                 username = System.getenv("DATABASE_USER") ?: System.getenv("PGUSER") ?: "gis"
-                password = System.getenv("DATABASE_PASSWORD") ?: System.getenv("PGPASSWORD") ?: "gis"
+                password = databasePassword
                 maximumPoolSize = (System.getenv("DATABASE_POOL_SIZE") ?: "10").toInt()
                 poolName = "web-gis-api"
+                connectionTimeout = (System.getenv("DATABASE_CONNECTION_TIMEOUT_MS") ?: "10000").toLong()
+                // DB/LB 側のアイドル切断より短くしてコネクションを入れ替える
+                maxLifetime = (System.getenv("DATABASE_MAX_LIFETIME_MS") ?: "1500000").toLong()
+                leakDetectionThreshold = (System.getenv("DATABASE_LEAK_DETECTION_MS") ?: "60000").toLong()
             }
             return Database(HikariDataSource(config))
         }

@@ -24,16 +24,21 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
-import io.ktor.utils.io.core.readBytes
+import io.ktor.utils.io.core.readAvailable
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+
+private val applicationLogger = LoggerFactory.getLogger("gis.example.Application")
 
 fun main() {
     val port = (System.getenv("PORT") ?: "8080").toInt()
@@ -48,6 +53,7 @@ fun Application.module() {
     val uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads")
     val apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/')
     val webOrigin = System.getenv("WEB_ORIGIN")
+    val maxUploadBytes = (System.getenv("UPLOAD_MAX_BYTES") ?: DEFAULT_MAX_UPLOAD_BYTES.toString()).toLong()
 
     val analysisJobRunner = AnalysisJobRunner(
         db = db,
@@ -71,11 +77,9 @@ fun Application.module() {
         )
     }
     install(CORS) {
-        if (webOrigin.isNullOrBlank()) {
-            anyHost()
-        } else {
-            allowHost(webOrigin.removePrefix("http://").removePrefix("https://"), schemes = listOf("http", "https"))
-        }
+        // WEB_ORIGIN 未設定時に anyHost に開放しない (fail-open 防止)。ローカル開発既定のみ許可する
+        val origin = webOrigin?.takeIf { it.isNotBlank() } ?: "http://localhost:5173"
+        allowHost(origin.removePrefix("http://").removePrefix("https://"), schemes = listOf("http", "https"))
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Patch)
@@ -88,7 +92,9 @@ fun Application.module() {
             call.respond(cause.status, ErrorResponse(cause.message))
         }
         exception<Throwable> { call, cause ->
-            call.respond(HttpStatusCode.InternalServerError, ErrorResponse(cause.message ?: "Unexpected server error"))
+            // 内部例外の詳細はログのみに残し、クライアントへは漏らさない
+            applicationLogger.error("Unhandled error on {} {}", call.request.httpMethod.value, call.request.uri, cause)
+            call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Internal server error"))
         }
     }
 
@@ -102,11 +108,14 @@ fun Application.module() {
         }
 
         get("/api/layers") {
-            call.respond(db.listLayers(call.request.queryParameters["projectId"]))
+            call.respond(db.listLayers(optionalUuid(call.request.queryParameters["projectId"], "projectId")))
         }
 
         get("/api/layers/{id}/attribute-values") {
-            val layerId = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val layerId = requireUuid(
+                call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
+                "Layer id"
+            )
             val field = call.request.queryParameters["field"]
                 ?: throw ApiException(HttpStatusCode.BadRequest, "Attribute field is required")
             val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 80
@@ -114,25 +123,37 @@ fun Application.module() {
         }
 
         delete("/api/layers/{id}") {
-            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val id = requireUuid(
+                call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
+                "Layer id"
+            )
             db.deleteLayer(id)
             call.respond(HttpStatusCode.NoContent)
         }
 
         delete("/api/result-sets/{id}") {
-            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Result set id is required")
+            val id = requireUuid(
+                call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Result set id is required"),
+                "Result set id"
+            )
             db.deleteResultSet(id)
             call.respond(HttpStatusCode.NoContent)
         }
 
         get("/api/layers/{id}/features/{featureId}") {
-            val layerId = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val layerId = requireUuid(
+                call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
+                "Layer id"
+            )
             val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
             call.respond(db.getFeature(layerId, featureId))
         }
 
         patch("/api/layers/{id}/features/{featureId}") {
-            val layerId = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val layerId = requireUuid(
+                call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
+                "Layer id"
+            )
             val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
             val request = call.receive<FeatureUpdateRequest>()
             call.respond(db.updateFeature(layerId, featureId, request))
@@ -142,8 +163,8 @@ fun Application.module() {
             val params = call.request.queryParameters
             call.respond(
                 db.searchFeatures(
-                    projectId = params["projectId"],
-                    layerId = params["layerId"],
+                    projectId = optionalUuid(params["projectId"], "projectId"),
+                    layerId = optionalUuid(params["layerId"], "layerId"),
                     q = params["q"],
                     field = params["field"],
                     operator = params["operator"],
@@ -165,7 +186,10 @@ fun Application.module() {
         }
 
         get("/api/features/{layerId}/{featureId}/business-links") {
-            val layerId = call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val layerId = requireUuid(
+                call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
+                "Layer id"
+            )
             val featureId = call.parameters["featureId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
             call.respond(db.getBusinessLinks(layerId, featureId))
         }
@@ -175,16 +199,16 @@ fun Application.module() {
             call.respond(
                 db.listLands(
                     LandListQuery(
-                        projectId = params["projectId"],
+                        projectId = optionalUuid(params["projectId"], "projectId"),
                         q = params["q"],
                         status = params["status"],
                         landUse = params["landUse"],
                         partyType = params["partyType"],
                         relationType = params["relationType"],
                         linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                        sourceLayerId = params["sourceLayerId"],
+                        sourceLayerId = optionalUuid(params["sourceLayerId"], "sourceLayerId"),
                         bbox = params["bbox"],
-                        intersectsLayerId = params["intersectsLayerId"],
+                        intersectsLayerId = optionalUuid(params["intersectsLayerId"], "intersectsLayerId"),
                         intersectsFeatureId = params["intersectsFeatureId"],
                         distanceMeters = params["distanceMeters"]?.toDoubleOrNull()
                     )
@@ -217,7 +241,7 @@ fun Application.module() {
             call.respond(
                 db.listBuildings(
                     BuildingListQuery(
-                        projectId = params["projectId"],
+                        projectId = optionalUuid(params["projectId"], "projectId"),
                         q = params["q"],
                         landId = params["landId"],
                         status = params["status"],
@@ -225,9 +249,9 @@ fun Application.module() {
                         partyType = params["partyType"],
                         relationType = params["relationType"],
                         linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                        sourceLayerId = params["sourceLayerId"],
+                        sourceLayerId = optionalUuid(params["sourceLayerId"], "sourceLayerId"),
                         bbox = params["bbox"],
-                        intersectsLayerId = params["intersectsLayerId"],
+                        intersectsLayerId = optionalUuid(params["intersectsLayerId"], "intersectsLayerId"),
                         intersectsFeatureId = params["intersectsFeatureId"],
                         distanceMeters = params["distanceMeters"]?.toDoubleOrNull()
                     )
@@ -260,7 +284,7 @@ fun Application.module() {
             call.respond(
                 db.listParties(
                     PartyListQuery(
-                        projectId = params["projectId"],
+                        projectId = optionalUuid(params["projectId"], "projectId"),
                         q = params["q"],
                         partyType = params["partyType"],
                         relationType = params["relationType"],
@@ -296,12 +320,12 @@ fun Application.module() {
             call.respond(
                 db.listZones(
                     ZoneListQuery(
-                        projectId = params["projectId"],
+                        projectId = optionalUuid(params["projectId"], "projectId"),
                         q = params["q"],
                         status = params["status"],
                         zoneType = params["zoneType"],
                         linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                        zoneLayerId = params["zoneLayerId"],
+                        zoneLayerId = optionalUuid(params["zoneLayerId"], "zoneLayerId"),
                         sourceLayerId = params["sourceLayerId"]
                     )
                 )
@@ -366,7 +390,7 @@ fun Application.module() {
                 when (part) {
                     is PartData.FormItem -> {
                         when (part.name) {
-                            "projectId" -> projectId = part.value.takeIf { it.isNotBlank() }
+                            "projectId" -> projectId = optionalUuid(part.value, "projectId")
                             "format" -> format = part.value.takeIf { it.isNotBlank() }?.lowercase()
                             "sourceSrid" -> sourceSrid = part.value.takeIf { it.isNotBlank() }?.toIntOrNull()
                             "layerRole" -> layerRole = part.value.takeIf { it.isNotBlank() }?.lowercase()
@@ -377,7 +401,7 @@ fun Application.module() {
                         filename = original
                         val target = uploadDir.resolve("${UUID.randomUUID()}-$original")
                         withContext(Dispatchers.IO) {
-                            Files.write(target, part.provider().readBytes())
+                            writeUploadWithLimit(part, target, maxUploadBytes)
                         }
                         uploadPath = target.toString()
                     }
@@ -403,7 +427,10 @@ fun Application.module() {
         }
 
         get("/api/import-jobs/{id}") {
-            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required")
+            val id = requireUuid(
+                call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
+                "Job id"
+            )
             call.respond(db.getImportJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Import job not found"))
         }
 
@@ -414,12 +441,18 @@ fun Application.module() {
         }
 
         get("/api/analysis-jobs/{id}") {
-            val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required")
+            val id = requireUuid(
+                call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
+                "Job id"
+            )
             call.respond(db.getAnalysisJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Analysis job not found"))
         }
 
         get("/api/tilejson/{layerId}") {
-            val id = call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
+            val id = requireUuid(
+                call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
+                "Layer id"
+            )
             val layer = db.getLayer(id) ?: throw ApiException(HttpStatusCode.NotFound, "Layer not found")
             call.respond(
                 TileJsonDto(
@@ -437,10 +470,17 @@ fun Application.module() {
         }
 
         get("/api/tiles/{layerId}/{z}/{x}/{y}") {
-            val layerId = call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required")
-            val z = call.parameters["z"]?.toIntOrNull() ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid z")
-            val x = call.parameters["x"]?.toIntOrNull() ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid x")
-            val y = call.parameters["y"]?.toIntOrNull() ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid y")
+            val layerId = requireUuid(
+                call.parameters["layerId"] ?: throw ApiException(HttpStatusCode.BadRequest, "Layer id is required"),
+                "Layer id"
+            )
+            val z = call.parameters["z"]?.toIntOrNull()?.takeIf { it in 0..24 }
+                ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid z")
+            val tileExtent = 1 shl z
+            val x = call.parameters["x"]?.toIntOrNull()?.takeIf { it in 0 until tileExtent }
+                ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid x")
+            val y = call.parameters["y"]?.toIntOrNull()?.takeIf { it in 0 until tileExtent }
+                ?: throw ApiException(HttpStatusCode.BadRequest, "Invalid y")
             call.respondBytes(
                 bytes = db.getMvtTile(layerId, z, x, y),
                 contentType = ContentType.parse("application/vnd.mapbox-vector-tile")
@@ -448,6 +488,42 @@ fun Application.module() {
         }
     }
 }
+
+private const val DEFAULT_MAX_UPLOAD_BYTES = 200L * 1024 * 1024
+
+// アップロードをストリーミングで書き出し、上限超過時は部分ファイルを消して 413 を返す
+// (全量をメモリへ読まない)
+private fun writeUploadWithLimit(part: PartData.FileItem, target: Path, maxBytes: Long) {
+    try {
+        val input = part.provider()
+        Files.newOutputStream(target).use { output ->
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val read = input.readAvailable(buffer, 0, buffer.size)
+                if (read <= 0) break
+                total += read
+                if (total > maxBytes) {
+                    throw ApiException(HttpStatusCode.PayloadTooLarge, "Upload exceeds limit of $maxBytes bytes")
+                }
+                output.write(buffer, 0, read)
+            }
+        }
+    } catch (exc: Exception) {
+        Files.deleteIfExists(target)
+        throw exc
+    }
+}
+
+private fun requireUuid(value: String, label: String): String =
+    try {
+        UUID.fromString(value).toString()
+    } catch (_: IllegalArgumentException) {
+        throw ApiException(HttpStatusCode.BadRequest, "$label must be a valid UUID")
+    }
+
+private fun optionalUuid(value: String?, label: String): String? =
+    value?.takeIf { it.isNotBlank() }?.let { requireUuid(it, label) }
 
 private fun sanitizeFileName(value: String): String {
     val cleaned = value.substringAfterLast('/').substringAfterLast('\\')
