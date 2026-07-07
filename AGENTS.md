@@ -48,7 +48,17 @@ VERIFY_SCOPE=all bash scripts/verify.sh
   - security: gitleaks(git 履歴全体)/ Trivy(HIGH,CRITICAL で失敗)/ SBOM(CycloneDX)。SARIF は run のアーティファクト
   - smoke-e2e: `scripts/smoke-e2e.sh` が docker compose 全スタックで「取込 → 検索プレビュー → 分析実体化(プレビューと件数一致)→ タイル配信」を検証。ローカルは `SMOKE_MANAGE_COMPOSE=0` で起動済みスタックに対して実行できる
   - 失敗時は `ci-nightly` ラベルの Issue に自動起票(既存 open Issue にはコメント追記)。**Issue を閉じる前に原因への恒久対応(ゲート強化・依存更新)を済ませること**
-- ビジュアルリグレッション・API fuzz(Schemathesis)は OpenAPI 導入後に nightly へ追加予定。verify.sh の軽量ゲートに混ぜない
+  - api-fuzz: Schemathesis が `apps/api/openapi.yaml` から入力を生成して実 API を検査(固定 seed 42)。既知の失敗クラス(不正 UUID で 500 等)が残っているため**当面は非ブロッキング**(`scripts/fuzz-api.sh`、`FUZZ_BLOCKING=0`)。失敗クラスを潰し切ったら `FUZZ_BLOCKING=1` に昇格する
+- ビジュアルリグレッションは今後 nightly へ追加予定。verify.sh の軽量ゲートに混ぜない
+
+## API 契約 (OpenAPI)
+
+`apps/api/openapi.yaml` が API 契約の SSoT。
+
+- **API のエンドポイント・DTO を変えたら同じコミットで openapi.yaml を更新する**
+- 型は `npm --workspace apps/web run generate:contracts` で `apps/web/src/contracts/generated.ts` に生成してコミットする(ドリフトは verify.sh の web スコープで fail)
+- 仕様の静的検査は Spectral(`npm --workspace apps/web run lint:contracts`)
+- web クライアント(`api.ts` / `types.ts`)は段階的に `contracts/generated.ts` の型へ移行する(手書き型と生成型の二重管理は移行期間のみ許容)
 
 ## テスト方針
 

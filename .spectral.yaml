@@ -1,0 +1,11 @@
+# OpenAPI 契約 (apps/api/openapi.yaml) の lint ルール。
+# 実行: npm --workspace apps/web run lint:contracts (scripts/verify.sh の web スコープ)
+extends: ["spectral:oas"]
+rules:
+  operation-operationId: error
+  operation-tags: error
+  # 説明文は日本語で運用しており、必須化はしない
+  operation-description: off
+  info-contact: off
+  info-license: off
+  license-url: off

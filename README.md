@@ -134,7 +134,11 @@ PGHOST=localhost PGDATABASE=gis PGUSER=gis PGPASSWORD=gis \
 
 注意: 統合テストは接続先 DB の `app` / `gis_data` スキーマを削除して作り直す。開発データの入った DB に向けないこと。
 
-nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セキュリティスキャン(gitleaks / Trivy / SBOM)と、docker compose 全スタックに対するスモーク E2E(`scripts/smoke-e2e.sh`: 取込 → 検索 → 分析 → タイル)を実行し、失敗時は `ci-nightly` ラベルの Issue に自動起票する。
+nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セキュリティスキャン(gitleaks / Trivy / SBOM)、docker compose 全スタックに対するスモーク E2E(`scripts/smoke-e2e.sh`: 取込 → 検索 → 分析 → タイル)、API fuzz(Schemathesis、当面は非ブロッキング)を実行し、失敗時は `ci-nightly` ラベルの Issue に自動起票する。
+
+## API Contract
+
+`apps/api/openapi.yaml` が API 契約の SSoT。Spectral で lint し、`apps/web/src/contracts/generated.ts` を openapi-typescript で生成する(同期は `scripts/check-contract-drift.sh` が検査)。API を変更するときは仕様と生成型を同じコミットで更新する。
 
 開発規約・アーキテクチャの分担は [`AGENTS.md`](AGENTS.md) を参照。
 

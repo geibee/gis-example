@@ -70,6 +70,66 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+  api-fuzz:
+    name: API fuzz (Schemathesis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      db:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: gis
+          POSTGRES_PASSWORD: gis
+          POSTGRES_DB: gis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gis -d gis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Schemathesis をインストール
+        run: pip install schemathesis
+      - name: DB スキーマ適用
+        env:
+          PGPASSWORD: gis
+        run: psql -h localhost -U gis -d gis -q -f infra/postgres/init.sql
+      - name: API をバックグラウンド起動
+        working-directory: apps/api
+        env:
+          DATABASE_URL: jdbc:postgresql://localhost:5432/gis
+          DATABASE_USER: gis
+          DATABASE_PASSWORD: gis
+          UPLOAD_DIR: /tmp/fuzz-uploads
+        run: |
+          gradle run --no-daemon > /tmp/fuzz-api.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf --max-time 2 http://localhost:8080/health >/dev/null 2>&1 && exit 0
+            sleep 5
+          done
+          echo "API が起動しません"; tail -50 /tmp/fuzz-api.log; exit 1
+      - name: ファズ実行 (非ブロッキング運用中)
+        run: bash scripts/fuzz-api.sh | tee /tmp/fuzz-report.log
+      - name: ファズログをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-results
+          path: |
+            /tmp/fuzz-report.log
+            /tmp/fuzz-api.log
+          if-no-files-found: ignore
+
   smoke-e2e:
     name: スモーク E2E (docker compose 全スタック)
     runs-on: ubuntu-latest
@@ -88,7 +148,7 @@ jobs:
 
   escalate:
     name: 失敗時に Issue へエスカレーション
-    needs: [security, smoke-e2e]
+    needs: [security, smoke-e2e, api-fuzz]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 5
