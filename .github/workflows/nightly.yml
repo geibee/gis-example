@@ -45,24 +45,21 @@ jobs:
             --report-format sarif \
             --report-path ci-results/sarif/gitleaks.sarif
 
+      - name: Trivy をインストール (脆弱性スキャン / SBOM)
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v0.58.1
+          trivy --version
+
       - name: 脆弱性スキャン (HIGH / CRITICAL で失敗)
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          format: sarif
-          output: ci-results/sarif/trivy.sarif
-          exit-code: "1"
+        run: |
+          trivy fs --scanners vuln --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --format sarif --output ci-results/sarif/trivy.sarif .
 
       - name: SBOM 生成 (CycloneDX)
         if: always()
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: cyclonedx
-          output: ci-results/sbom.cdx.json
+        run: trivy fs --format cyclonedx --output ci-results/sbom.cdx.json .
 
       - name: スキャン成果物をアップロード (SARIF / SBOM)
         if: always()
