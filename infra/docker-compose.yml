@@ -1,5 +1,6 @@
 services:
   postgres:
+    restart: unless-stopped
     build:
       context: ./postgres
     image: web-gis-postgis:16-3
@@ -7,8 +8,11 @@ services:
       POSTGRES_DB: gis
       POSTGRES_USER: gis
       POSTGRES_PASSWORD: gis
+    # ホストへの公開はローカル開発用にループバックのみ。本番では公開しないこと
+    # (API の認可を迂回して DB へ直接アクセスできてしまう)。
+    # ホスト側で 5432 が使用中の場合は POSTGRES_HOST_PORT で変更できる
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
@@ -17,6 +21,7 @@ services:
       - ./postgres/040-seed-tokyo-commercial-zoning.sql.gz:/docker-entrypoint-initdb.d/040-seed-tokyo-commercial-zoning.sql.gz:ro
       - ./postgres/050-seed-business-data.sql:/docker-entrypoint-initdb.d/050-seed-business-data.sql:ro
       - ./postgres/060-seed-dense-tokyo-business-demo.sql:/docker-entrypoint-initdb.d/060-seed-dense-tokyo-business-demo.sql:ro
+      - ./postgres/070-seed-dev-users.sql:/docker-entrypoint-initdb.d/070-seed-dev-users.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gis -d gis"]
       interval: 5s
@@ -24,19 +29,36 @@ services:
       retries: 20
 
   martin:
+    restart: unless-stopped
     image: ghcr.io/maplibre/martin:1.3.1
     environment:
       DATABASE_URL: postgres://gis:gis@postgres:5432/gis
     command: ["--config", "/config/martin.yaml"]
+    # タイルは API (/api/tiles) 経由で配信する。Martin の直接公開は API の認可を
+    # 迂回する経路になるため、ローカル開発用にループバックのみに限定する
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./martin/martin.yaml:/config/martin.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
 
+  keycloak:
+    restart: unless-stopped
+    image: quay.io/keycloak/keycloak:26.2
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: "8080"
+    command: ["start-dev", "--import-realm"]
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+
   api:
+    restart: unless-stopped
     build:
       context: ../apps/api
     environment:
@@ -47,6 +69,11 @@ services:
       API_PUBLIC_URL: http://localhost:8080
       MARTIN_PUBLIC_URL: http://localhost:3000
       WEB_ORIGIN: http://localhost:5173
+      # iss クレームはブラウザから見た Keycloak の URL、JWKS の取得はコンテナ間ネットワーク経由
+      OIDC_ISSUER: http://localhost:8081/realms/gis
+      OIDC_AUDIENCE: gis-api
+      OIDC_JWKS_URL: http://keycloak:8080/realms/gis/protocol/openid-connect/certs
+      AUTH_ADMIN_EMAILS: admin@gis.example
     ports:
       - "8080:8080"
     volumes:
@@ -56,6 +83,7 @@ services:
         condition: service_healthy
 
   worker-gis:
+    restart: unless-stopped
     build:
       context: ../apps/worker-gis
     environment:
@@ -72,11 +100,14 @@ services:
         condition: service_healthy
 
   web:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+    # ホスト側で 5173 が使用中の場合は WEB_HOST_PORT で変更できる
+    # (OIDC のリダイレクト URI と CORS は 5173 前提のため、UI を使う場合は既定のままにする)
     ports:
-      - "5173:80"
+      - "${WEB_HOST_PORT:-5173}:80"
     depends_on:
       - api
       - martin

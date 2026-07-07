@@ -21,8 +21,11 @@ Services:
 
 - Web: http://localhost:5173
 - API health: http://localhost:8080/health
-- Martin: http://localhost:3000
-- PostgreSQL: localhost:5432 (`gis` / `gis`)
+- Keycloak (OIDC IdP): http://localhost:8081 (管理コンソール `admin` / `admin`)
+- Martin: http://localhost:3000 (ループバックのみ)
+- PostgreSQL: localhost:5432 (`gis` / `gis`、ループバックのみ)
+
+Martin と PostgreSQL のホスト公開はローカル開発用に `127.0.0.1` バインドへ限定している。どちらも API の認可を迂回できる経路になるため、本番環境ではホストへ公開しないこと。
 
 Uploaded files and generated runtime data are stored under `./data`.
 
@@ -142,8 +145,46 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 
 開発規約・アーキテクチャの分担は [`AGENTS.md`](AGENTS.md) を参照。
 
+## Authentication
+
+`/health` を除く全 API は OIDC の Bearer JWT による認証が必須。IdP は Keycloak を想定している (compose に開発用 realm 込みで含まれる。他の IdP も OIDC 準拠なら利用可)。
+
+| 環境変数 (API) | 説明 |
+|---|---|
+| `OIDC_ISSUER` | トークンの `iss` クレームと一致すべき issuer (例 `http://localhost:8081/realms/gis`)。必須 |
+| `OIDC_AUDIENCE` | トークンの `aud` に要求する値 (例 `gis-api`)。必須 |
+| `OIDC_JWKS_URL` | JWKS の取得先。未設定時は Keycloak の既定パス (`$OIDC_ISSUER/protocol/openid-connect/certs`) |
+| `AUTH_ADMIN_EMAILS` | カンマ区切り。この email のユーザーは初回ログイン時に system admin として登録される (初期管理者のブートストラップ用) |
+
+認証に成功した subject は `app.users` へ初回アクセス時に自動登録 (JIT) される。`is_active = false` にすると即時にアクセスを止められる。
+
+web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-oidc-context`)、API 呼び出しと MapLibre のタイル取得 (`transformRequest`) に Bearer トークンを付与する。ビルド時の設定は `VITE_OIDC_AUTHORITY`(既定 `http://localhost:8081/realms/gis`)と `VITE_OIDC_CLIENT_ID`(既定 `gis-web`)。
+
+開発 realm (`infra/keycloak/realm-gis.json`) のユーザー: `gis-admin` / `gis-editor` / `gis-viewer` (パスワードはユーザー名と同じ)。compose のシード (`infra/postgres/070-seed-dev-users.sql`) が gis-editor / gis-viewer を Default project のメンバーとして登録済み。
+
+## Authorization
+
+認可は「メンバーシップ (誰がどのプロジェクトで何のロールか) は DB、ポリシー (ロールが何をできるか) はコード」の分離で実装している (`apps/api` の `AccessPolicy`)。判定は I/O を持たない純粋関数で、Cedar と同型の (principal, action, resource) モデルを取り、ロール × アクションの全組合せを単体テストが検査する。
+
+| ロール | 範囲 | できること |
+|---|---|---|
+| system admin (`app.users.system_role`) | 全プロジェクト | すべて + ユーザー・メンバー管理 |
+| editor (`app.project_members.role`) | プロジェクト単位 | 閲覧に加えて取込・分析・レイヤ / フィーチャ編集・業務データ編集 |
+| viewer (`app.project_members.role`) | プロジェクト単位 | 閲覧のみ (一覧・検索・タイル・ジョブ状態) |
+
+- メンバーでないプロジェクトのリソースへの個別アクセスは 404 (ID の存在自体を隠す)。メンバーだがロール不足の場合と、projectId を明示した操作の拒否は 403
+- 一覧 API (`/api/layers` `/api/lands` `/api/buildings` `/api/parties` `/api/zones` `/api/features/search`) は `projectId` が必須
+- `/api/projects` はメンバーであるプロジェクトのみ返す (admin は全件)
+- 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。閲覧成功は記録しない。書込みはベストエフォートで、失敗してもリクエストは落とさない
+- 管理 API: `GET /api/me`(自分のロールとメンバーシップ)、admin 専用の `GET /api/users`・`PATCH /api/users/{id}`(system_role / is_active。自分自身は変更不可)・`GET/PUT/DELETE /api/projects/{id}/members/{userId}`。メンバーシップの変更は次のリクエストから即時反映される
+
 ## Notes
 
-- Initial authentication/authorization is intentionally omitted for single-admin use.
+- API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。
+- CORS の許可オリジンは `WEB_ORIGIN`(未設定時は `http://localhost:5173` のみ)。全開放 (`anyHost`) にはならない。
+- アップロード上限は API 側 `UPLOAD_MAX_BYTES`(既定 200MB)と web の nginx `client_max_body_size 200m` で揃えている。
+- API の SQL には `DATABASE_STATEMENT_TIMEOUT_MS`(既定 30 秒)の statement_timeout がかかる。分析ジョブ・区域レイヤ生成などの重い生成系処理はトランザクション内で `HEAVY_STATEMENT_TIMEOUT_MS`(既定 0 = 無制限)に差し替わる。
+- 一覧 API (`/api/lands` `/api/buildings` `/api/parties` `/api/zones`) は `limit`(既定 200・最大 1000)と `offset` でページングし、フィルタ適用後の総件数を `X-Total-Count` ヘッダで返す。
+- 実行中のままプロセスが落ちたジョブはリース期限で pending へ再キューされる: 取込ジョブは worker の `IMPORT_JOB_STALE_SECONDS`(既定 1800 秒)、分析ジョブは API の `ANALYSIS_JOB_STALE_SECONDS`(既定 1800 秒)。長時間かかる正当なジョブがある場合はこの値を延ばすこと。
 - Imported and result geometries are stored in EPSG:3857 for Martin tile serving. Bboxes are exposed in EPSG:4326.
 - Layer IDs, table names, geometry columns, attribute names, and operators are validated against DB metadata before jobs are accepted or executed.

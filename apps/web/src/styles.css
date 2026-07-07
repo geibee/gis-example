@@ -1697,3 +1697,15 @@ input[type="file"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* 認証ゲート (ログイン前・認証エラー時の全画面表示) */
+.auth-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 100vh;
+  font-size: 15px;
+  color: #334155;
+}

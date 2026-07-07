@@ -7,12 +7,15 @@ info:
 
     - この仕様は Spectral で lint され、apps/web/src/contracts/generated.ts が
       本ファイルから生成される (ドリフトは scripts/verify.sh の web スコープで検査)
-    - 認可は初期スコープ外 (シングル管理者運用)
+    - /health を除く全 API は OIDC IdP が発行した Bearer JWT による認証が必須
     - ジオメトリは EPSG:3857 で格納され、bbox は EPSG:4326 で公開される
 servers:
   - url: http://localhost:8080
+security:
+  - bearerAuth: []
 tags:
   - name: system
+  - name: admin
   - name: layers
   - name: features
   - name: business
@@ -26,6 +29,7 @@ paths:
       tags: [system]
       operationId: getHealth
       summary: ヘルスチェック
+      security: []
       responses:
         "200":
           description: OK
@@ -44,6 +48,8 @@ paths:
       operationId: listProjects
       summary: プロジェクト一覧
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "200":
           description: OK
           content:
@@ -53,6 +59,131 @@ paths:
                 items:
                   $ref: "#/components/schemas/Project"
 
+  /api/me:
+    get:
+      tags: [admin]
+      operationId: getMe
+      summary: 自分のユーザー情報とメンバーシップ
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+
+  /api/users:
+    get:
+      tags: [admin]
+      operationId: listUsers
+      summary: ユーザー一覧 (system admin 専用)
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+  /api/users/{id}:
+    patch:
+      tags: [admin]
+      operationId: updateUser
+      summary: ユーザーのロール・有効状態の変更 (system admin 専用。自分自身は変更不可)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserPatchRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 更新後のユーザー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/members:
+    get:
+      tags: [admin]
+      operationId: listProjectMembers
+      summary: プロジェクトのメンバー一覧 (system admin 専用)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectMember"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/members/{userId}:
+    put:
+      tags: [admin]
+      operationId: putProjectMember
+      summary: メンバーの追加・ロール変更 (system admin 専用)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberPutRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 追加・更新後のメンバー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMember"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [admin]
+      operationId: deleteProjectMember
+      summary: メンバーの削除 (system admin 専用)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/layers:
     get:
       tags: [layers]
@@ -61,8 +192,13 @@ paths:
       parameters:
         - name: projectId
           in: query
+          required: true
           schema: { type: string }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -80,6 +216,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -98,6 +238,10 @@ paths:
           in: query
           schema: { type: integer, default: 80 }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -115,6 +259,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -127,6 +275,10 @@ paths:
         - $ref: "#/components/parameters/PathId"
         - $ref: "#/components/parameters/PathFeatureId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -148,6 +300,10 @@ paths:
             schema:
               $ref: "#/components/schemas/FeatureUpdateRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後のフィーチャ
           content:
@@ -163,7 +319,7 @@ paths:
       operationId: searchFeatures
       summary: フィーチャ検索 (キーワード / 単一属性条件)
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: layerId, in: query, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: field, in: query, schema: { type: string } }
@@ -172,6 +328,10 @@ paths:
         - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
         - { name: limit, in: query, schema: { type: integer, default: 50 } }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -194,6 +354,10 @@ paths:
             schema:
               $ref: "#/components/schemas/BusinessSpatialSearchRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -216,6 +380,10 @@ paths:
             schema:
               $ref: "#/components/schemas/ConditionQuery"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -235,6 +403,10 @@ paths:
         - { name: layerId, in: path, required: true, schema: { type: string } }
         - $ref: "#/components/parameters/PathFeatureId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -248,7 +420,7 @@ paths:
       operationId: listLands
       summary: 土地一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string } }
         - { name: landUse, in: query, schema: { type: string } }
@@ -260,15 +432,24 @@ paths:
         - { name: intersectsLayerId, in: query, schema: { type: string } }
         - { name: intersectsFeatureId, in: query, schema: { type: string } }
         - { name: distanceMeters, in: query, schema: { type: number } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Land"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [business]
       operationId: createLand
@@ -280,6 +461,10 @@ paths:
             schema:
               $ref: "#/components/schemas/LandWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -296,6 +481,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -316,6 +505,10 @@ paths:
             schema:
               $ref: "#/components/schemas/LandWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -331,6 +524,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -340,7 +537,7 @@ paths:
       operationId: listBuildings
       summary: 建物一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: landId, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string } }
@@ -353,15 +550,24 @@ paths:
         - { name: intersectsLayerId, in: query, schema: { type: string } }
         - { name: intersectsFeatureId, in: query, schema: { type: string } }
         - { name: distanceMeters, in: query, schema: { type: number } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Building"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [business]
       operationId: createBuilding
@@ -373,6 +579,10 @@ paths:
             schema:
               $ref: "#/components/schemas/BuildingWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -389,6 +599,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -409,6 +623,10 @@ paths:
             schema:
               $ref: "#/components/schemas/BuildingWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -424,6 +642,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -433,21 +655,30 @@ paths:
       operationId: listParties
       summary: 関係者一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: partyType, in: query, schema: { type: string } }
         - { name: relationType, in: query, schema: { type: string } }
         - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
         - { name: targetType, in: query, schema: { type: string, enum: [land, building] } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Party"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [business]
       operationId: createParty
@@ -459,6 +690,10 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -475,6 +710,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -495,6 +734,10 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -510,6 +753,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -525,6 +772,10 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyRelationshipWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -547,6 +798,10 @@ paths:
             schema:
               $ref: "#/components/schemas/PartyRelationshipWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -562,6 +817,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -571,22 +830,31 @@ paths:
       operationId: listZones
       summary: 区域一覧
       parameters:
-        - { name: projectId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, required: true, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string } }
         - { name: zoneType, in: query, schema: { type: string } }
         - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
         - { name: zoneLayerId, in: query, schema: { type: string } }
         - { name: sourceLayerId, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Zone"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [zones]
       operationId: createZone
@@ -598,6 +866,10 @@ paths:
             schema:
               $ref: "#/components/schemas/ZoneWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -614,6 +886,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -634,6 +910,10 @@ paths:
             schema:
               $ref: "#/components/schemas/ZoneWriteRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: 更新後
           content:
@@ -649,6 +929,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -660,6 +944,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -680,6 +968,10 @@ paths:
             schema:
               $ref: "#/components/schemas/ZoneLayerFromImportRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 作成済み
           content:
@@ -714,6 +1006,10 @@ paths:
                   format: binary
               required: [file]
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 受付済み
           content:
@@ -730,6 +1026,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -750,6 +1050,10 @@ paths:
             schema:
               $ref: "#/components/schemas/AnalysisJobRequest"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "201":
           description: 受付済み
           content:
@@ -766,6 +1070,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -782,6 +1090,10 @@ paths:
       parameters:
         - { name: layerId, in: path, required: true, schema: { type: string } }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -801,6 +1113,10 @@ paths:
         - { name: x, in: path, required: true, schema: { type: integer, minimum: 0 } }
         - { name: y, in: path, required: true, schema: { type: integer, minimum: 0 } }
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "200":
           description: OK
           content:
@@ -812,19 +1128,53 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OIDC IdP が発行したアクセストークン
+
   parameters:
     PathId:
       name: id
       in: path
       required: true
       schema: { type: string }
+    ListLimit:
+      name: limit
+      in: query
+      description: 1 ページの最大件数
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+    ListOffset:
+      name: offset
+      in: query
+      description: 読み飛ばす件数
+      schema: { type: integer, minimum: 0, default: 0 }
     PathFeatureId:
       name: featureId
       in: path
       required: true
       schema: { type: string }
 
+  headers:
+    XTotalCount:
+      description: フィルタ適用後の総件数 (limit/offset 適用前)
+      schema: { type: integer, format: int64 }
+
   responses:
+    Forbidden:
+      description: 認可されていない (プロジェクトのメンバーだがロールの権限が不足)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: 認証されていない (トークン欠落・無効・失効、または無効化されたユーザー)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     BadRequest:
       description: リクエスト不正
       content:
@@ -852,6 +1202,61 @@ components:
         name: { type: string }
         createdAt: { type: string }
       required: [id, name, createdAt]
+
+    Membership:
+      type: object
+      properties:
+        projectId: { type: string }
+        role: { type: string, enum: [editor, viewer] }
+      required: [projectId, role]
+
+    Me:
+      type: object
+      properties:
+        userId: { type: string }
+        subject: { type: string }
+        email: { type: [string, "null"] }
+        displayName: { type: [string, "null"] }
+        systemRole: { type: string, enum: [admin, user] }
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/Membership"
+      required: [userId, subject, systemRole, memberships]
+
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        subject: { type: string }
+        email: { type: [string, "null"] }
+        displayName: { type: [string, "null"] }
+        systemRole: { type: string, enum: [admin, user] }
+        isActive: { type: boolean }
+        createdAt: { type: string }
+      required: [id, subject, systemRole, isActive, createdAt]
+
+    UserPatchRequest:
+      type: object
+      properties:
+        systemRole: { type: string, enum: [admin, user] }
+        isActive: { type: boolean }
+
+    ProjectMember:
+      type: object
+      properties:
+        userId: { type: string }
+        projectId: { type: string }
+        role: { type: string, enum: [editor, viewer] }
+        email: { type: [string, "null"] }
+        displayName: { type: [string, "null"] }
+      required: [userId, projectId, role]
+
+    MemberPutRequest:
+      type: object
+      properties:
+        role: { type: string, enum: [editor, viewer] }
+      required: [role]
 
     LayerAttribute:
       type: object

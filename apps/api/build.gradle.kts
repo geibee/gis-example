@@ -22,6 +22,8 @@ kotlin {
 dependencies {
     implementation("io.ktor:ktor-server-core-jvm:2.3.12")
     implementation("io.ktor:ktor-server-netty-jvm:2.3.12")
+    implementation("io.ktor:ktor-server-auth-jvm:2.3.12")
+    implementation("io.ktor:ktor-server-auth-jwt-jvm:2.3.12")
     implementation("io.ktor:ktor-server-call-logging-jvm:2.3.12")
     implementation("io.ktor:ktor-server-cors-jvm:2.3.12")
     implementation("io.ktor:ktor-server-status-pages-jvm:2.3.12")
@@ -33,6 +35,8 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
     testImplementation(kotlin("test"))
+    // 認証・認可の統合テストで HTTP 層 (PEP の配線) まで検証する
+    testImplementation("io.ktor:ktor-server-test-host-jvm:2.3.12")
 }
 
 // test = 単体テストのみ (DB 不要、軽量ゲート scripts/verify.sh が実行)

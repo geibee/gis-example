@@ -38,6 +38,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 自分のユーザー情報とメンバーシップ */
+        get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** ユーザー一覧 (system admin 専用) */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** ユーザーのロール・有効状態の変更 (system admin 専用。自分自身は変更不可) */
+        patch: operations["updateUser"];
+        trace?: never;
+    };
+    "/api/projects/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** プロジェクトのメンバー一覧 (system admin 専用) */
+        get: operations["listProjectMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** メンバーの追加・ロール変更 (system admin 専用) */
+        put: operations["putProjectMember"];
+        post?: never;
+        /** メンバーの削除 (system admin 専用) */
+        delete: operations["deleteProjectMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/layers": {
         parameters: {
             query?: never;
@@ -523,6 +609,47 @@ export interface components {
             name: string;
             createdAt: string;
         };
+        Membership: {
+            projectId: string;
+            /** @enum {string} */
+            role: "editor" | "viewer";
+        };
+        Me: {
+            userId: string;
+            subject: string;
+            email?: string | null;
+            displayName?: string | null;
+            /** @enum {string} */
+            systemRole: "admin" | "user";
+            memberships: components["schemas"]["Membership"][];
+        };
+        User: {
+            id: string;
+            subject: string;
+            email?: string | null;
+            displayName?: string | null;
+            /** @enum {string} */
+            systemRole: "admin" | "user";
+            isActive: boolean;
+            createdAt: string;
+        };
+        UserPatchRequest: {
+            /** @enum {string} */
+            systemRole?: "admin" | "user";
+            isActive?: boolean;
+        };
+        ProjectMember: {
+            userId: string;
+            projectId: string;
+            /** @enum {string} */
+            role: "editor" | "viewer";
+            email?: string | null;
+            displayName?: string | null;
+        };
+        MemberPutRequest: {
+            /** @enum {string} */
+            role: "editor" | "viewer";
+        };
         LayerAttribute: {
             name: string;
             dataType: string;
@@ -905,6 +1032,24 @@ export interface components {
         };
     };
     responses: {
+        /** @description 認可されていない (プロジェクトのメンバーだがロールの権限が不足) */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description 認証されていない (トークン欠落・無効・失効、または無効化されたユーザー) */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description リクエスト不正 */
         BadRequest: {
             headers: {
@@ -926,10 +1071,17 @@ export interface components {
     };
     parameters: {
         PathId: string;
+        /** @description 1 ページの最大件数 */
+        ListLimit: number;
+        /** @description 読み飛ばす件数 */
+        ListOffset: number;
         PathFeatureId: string;
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /** @description フィルタ適用後の総件数 (limit/offset 適用前) */
+        XTotalCount: number;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -974,12 +1126,166 @@ export interface operations {
                     "application/json": components["schemas"]["Project"][];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新後のユーザー */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listProjectMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMember"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putProjectMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberPutRequest"];
+            };
+        };
+        responses: {
+            /** @description 追加・更新後のメンバー */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteProjectMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 削除済み */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listLayers: {
         parameters: {
-            query?: {
-                projectId?: string;
+            query: {
+                projectId: string;
             };
             header?: never;
             path?: never;
@@ -996,6 +1302,8 @@ export interface operations {
                     "application/json": components["schemas"]["Layer"][];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     deleteLayer: {
@@ -1016,6 +1324,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1043,6 +1353,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     deleteResultSet: {
@@ -1063,6 +1375,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1087,6 +1401,8 @@ export interface operations {
                     "application/json": components["schemas"]["Feature"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1116,13 +1432,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
     searchFeatures: {
         parameters: {
-            query?: {
-                projectId?: string;
+            query: {
+                projectId: string;
                 layerId?: string;
                 q?: string;
                 field?: string;
@@ -1147,6 +1465,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     businessSpatialSearch: {
@@ -1172,6 +1492,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     conditionSearch: {
@@ -1197,6 +1519,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getFeatureBusinessLinks: {
@@ -1220,12 +1544,14 @@ export interface operations {
                     "application/json": components["schemas"]["BusinessLinks"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listLands: {
         parameters: {
-            query?: {
-                projectId?: string;
+            query: {
+                projectId: string;
                 q?: string;
                 status?: string;
                 landUse?: string;
@@ -1238,6 +1564,10 @@ export interface operations {
                 intersectsLayerId?: string;
                 intersectsFeatureId?: string;
                 distanceMeters?: number;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1248,12 +1578,16 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Land"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createLand: {
@@ -1279,6 +1613,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getLand: {
@@ -1301,6 +1637,8 @@ export interface operations {
                     "application/json": components["schemas"]["Land"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1322,6 +1660,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1350,13 +1690,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
     listBuildings: {
         parameters: {
-            query?: {
-                projectId?: string;
+            query: {
+                projectId: string;
                 q?: string;
                 landId?: string;
                 status?: string;
@@ -1369,6 +1711,10 @@ export interface operations {
                 intersectsLayerId?: string;
                 intersectsFeatureId?: string;
                 distanceMeters?: number;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1379,12 +1725,16 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Building"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createBuilding: {
@@ -1410,6 +1760,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getBuilding: {
@@ -1432,6 +1784,8 @@ export interface operations {
                     "application/json": components["schemas"]["Building"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1453,6 +1807,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1481,18 +1837,24 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
     listParties: {
         parameters: {
-            query?: {
-                projectId?: string;
+            query: {
+                projectId: string;
                 q?: string;
                 partyType?: string;
                 relationType?: string;
                 linkedOnly?: boolean;
                 targetType?: "land" | "building";
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1503,12 +1865,16 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Party"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createParty: {
@@ -1534,6 +1900,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getParty: {
@@ -1556,6 +1924,8 @@ export interface operations {
                     "application/json": components["schemas"]["Party"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1577,6 +1947,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1605,6 +1977,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1631,6 +2005,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     deletePartyRelationship: {
@@ -1651,6 +2027,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1679,19 +2057,25 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
     listZones: {
         parameters: {
-            query?: {
-                projectId?: string;
+            query: {
+                projectId: string;
                 q?: string;
                 status?: string;
                 zoneType?: string;
                 linkedOnly?: boolean;
                 zoneLayerId?: string;
                 sourceLayerId?: string;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1702,12 +2086,16 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Zone"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createZone: {
@@ -1733,6 +2121,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getZone: {
@@ -1755,6 +2145,8 @@ export interface operations {
                     "application/json": components["schemas"]["Zone"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1776,6 +2168,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1804,6 +2198,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1827,6 +2223,8 @@ export interface operations {
                     "application/json": components["schemas"]["ZonePartySummary"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1853,6 +2251,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1888,6 +2288,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getImportJob: {
@@ -1910,6 +2312,8 @@ export interface operations {
                     "application/json": components["schemas"]["ImportJob"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1936,6 +2340,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getAnalysisJob: {
@@ -1958,6 +2364,8 @@ export interface operations {
                     "application/json": components["schemas"]["AnalysisJob"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1981,6 +2389,8 @@ export interface operations {
                     "application/json": components["schemas"]["TileJson"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -2008,6 +2418,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };

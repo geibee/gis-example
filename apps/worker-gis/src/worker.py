@@ -15,11 +15,13 @@ from psycopg.rows import DictRow, dict_row
 
 def main() -> None:
     poll_interval = float(os.getenv("POLL_INTERVAL_SECONDS", "2"))
+    stale_seconds = float(os.getenv("IMPORT_JOB_STALE_SECONDS", "1800"))
     print("GIS worker started", flush=True)
     while True:
         did_work = False
         try:
             with connect() as conn:
+                requeue_stale_import_jobs(conn, stale_seconds)
                 import_job = claim_import_job(conn)
                 if import_job is not None:
                     did_work = True
@@ -31,15 +33,44 @@ def main() -> None:
             time.sleep(poll_interval)
 
 
+def require_pgpassword() -> str:
+    # 既定パスワードへのフォールバックはしない (本番で弱い資格情報のまま起動させない)
+    password = os.getenv("PGPASSWORD")
+    if not password:
+        raise RuntimeError("PGPASSWORD が未設定です")
+    return password
+
+
 def connect() -> psycopg.Connection[DictRow]:
     return psycopg.connect(
         host=os.getenv("PGHOST", "localhost"),
         port=int(os.getenv("PGPORT", "5432")),
         dbname=os.getenv("PGDATABASE", "gis"),
         user=os.getenv("PGUSER", "gis"),
-        password=os.getenv("PGPASSWORD", "gis"),
+        password=require_pgpassword(),
         row_factory=dict_row,
     )
+
+
+def requeue_stale_import_jobs(conn: psycopg.Connection[DictRow], max_age_seconds: float) -> int:
+    # ワーカーがジョブ実行中に落ちると running のまま残るため、リース期限超過分を pending へ戻す。
+    # 時刻閾値による判定なので、閾値を超える正常実行があり得る規模のデータを扱う場合は
+    # IMPORT_JOB_STALE_SECONDS を十分大きくすること (既定 1800 秒)
+    with conn.transaction():
+        cursor = conn.execute(
+            """
+            UPDATE app.import_jobs
+            SET status = 'pending', started_at = NULL,
+                error_message = concat('実行中のまま ', %s::text, ' 秒を超えたため再キュー')
+            WHERE status = 'running'
+              AND started_at < now() - make_interval(secs => %s)
+            """,
+            (max_age_seconds, max_age_seconds),
+        )
+        requeued = cursor.rowcount
+    if requeued > 0:
+        print(f"Requeued {requeued} stale import job(s)", flush=True)
+    return requeued
 
 
 def claim_import_job(conn: psycopg.Connection[DictRow]) -> dict[str, Any] | None:
@@ -102,7 +133,7 @@ def run_ogr2ogr(source: str, table_name: str, source_srid: int) -> None:
         f"port={os.getenv('PGPORT', '5432')} "
         f"dbname={os.getenv('PGDATABASE', 'gis')} "
         f"user={os.getenv('PGUSER', 'gis')} "
-        f"password={os.getenv('PGPASSWORD', 'gis')}"
+        f"password={require_pgpassword()}"
     )
     command = [
         "ogr2ogr",

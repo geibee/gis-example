@@ -1,0 +1,111 @@
+import type { Building, BusinessLinks, BusinessObjectFilters, Land, Layer, Party, Zone } from "./types";
+
+export type LayerViewState = {
+  baseMapVisible: boolean;
+  visibleLayerIds: string[];
+  layerOrder: string[];
+};
+
+export type LayerListItem =
+  | { type: "layer"; layer: Layer }
+  | { type: "resultSet"; id: string; name: string; layers: Layer[] };
+
+export type BusinessTab = "zone" | "lands" | "buildings" | "parties";
+export type ZoneBusinessSourceType = "all" | "land" | "building";
+
+export type RouteSelection = {
+  tab: BusinessTab;
+  id: string | null;
+};
+
+export type ZoneLayerCreateMetadata = {
+  name?: string | null;
+  zoneType?: string | null;
+  status?: string | null;
+};
+
+export type LandDraft = {
+  id: string;
+  lotNumber: string;
+  address: string;
+  landUse: string;
+  areaSqm: string;
+  registeredOwner: string;
+  rightType: string;
+  registrationCause: string;
+  registrationAcceptedOn: string;
+  status: string;
+  memo: string;
+  sourceLayerId: string;
+  sourceFeatureId: string;
+};
+
+export type ZoneDraft = {
+  id: string;
+  name: string;
+  zoneType: string;
+  status: string;
+  memo: string;
+  zoneLayerId: string;
+  zoneFeatureId: string;
+};
+
+export type BusinessMapTarget = {
+  layerId: string;
+  layerName: string;
+  featureId: string;
+  matchSummary: string;
+  businessLinks: BusinessLinks;
+  matchedBusinessLinks: BusinessLinks;
+};
+
+export type BusinessMapTargetContext = {
+  tab: BusinessTab;
+  zones: Zone[];
+  lands: Land[];
+  buildings: Building[];
+  parties: Party[];
+  layerById: Map<string, Layer>;
+};
+
+export type BusinessListSearchCriteria = {
+  query: string;
+  filters: BusinessObjectFilters;
+};
+
+export type BuildingDraft = {
+  id: string;
+  landId: string;
+  name: string;
+  buildingLocation: string;
+  houseNumber: string;
+  buildingUse: string;
+  floors: string;
+  totalFloorAreaSqm: string;
+  structure: string;
+  registeredOwner: string;
+  rightType: string;
+  registrationAcceptedOn: string;
+  status: string;
+  memo: string;
+  sourceLayerId: string;
+  sourceFeatureId: string;
+};
+
+export type PartyDraft = {
+  id: string;
+  name: string;
+  partyType: string;
+  contact: string;
+  address: string;
+  memo: string;
+  tags: string;
+};
+
+export type RelationshipDraft = {
+  partyId: string;
+  targetType: "land" | "building";
+  targetId: string;
+  relationType: string;
+  note: string;
+};

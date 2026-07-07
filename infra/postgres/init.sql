@@ -11,6 +11,43 @@ CREATE TABLE IF NOT EXISTS app.projects (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- 認証済みユーザー (OIDC の subject と突合)。初回アクセス時に JIT 登録される
+CREATE TABLE IF NOT EXISTS app.users (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    subject text NOT NULL UNIQUE,
+    email text,
+    display_name text,
+    system_role text NOT NULL DEFAULT 'user' CHECK (system_role IN ('admin', 'user')),
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- プロジェクト単位のメンバーシップ (認可の可変データ)。
+-- ロールが何をできるかは API コード側の権限マトリクスが定義する
+CREATE TABLE IF NOT EXISTS app.project_members (
+    user_id uuid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+    project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
+    role text NOT NULL CHECK (role IN ('editor', 'viewer')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, project_id)
+);
+
+-- 監査ログ: 変更系操作の成功と認証失敗・認可拒否を記録する (追記のみ、更新しない)
+CREATE TABLE IF NOT EXISTS app.audit_logs (
+    id bigserial PRIMARY KEY,
+    occurred_at timestamptz NOT NULL DEFAULT now(),
+    user_id uuid,
+    subject text,
+    action text,
+    decision text NOT NULL CHECK (decision IN ('allow', 'deny')),
+    project_id uuid,
+    http_method text NOT NULL,
+    path text NOT NULL,
+    status_code integer NOT NULL,
+    detail jsonb
+);
+
 CREATE TABLE IF NOT EXISTS app.result_sets (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,
@@ -163,6 +200,9 @@ CREATE TABLE IF NOT EXISTS app.party_relationships (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS project_members_project_idx ON app.project_members(project_id);
+CREATE INDEX IF NOT EXISTS audit_logs_occurred_idx ON app.audit_logs(occurred_at);
+CREATE INDEX IF NOT EXISTS audit_logs_user_idx ON app.audit_logs(user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS import_jobs_status_idx ON app.import_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS analysis_jobs_status_idx ON app.analysis_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS layers_project_idx ON app.layers(project_id, created_at);
