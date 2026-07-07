@@ -65,6 +65,16 @@ internal val databaseJson = Json {
 
 internal val databaseLogger = org.slf4j.LoggerFactory.getLogger(Database::class.java)
 
+// 生成系 (分析ジョブ・区域レイヤ生成) は重い空間演算を含むため、
+// セッション既定の statement_timeout とは別の上限を使う (0 は無制限)
+internal val heavyStatementTimeoutMillis: Long =
+    (System.getenv("HEAVY_STATEMENT_TIMEOUT_MS") ?: "0").toLong()
+
+// トランザクション内でのみ有効 (SET LOCAL)。値は toLong 済みの数値のみ埋め込む
+internal fun setLocalStatementTimeout(connection: java.sql.Connection, timeoutMillis: Long) {
+    connection.createStatement().use { it.execute("SET LOCAL statement_timeout = $timeoutMillis") }
+}
+
 class Database(internal val dataSource: HikariDataSource) : AutoCloseable {
     companion object {
         fun fromEnv(): Database {
@@ -81,6 +91,10 @@ class Database(internal val dataSource: HikariDataSource) : AutoCloseable {
                 // DB/LB 側のアイドル切断より短くしてコネクションを入れ替える
                 maxLifetime = (System.getenv("DATABASE_MAX_LIFETIME_MS") ?: "1500000").toLong()
                 leakDetectionThreshold = (System.getenv("DATABASE_LEAK_DETECTION_MS") ?: "60000").toLong()
+                // 暴走クエリでプールが枯渇しないようセッション既定の statement_timeout を設定する。
+                // 重い生成系処理はトランザクション内で SET LOCAL により HEAVY_STATEMENT_TIMEOUT_MS へ差し替える
+                connectionInitSql =
+                    "SET statement_timeout = ${(System.getenv("DATABASE_STATEMENT_TIMEOUT_MS") ?: "30000").toLong()}"
             }
             return Database(HikariDataSource(config))
         }

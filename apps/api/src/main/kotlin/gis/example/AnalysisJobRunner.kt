@@ -7,13 +7,15 @@ import org.slf4j.LoggerFactory
 // claim は FOR UPDATE SKIP LOCKED によるジョブテーブルキュー方式のまま変えていない
 class AnalysisJobRunner(
     private val db: Database,
-    private val pollIntervalMillis: Long
+    private val pollIntervalMillis: Long,
+    private val staleJobMaxAgeSeconds: Long
 ) {
     private val logger = LoggerFactory.getLogger(AnalysisJobRunner::class.java)
 
     @Volatile
     private var running = false
     private var thread: Thread? = null
+    private var nextStaleCheckAtMillis = 0L
 
     fun start() {
         if (thread != null) return
@@ -33,6 +35,7 @@ class AnalysisJobRunner(
 
     private fun loop() {
         while (running) {
+            requeueStaleJobsIfDue()
             val job = try {
                 db.claimPendingAnalysisJob()
             } catch (exc: Exception) {
@@ -50,5 +53,25 @@ class AnalysisJobRunner(
             // executeClaimedAnalysisJob は例外を投げず、失敗時は failed をジョブに記録する
             db.executeClaimedAnalysisJob(job)
         }
+    }
+
+    // claim はトランザクション単位で確定するため、実行中に落ちたジョブは running のまま残る。
+    // ポーリングごとでは無駄が多いので一定間隔でだけリース期限超過分を pending へ戻す
+    private fun requeueStaleJobsIfDue() {
+        val now = System.currentTimeMillis()
+        if (now < nextStaleCheckAtMillis) return
+        nextStaleCheckAtMillis = now + STALE_CHECK_INTERVAL_MILLIS
+        try {
+            val requeued = db.requeueStaleAnalysisJobs(staleJobMaxAgeSeconds)
+            if (requeued > 0) {
+                logger.warn("Requeued {} stale analysis job(s) running longer than {} seconds", requeued, staleJobMaxAgeSeconds)
+            }
+        } catch (exc: Exception) {
+            logger.warn("Failed to requeue stale analysis jobs", exc)
+        }
+    }
+
+    private companion object {
+        const val STALE_CHECK_INTERVAL_MILLIS = 60_000L
     }
 }

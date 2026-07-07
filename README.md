@@ -148,5 +148,7 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 - API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。
 - CORS の許可オリジンは `WEB_ORIGIN`(未設定時は `http://localhost:5173` のみ)。全開放 (`anyHost`) にはならない。
 - アップロード上限は API 側 `UPLOAD_MAX_BYTES`(既定 200MB)と web の nginx `client_max_body_size 200m` で揃えている。
+- API の SQL には `DATABASE_STATEMENT_TIMEOUT_MS`(既定 30 秒)の statement_timeout がかかる。分析ジョブ・区域レイヤ生成などの重い生成系処理はトランザクション内で `HEAVY_STATEMENT_TIMEOUT_MS`(既定 0 = 無制限)に差し替わる。
+- 実行中のままプロセスが落ちたジョブはリース期限で pending へ再キューされる: 取込ジョブは worker の `IMPORT_JOB_STALE_SECONDS`(既定 1800 秒)、分析ジョブは API の `ANALYSIS_JOB_STALE_SECONDS`(既定 1800 秒)。長時間かかる正当なジョブがある場合はこの値を延ばすこと。
 - Imported and result geometries are stored in EPSG:3857 for Martin tile serving. Bboxes are exposed in EPSG:4326.
 - Layer IDs, table names, geometry columns, attribute names, and operators are validated against DB metadata before jobs are accepted or executed.

@@ -91,6 +91,24 @@ fun Database.claimPendingAnalysisJob(): ClaimedAnalysisJob? = dataSource.connect
     }
 }
 
+// worker-gis の取込ジョブと同様に、実行中にプロセスが落ちて running のまま残った
+// 分析ジョブをリース期限超過で pending へ戻す
+fun Database.requeueStaleAnalysisJobs(maxAgeSeconds: Long): Int = dataSource.connection.use { connection ->
+    connection.prepareStatement(
+        """
+        UPDATE app.analysis_jobs
+        SET status = 'pending', started_at = NULL,
+            error_message = concat('実行中のまま ', ?::text, ' 秒を超えたため再キュー')
+        WHERE status = 'running'
+          AND started_at < now() - make_interval(secs => ?::double precision)
+        """.trimIndent()
+    ).use { stmt ->
+        stmt.setString(1, maxAgeSeconds.toString())
+        stmt.setLong(2, maxAgeSeconds)
+        stmt.executeUpdate()
+    }
+}
+
 // claim 済み分析ジョブを実行する。結果テーブル作成・レイヤ登録・ジョブ状態更新を
 // 1 トランザクションで確定し、例外時は failed を記録する (呼び出し側へは投げない)
 fun Database.executeClaimedAnalysisJob(job: ClaimedAnalysisJob) {
@@ -101,6 +119,7 @@ fun Database.executeClaimedAnalysisJob(job: ClaimedAnalysisJob) {
             val previousAutoCommit = connection.autoCommit
             connection.autoCommit = false
             try {
+                setLocalStatementTimeout(connection, heavyStatementTimeoutMillis)
                 val outcome = when (operation) {
                     "condition_search" -> executeConditionSearchAnalysisJob(connection, job, request)
                     "and_filter" -> executeAndFilterAnalysisJob(connection, job, request)

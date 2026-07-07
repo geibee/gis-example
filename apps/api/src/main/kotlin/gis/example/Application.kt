@@ -57,7 +57,8 @@ fun Application.module() {
 
     val analysisJobRunner = AnalysisJobRunner(
         db = db,
-        pollIntervalMillis = ((System.getenv("ANALYSIS_POLL_INTERVAL_SECONDS") ?: "2").toDouble() * 1000).toLong()
+        pollIntervalMillis = ((System.getenv("ANALYSIS_POLL_INTERVAL_SECONDS") ?: "2").toDouble() * 1000).toLong(),
+        staleJobMaxAgeSeconds = (System.getenv("ANALYSIS_JOB_STALE_SECONDS") ?: "1800").toLong()
     )
     analysisJobRunner.start()
 

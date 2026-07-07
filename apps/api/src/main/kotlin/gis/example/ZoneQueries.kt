@@ -311,6 +311,8 @@ fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest): Zon
         val previousAutoCommit = connection.autoCommit
         connection.autoCommit = false
         try {
+            // ST_MemUnion + ST_Buffer は大規模レイヤで長時間かかるため、生成系専用の上限に差し替える
+            setLocalStatementTimeout(connection, heavyStatementTimeoutMillis)
             createSourceZoneBufferTable(
                 connection = connection,
                 tableName = tableName,
