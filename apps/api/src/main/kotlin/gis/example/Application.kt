@@ -98,6 +98,7 @@ fun Application.module(
         exposeHeader(TOTAL_COUNT_HEADER)
     }
     installOidcAuthentication(db, oidcSettings)
+    install(auditLogPlugin(db))
     install(StatusPages) {
         exception<ApiException> { call, cause ->
             call.respond(cause.status, ErrorResponse(cause.message))

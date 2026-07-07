@@ -20,6 +20,22 @@ fun Database.ensureBusinessSchema() {
                     updated_at timestamptz NOT NULL DEFAULT now()
                 );
 
+                CREATE TABLE IF NOT EXISTS app.audit_logs (
+                    id bigserial PRIMARY KEY,
+                    occurred_at timestamptz NOT NULL DEFAULT now(),
+                    user_id uuid,
+                    subject text,
+                    action text,
+                    decision text NOT NULL CHECK (decision IN ('allow', 'deny')),
+                    project_id uuid,
+                    http_method text NOT NULL,
+                    path text NOT NULL,
+                    status_code integer NOT NULL,
+                    detail jsonb
+                );
+                CREATE INDEX IF NOT EXISTS audit_logs_occurred_idx ON app.audit_logs(occurred_at);
+                CREATE INDEX IF NOT EXISTS audit_logs_user_idx ON app.audit_logs(user_id, occurred_at);
+
                 CREATE TABLE IF NOT EXISTS app.project_members (
                     user_id uuid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
                     project_id uuid NOT NULL REFERENCES app.projects(id) ON DELETE CASCADE,

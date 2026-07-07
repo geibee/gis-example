@@ -173,6 +173,7 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 - メンバーでないプロジェクトのリソースへの個別アクセスは 404 (ID の存在自体を隠す)。メンバーだがロール不足の場合と、projectId を明示した操作の拒否は 403
 - 一覧 API (`/api/layers` `/api/lands` `/api/buildings` `/api/parties` `/api/zones` `/api/features/search`) は `projectId` が必須
 - `/api/projects` はメンバーであるプロジェクトのみ返す (admin は全件)
+- 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。閲覧成功は記録しない。書込みはベストエフォートで、失敗してもリクエストは落とさない
 
 ## Notes
 

@@ -216,6 +216,57 @@ class AuthzIntegrationTest {
     }
 
     @Test
+    fun `監査ログは mutate 成功と認可拒否を記録し read 成功は記録しない`() {
+        // 検証専用のパスで他テストの記録と分離する
+        val auditLand = "L-IT-1"
+        withApp { client ->
+            val patchBody = """{"memo": "audit 検証"}"""
+            client.patch("/api/lands/$auditLand") {
+                header(HttpHeaders.Authorization, editorBearer)
+                contentType(ContentType.Application.Json)
+                setBody(patchBody)
+            }
+            client.patch("/api/lands/$auditLand") {
+                header(HttpHeaders.Authorization, viewerBearer)
+                contentType(ContentType.Application.Json)
+                setBody(patchBody)
+            }
+            client.get("/api/lands/$auditLand") // トークンなし = 401
+            client.get("/api/lands/$auditLand") { header(HttpHeaders.Authorization, viewerBearer) } // read 成功
+        }
+        // withApp を抜けた時点でサーバは停止済み = ResponseSent フックも完了している
+        fun auditCount(where: String): Int = rawConnection().use { connection ->
+            connection.createStatement().use { stmt ->
+                stmt.executeQuery("SELECT count(*) FROM app.audit_logs WHERE $where").use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
+        val path = "/api/lands/$auditLand"
+        check(
+            auditCount(
+                "subject = 'authz-editor' AND decision = 'allow' AND http_method = 'PATCH' " +
+                    "AND path = '$path' AND action = 'BUSINESS_WRITE' AND project_id = '$defaultProject'"
+            ) >= 1
+        ) { "editor の PATCH 成功が記録されていません" }
+        check(
+            auditCount(
+                "subject = 'authz-viewer' AND decision = 'deny' AND status_code = 403 " +
+                    "AND http_method = 'PATCH' AND path = '$path'"
+            ) >= 1
+        ) { "viewer の 403 拒否が記録されていません" }
+        check(
+            auditCount("subject IS NULL AND decision = 'deny' AND status_code = 401 AND path = '$path'") >= 1
+        ) { "トークンなしの 401 が記録されていません" }
+        assertEquals(
+            0,
+            auditCount("decision = 'allow' AND http_method = 'GET'"),
+            "read 成功は記録しない"
+        )
+    }
+
+    @Test
     fun `admin はメンバーでないプロジェクトも操作できる`() = withApp { client ->
         assertEquals(
             HttpStatusCode.OK,
