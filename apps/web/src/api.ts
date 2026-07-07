@@ -18,22 +18,39 @@ import type {
   ZonePartySummary
 } from "./types";
 
+import { getAccessToken, notifyUnauthorized } from "./auth";
+
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
+function withAuthHeaders(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  const token = getAccessToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return { ...init, headers };
+}
+
+async function raiseApiError(response: Response): Promise<never> {
+  if (response.status === 401) {
+    // トークン失効・ユーザー無効化。再ログインへ誘導する
+    notifyUnauthorized();
+    throw new Error("認証の有効期限が切れました。再ログインしてください");
+  }
+  const body = await response.json().catch(() => ({ error: response.statusText }));
+  throw new Error(body.error ?? response.statusText);
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders(init));
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(body.error ?? response.statusText);
+    await raiseApiError(response);
   }
   return response.json() as Promise<T>;
 }
 
 async function requestVoid(path: string, init?: RequestInit): Promise<void> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders(init));
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(body.error ?? response.statusText);
+    await raiseApiError(response);
   }
 }
 

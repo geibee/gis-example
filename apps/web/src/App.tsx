@@ -1,6 +1,8 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type MapLayerMouseEvent, type Map as MapLibreMap } from "maplibre-gl";
-import { Building2, EyeOff, FileText, Map as MapIcon, Users } from "lucide-react";
+import { Building2, EyeOff, FileText, LogOut, Map as MapIcon, Users } from "lucide-react";
+import { useAuth } from "react-oidc-context";
+import { getAccessToken } from "./auth";
 import {
   conditionSearchFeatures,
   createAnalysisJob,
@@ -136,6 +138,7 @@ import { ZoneSearchPanel } from "./components/ZoneSearchPanel";
 import { ZoneWorkspace } from "./components/ZoneWorkspace";
 
 export default function App() {
+  const auth = useAuth();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const styleLayersByLayerId = useRef<Record<string, string[]>>({});
@@ -620,7 +623,18 @@ export default function App() {
       style: baseStyle as maplibregl.StyleSpecification,
       center: imperialPalaceCenter,
       zoom: defaultMapZoom,
-      attributionControl: { compact: true }
+      attributionControl: { compact: true },
+      // tilejson とタイル (/api/tiles) は MapLibre が直接取得するため、
+      // ここでアクセストークンを付与する (API の認証必須化に対応)
+      transformRequest: (url) => {
+        if (url.includes("/api/")) {
+          const token = getAccessToken();
+          if (token) {
+            return { url, headers: { Authorization: `Bearer ${token}` } };
+          }
+        }
+        return { url };
+      }
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
@@ -1939,6 +1953,15 @@ export default function App() {
         <button className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
           {mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
           {mapSupportOpen ? "地図を隠す" : "地図を表示"}
+        </button>
+        <button
+          className="subtle-button"
+          type="button"
+          title={auth.user?.profile.preferred_username ?? auth.user?.profile.email ?? undefined}
+          onClick={() => void auth.signoutRedirect()}
+        >
+          <LogOut size={16} />
+          ログアウト
         </button>
       </header>
 

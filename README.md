@@ -158,6 +158,8 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 
 認証に成功した subject は `app.users` へ初回アクセス時に自動登録 (JIT) される。`is_active = false` にすると即時にアクセスを止められる。
 
+web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-oidc-context`)、API 呼び出しと MapLibre のタイル取得 (`transformRequest`) に Bearer トークンを付与する。ビルド時の設定は `VITE_OIDC_AUTHORITY`(既定 `http://localhost:8081/realms/gis`)と `VITE_OIDC_CLIENT_ID`(既定 `gis-web`)。
+
 開発 realm (`infra/keycloak/realm-gis.json`) のユーザー: `gis-admin` / `gis-editor` / `gis-viewer` (パスワードはユーザー名と同じ)。compose のシード (`infra/postgres/070-seed-dev-users.sql`) が gis-editor / gis-viewer を Default project のメンバーとして登録済み。
 
 ## Authorization
