@@ -9,9 +9,10 @@ services:
       POSTGRES_USER: gis
       POSTGRES_PASSWORD: gis
     # ホストへの公開はローカル開発用にループバックのみ。本番では公開しないこと
-    # (API の認可を迂回して DB へ直接アクセスできてしまう)
+    # (API の認可を迂回して DB へ直接アクセスできてしまう)。
+    # ホスト側で 5432 が使用中の場合は POSTGRES_HOST_PORT で変更できる
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
@@ -103,8 +104,10 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+    # ホスト側で 5173 が使用中の場合は WEB_HOST_PORT で変更できる
+    # (OIDC のリダイレクト URI と CORS は 5173 前提のため、UI を使う場合は既定のままにする)
     ports:
-      - "5173:80"
+      - "${WEB_HOST_PORT:-5173}:80"
     depends_on:
       - api
       - martin

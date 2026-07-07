@@ -134,7 +134,7 @@ curl -sf "${AUTH[@]}" "$BASE/api/tilejson/$RESULT_LAYER_ID" | json_get "j['tiles
   || fail "tilejson が取得できません"
 
 # 結果レイヤの bbox 中心を覆う z15 タイル座標を計算して非空を確認する
-read -r TILE_X TILE_Y <<<"$(curl -sf "${AUTH[@]}" "$BASE/api/layers" | python3 -c "
+read -r TILE_X TILE_Y <<<"$(curl -sf "${AUTH[@]}" "$BASE/api/layers?projectId=$PROJECT_ID" | python3 -c "
 import json, math, sys
 layers = json.load(sys.stdin)
 layer = next(l for l in layers if l['id'] == '$RESULT_LAYER_ID')
@@ -146,6 +146,8 @@ lat_rad = math.radians(lat)
 y = int((1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n)
 print(x, y)
 ")"
+# コマンド置換の失敗は read に飲まれるため、空なら明示的に落とす
+[[ -n "${TILE_X:-}" && -n "${TILE_Y:-}" ]] || fail "タイル座標を計算できません (/api/layers の応答を確認)"
 TILE_BYTES=$(curl -sf "${AUTH[@]}" -o /dev/null -w "%{size_download}" "$BASE/api/tiles/$RESULT_LAYER_ID/15/$TILE_X/$TILE_Y")
 [[ "$TILE_BYTES" -gt 0 ]] || fail "結果レイヤの z15 タイルが空です (15/$TILE_X/$TILE_Y)"
 log "  MVT 非空: 15/$TILE_X/$TILE_Y (${TILE_BYTES} bytes)"
