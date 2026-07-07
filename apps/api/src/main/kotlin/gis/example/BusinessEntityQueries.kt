@@ -47,7 +47,7 @@ internal fun Database.getBusinessLinks(connection: Connection, layerId: String, 
     }
 )
 
-fun Database.listLands(query: LandListQuery): List<LandDto> = dataSource.connection.use { connection ->
+fun Database.listLands(query: LandListQuery): PagedList<LandDto> = dataSource.connection.use { connection ->
     val filters = mutableListOf<String>()
     val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
     val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
@@ -104,28 +104,39 @@ fun Database.listLands(query: LandListQuery): List<LandDto> = dataSource.connect
         filters = filters,
         binders = binders
     )
+    val baseSql = """
+        FROM app.lands AS l
+        ${whereClause(filters)}
+    """.trimIndent()
+    val totalCount = queryTotalCount(connection, baseSql, binders)
     val sql = """
         SELECT l.id, l.project_id::text, l.lot_number, l.address, l.land_use, l.area_sqm,
                l.registered_owner, l.right_type, l.registration_cause, l.registration_accepted_on::text,
                l.status, l.memo, l.source_layer_id::text, l.source_feature_id
-        FROM app.lands AS l
-        ${whereClause(filters)}
-        ORDER BY l.id
+        $baseSql
+        ORDER BY l.id${pagingClause(query.limit, query.offset)}
     """.trimIndent()
-    connection.prepareStatement(sql).use { stmt ->
+    val items = connection.prepareStatement(sql).use { stmt ->
         bindPatchValues(stmt, binders)
         stmt.executeQuery().use { rs ->
-            val items = buildList {
+            buildList {
                 while (rs.next()) add(rs.toLandDto())
-            }
-            items.map { land ->
-                land.copy(
-                    buildings = listBuildingLinksForLand(connection, land.id),
-                    relationships = listRelationshipsForTarget(connection, "land", land.id)
-                )
             }
         }
     }
+    // 行ごとの個別クエリ (N+1) を避け、ページ内の ID をまとめて引く
+    val landIds = items.map { it.id }
+    val buildingLinks = listBuildingLinksForLands(connection, landIds)
+    val relationships = listRelationshipsForTargets(connection, "land", landIds)
+    PagedList(
+        items = items.map { land ->
+            land.copy(
+                buildings = buildingLinks[land.id].orEmpty(),
+                relationships = relationships[land.id].orEmpty()
+            )
+        },
+        totalCount = totalCount
+    )
 }
 
 fun Database.getLand(id: String): LandDto? = dataSource.connection.use { connection ->
@@ -281,7 +292,7 @@ fun Database.deleteLand(id: String) {
     }
 }
 
-fun Database.listBuildings(query: BuildingListQuery): List<BuildingDto> = dataSource.connection.use { connection ->
+fun Database.listBuildings(query: BuildingListQuery): PagedList<BuildingDto> = dataSource.connection.use { connection ->
     val filters = mutableListOf<String>()
     val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
     val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
@@ -342,27 +353,35 @@ fun Database.listBuildings(query: BuildingListQuery): List<BuildingDto> = dataSo
         filters = filters,
         binders = binders
     )
+    val baseSql = """
+        FROM app.buildings AS b
+        LEFT JOIN app.lands AS l ON l.id = b.land_id
+        ${whereClause(filters)}
+    """.trimIndent()
+    val totalCount = queryTotalCount(connection, baseSql, binders)
     val sql = """
         SELECT b.id, b.project_id::text, b.land_id, concat(l.lot_number, ' · ', l.address) AS land_label,
                b.name, b.building_location, b.house_number, b.building_use, b.floors,
                b.total_floor_area_sqm, b.structure, b.registered_owner, b.right_type,
                b.registration_accepted_on::text, b.status, b.memo, b.source_layer_id::text, b.source_feature_id
-        FROM app.buildings AS b
-        LEFT JOIN app.lands AS l ON l.id = b.land_id
-        ${whereClause(filters)}
-        ORDER BY b.id
+        $baseSql
+        ORDER BY b.id${pagingClause(query.limit, query.offset)}
     """.trimIndent()
-    connection.prepareStatement(sql).use { stmt ->
+    val items = connection.prepareStatement(sql).use { stmt ->
         bindPatchValues(stmt, binders)
         stmt.executeQuery().use { rs ->
-            val items = buildList {
+            buildList {
                 while (rs.next()) add(rs.toBuildingDto())
-            }
-            items.map { building ->
-                building.copy(relationships = listRelationshipsForTarget(connection, "building", building.id))
             }
         }
     }
+    val relationships = listRelationshipsForTargets(connection, "building", items.map { it.id })
+    PagedList(
+        items = items.map { building ->
+            building.copy(relationships = relationships[building.id].orEmpty())
+        },
+        totalCount = totalCount
+    )
 }
 
 fun Database.getBuilding(id: String): BuildingDto? = dataSource.connection.use { connection ->
@@ -516,6 +535,40 @@ fun Database.deleteBuilding(id: String) {
             connection.autoCommit = previousAutoCommit
         }
     }
+}
+
+// 一覧のフィルタ適用後の総件数。ページ本体と同じ FROM/WHERE (binders) を使い回す
+internal fun Database.queryTotalCount(
+    connection: Connection,
+    baseSql: String,
+    binders: List<(PreparedStatement, Int) -> Unit>
+): Long = connection.prepareStatement("SELECT count(*) $baseSql").use { stmt ->
+    bindPatchValues(stmt, binders)
+    stmt.executeQuery().use { rs ->
+        rs.next()
+        rs.getLong(1)
+    }
+}
+
+// listBuildingLinksForLand の一括版。ページ内の土地 ID をまとめて引き、土地 ID ごとに返す
+private fun Database.listBuildingLinksForLands(connection: Connection, landIds: List<String>): Map<String, List<BusinessEntityLinkDto>> {
+    if (landIds.isEmpty()) return emptyMap()
+    data class Row(val landId: String, val link: BusinessEntityLinkDto)
+    return connection.prepareStatement(
+        """
+        SELECT land_id, id, name AS label
+        FROM app.buildings
+        WHERE land_id = ANY(?)
+        ORDER BY id
+        """.trimIndent()
+    ).use { stmt ->
+        stmt.setArray(1, connection.createArrayOf("text", landIds.toTypedArray()))
+        stmt.executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(Row(rs.getString("land_id"), BusinessEntityLinkDto(rs.getString("id"), rs.getString("label"))))
+            }
+        }
+    }.groupBy({ it.landId }, { it.link })
 }
 
 private fun Database.listBuildingLinksForLand(connection: Connection, landId: String): List<BusinessEntityLinkDto> =

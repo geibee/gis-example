@@ -7,7 +7,7 @@ import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.SQLException
 
-fun Database.listParties(query: PartyListQuery): List<PartyDto> = dataSource.connection.use { connection ->
+fun Database.listParties(query: PartyListQuery): PagedList<PartyDto> = dataSource.connection.use { connection ->
     val filters = mutableListOf<String>()
     val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
     val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
@@ -63,21 +63,30 @@ fun Database.listParties(query: PartyListQuery): List<PartyDto> = dataSource.con
             """.trimIndent()
         )
     }
-    val sql = """
-        SELECT p.id, p.project_id::text, p.name, p.party_type, p.contact, p.address, p.memo, p.tags
+    val baseSql = """
         FROM app.parties AS p
         ${whereClause(filters)}
-        ORDER BY p.id
     """.trimIndent()
-    connection.prepareStatement(sql).use { stmt ->
+    val totalCount = queryTotalCount(connection, baseSql, binders)
+    val sql = """
+        SELECT p.id, p.project_id::text, p.name, p.party_type, p.contact, p.address, p.memo, p.tags
+        $baseSql
+        ORDER BY p.id${pagingClause(query.limit, query.offset)}
+    """.trimIndent()
+    val items = connection.prepareStatement(sql).use { stmt ->
         bindPatchValues(stmt, binders)
         stmt.executeQuery().use { rs ->
-            val items = buildList {
+            buildList {
                 while (rs.next()) add(rs.toPartyDto())
             }
-            items.map { party -> party.copy(relationships = listRelationshipsForParty(connection, party.id)) }
         }
     }
+    // 行ごとの個別クエリ (N+1) を避け、ページ内の関係者 ID をまとめて引く
+    val relationships = listRelationshipsForParties(connection, items.map { it.id })
+    PagedList(
+        items = items.map { party -> party.copy(relationships = relationships[party.id].orEmpty()) },
+        totalCount = totalCount
+    )
 }
 
 fun Database.getParty(id: String): PartyDto? = dataSource.connection.use { connection ->
@@ -268,6 +277,41 @@ internal fun Database.listRelationshipsForTarget(connection: Connection, targetT
             }
         }
     }
+
+// listRelationshipsForTarget の一括版。並び順は単体版と同じで、対象 ID ごとにグループ化して返す
+internal fun Database.listRelationshipsForTargets(
+    connection: Connection,
+    targetType: String,
+    targetIds: List<String>
+): Map<String, List<PartyRelationshipDto>> {
+    if (targetIds.isEmpty()) return emptyMap()
+    return connection.prepareStatement(
+        relationshipSelectSql("WHERE r.target_type = ? AND r.target_id = ANY(?) ORDER BY r.relation_type, p.name")
+    ).use { stmt ->
+        stmt.setString(1, targetType)
+        stmt.setArray(2, connection.createArrayOf("text", targetIds.toTypedArray()))
+        stmt.executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(rs.toPartyRelationshipDto())
+            }
+        }
+    }.groupBy { it.targetId }
+}
+
+// listRelationshipsForParty の一括版
+private fun Database.listRelationshipsForParties(connection: Connection, partyIds: List<String>): Map<String, List<PartyRelationshipDto>> {
+    if (partyIds.isEmpty()) return emptyMap()
+    return connection.prepareStatement(
+        relationshipSelectSql("WHERE r.party_id = ANY(?) ORDER BY r.target_type, r.target_id")
+    ).use { stmt ->
+        stmt.setArray(1, connection.createArrayOf("text", partyIds.toTypedArray()))
+        stmt.executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(rs.toPartyRelationshipDto())
+            }
+        }
+    }.groupBy { it.partyId }
+}
 
 private fun Database.listRelationshipsForParty(connection: Connection, partyId: String): List<PartyRelationshipDto> =
     connection.prepareStatement(relationshipSelectSql("WHERE r.party_id = ? ORDER BY r.target_type, r.target_id")).use { stmt ->

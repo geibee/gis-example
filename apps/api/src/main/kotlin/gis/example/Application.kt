@@ -17,6 +17,7 @@ import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.delete
@@ -87,6 +88,8 @@ fun Application.module() {
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Options)
         allowHeader(HttpHeaders.ContentType)
+        // 一覧 API の総件数ヘッダをブラウザの JS から読めるようにする
+        exposeHeader(TOTAL_COUNT_HEADER)
     }
     install(StatusPages) {
         exception<ApiException> { call, cause ->
@@ -197,24 +200,26 @@ fun Application.module() {
 
         get("/api/lands") {
             val params = call.request.queryParameters
-            call.respond(
-                db.listLands(
-                    LandListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
-                        q = params["q"],
-                        status = params["status"],
-                        landUse = params["landUse"],
-                        partyType = params["partyType"],
-                        relationType = params["relationType"],
-                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                        sourceLayerId = optionalUuid(params["sourceLayerId"], "sourceLayerId"),
-                        bbox = params["bbox"],
-                        intersectsLayerId = optionalUuid(params["intersectsLayerId"], "intersectsLayerId"),
-                        intersectsFeatureId = params["intersectsFeatureId"],
-                        distanceMeters = params["distanceMeters"]?.toDoubleOrNull()
-                    )
+            val result = db.listLands(
+                LandListQuery(
+                    projectId = optionalUuid(params["projectId"], "projectId"),
+                    q = params["q"],
+                    status = params["status"],
+                    landUse = params["landUse"],
+                    partyType = params["partyType"],
+                    relationType = params["relationType"],
+                    linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                    sourceLayerId = optionalUuid(params["sourceLayerId"], "sourceLayerId"),
+                    bbox = params["bbox"],
+                    intersectsLayerId = optionalUuid(params["intersectsLayerId"], "intersectsLayerId"),
+                    intersectsFeatureId = params["intersectsFeatureId"],
+                    distanceMeters = params["distanceMeters"]?.toDoubleOrNull(),
+                    limit = parseListLimit(params["limit"]),
+                    offset = parseListOffset(params["offset"])
                 )
             )
+            call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
+            call.respond(result.items)
         }
 
         post("/api/lands") {
@@ -239,25 +244,27 @@ fun Application.module() {
 
         get("/api/buildings") {
             val params = call.request.queryParameters
-            call.respond(
-                db.listBuildings(
-                    BuildingListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
-                        q = params["q"],
-                        landId = params["landId"],
-                        status = params["status"],
-                        buildingUse = params["buildingUse"],
-                        partyType = params["partyType"],
-                        relationType = params["relationType"],
-                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                        sourceLayerId = optionalUuid(params["sourceLayerId"], "sourceLayerId"),
-                        bbox = params["bbox"],
-                        intersectsLayerId = optionalUuid(params["intersectsLayerId"], "intersectsLayerId"),
-                        intersectsFeatureId = params["intersectsFeatureId"],
-                        distanceMeters = params["distanceMeters"]?.toDoubleOrNull()
-                    )
+            val result = db.listBuildings(
+                BuildingListQuery(
+                    projectId = optionalUuid(params["projectId"], "projectId"),
+                    q = params["q"],
+                    landId = params["landId"],
+                    status = params["status"],
+                    buildingUse = params["buildingUse"],
+                    partyType = params["partyType"],
+                    relationType = params["relationType"],
+                    linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                    sourceLayerId = optionalUuid(params["sourceLayerId"], "sourceLayerId"),
+                    bbox = params["bbox"],
+                    intersectsLayerId = optionalUuid(params["intersectsLayerId"], "intersectsLayerId"),
+                    intersectsFeatureId = params["intersectsFeatureId"],
+                    distanceMeters = params["distanceMeters"]?.toDoubleOrNull(),
+                    limit = parseListLimit(params["limit"]),
+                    offset = parseListOffset(params["offset"])
                 )
             )
+            call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
+            call.respond(result.items)
         }
 
         post("/api/buildings") {
@@ -282,18 +289,20 @@ fun Application.module() {
 
         get("/api/parties") {
             val params = call.request.queryParameters
-            call.respond(
-                db.listParties(
-                    PartyListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
-                        q = params["q"],
-                        partyType = params["partyType"],
-                        relationType = params["relationType"],
-                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                        targetType = params["targetType"]
-                    )
+            val result = db.listParties(
+                PartyListQuery(
+                    projectId = optionalUuid(params["projectId"], "projectId"),
+                    q = params["q"],
+                    partyType = params["partyType"],
+                    relationType = params["relationType"],
+                    linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                    targetType = params["targetType"],
+                    limit = parseListLimit(params["limit"]),
+                    offset = parseListOffset(params["offset"])
                 )
             )
+            call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
+            call.respond(result.items)
         }
 
         post("/api/parties") {
@@ -318,19 +327,21 @@ fun Application.module() {
 
         get("/api/zones") {
             val params = call.request.queryParameters
-            call.respond(
-                db.listZones(
-                    ZoneListQuery(
-                        projectId = optionalUuid(params["projectId"], "projectId"),
-                        q = params["q"],
-                        status = params["status"],
-                        zoneType = params["zoneType"],
-                        linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                        zoneLayerId = optionalUuid(params["zoneLayerId"], "zoneLayerId"),
-                        sourceLayerId = params["sourceLayerId"]
-                    )
+            val result = db.listZones(
+                ZoneListQuery(
+                    projectId = optionalUuid(params["projectId"], "projectId"),
+                    q = params["q"],
+                    status = params["status"],
+                    zoneType = params["zoneType"],
+                    linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                    zoneLayerId = optionalUuid(params["zoneLayerId"], "zoneLayerId"),
+                    sourceLayerId = params["sourceLayerId"],
+                    limit = parseListLimit(params["limit"]),
+                    offset = parseListOffset(params["offset"])
                 )
             )
+            call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
+            call.respond(result.items)
         }
 
         post("/api/zones") {
@@ -491,6 +502,31 @@ fun Application.module() {
 }
 
 private const val DEFAULT_MAX_UPLOAD_BYTES = 200L * 1024 * 1024
+
+private const val TOTAL_COUNT_HEADER = "X-Total-Count"
+private const val DEFAULT_LIST_LIMIT = 200
+private const val MAX_LIST_LIMIT = 1000
+
+// 一覧 API の limit。未指定は既定値、範囲外・非数値は 400 (openapi.yaml の定義と揃える)
+private fun parseListLimit(value: String?): Int {
+    val limit = value?.let {
+        it.toIntOrNull() ?: throw ApiException(HttpStatusCode.BadRequest, "limit must be an integer")
+    } ?: DEFAULT_LIST_LIMIT
+    if (limit < 1 || limit > MAX_LIST_LIMIT) {
+        throw ApiException(HttpStatusCode.BadRequest, "limit must be between 1 and $MAX_LIST_LIMIT")
+    }
+    return limit
+}
+
+private fun parseListOffset(value: String?): Int {
+    val offset = value?.let {
+        it.toIntOrNull() ?: throw ApiException(HttpStatusCode.BadRequest, "offset must be an integer")
+    } ?: 0
+    if (offset < 0) {
+        throw ApiException(HttpStatusCode.BadRequest, "offset must be 0 or greater")
+    }
+    return offset
+}
 
 // アップロードをストリーミングで書き出し、上限超過時は部分ファイルを消して 413 を返す
 // (全量をメモリへ読まない)

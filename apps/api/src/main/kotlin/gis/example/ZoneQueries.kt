@@ -10,7 +10,7 @@ import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.SQLException
 
-fun Database.listZones(query: ZoneListQuery): List<ZoneDto> = dataSource.connection.use { connection ->
+fun Database.listZones(query: ZoneListQuery): PagedList<ZoneDto> = dataSource.connection.use { connection ->
     val filters = mutableListOf<String>()
     val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
     val textQuery = query.q?.trim()?.takeIf { it.isNotEmpty() }
@@ -49,31 +49,38 @@ fun Database.listZones(query: ZoneListQuery): List<ZoneDto> = dataSource.connect
     if (query.linkedOnly) {
         filters.add("z.zone_layer_id IS NOT NULL AND z.zone_feature_id IS NOT NULL")
     }
+    val baseSql = """
+        FROM app.zones AS z
+        ${whereClause(filters)}
+    """.trimIndent()
+    val totalCount = queryTotalCount(connection, baseSql, binders)
     val sql = """
         SELECT z.id, z.project_id::text, z.name, z.zone_type, z.status, z.memo,
                z.zone_layer_id::text, z.zone_feature_id,
                z.source_layer_id::text, z.source_feature_id
-        FROM app.zones AS z
-        ${whereClause(filters)}
-        ORDER BY z.id
+        $baseSql
+        ORDER BY z.id${pagingClause(query.limit, query.offset)}
     """.trimIndent()
-    connection.prepareStatement(sql).use { stmt ->
+    val zones = connection.prepareStatement(sql).use { stmt ->
         bindPatchValues(stmt, binders)
         stmt.executeQuery().use { rs ->
             buildList {
-                while (rs.next()) {
-                    val zone = rs.toZoneDto()
-                    val contained = listZoneBusinessLinks(zone)
-                    add(
-                        zone.copy(
-                            landCount = contained.lands.size,
-                            buildingCount = contained.buildings.size
-                        )
-                    )
-                }
+                while (rs.next()) add(rs.toZoneDto())
             }
         }
     }
+    // 区域ごとに listLands/listBuildings を呼ぶ N+1 を避け、区域レイヤ単位の一括クエリで数える
+    val counts = countZoneBusinessLinksBatch(connection, zones)
+    PagedList(
+        items = zones.map { zone ->
+            val zoneCounts = counts[zone.id] ?: ZoneLinkCounts(0, 0)
+            zone.copy(
+                landCount = zoneCounts.landCount,
+                buildingCount = zoneCounts.buildingCount
+            )
+        },
+        totalCount = totalCount
+    )
 }
 
 fun Database.getZone(id: String): ZoneDto? = dataSource.connection.use { connection ->
@@ -364,7 +371,7 @@ fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest): Zon
                         zoneLayerId = layerId,
                         sourceLayerId = null
                     )
-                )
+                ).items
             )
         } catch (exc: ApiException) {
             connection.rollback()
@@ -375,6 +382,107 @@ fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest): Zon
         } finally {
             connection.autoCommit = previousAutoCommit
         }
+    }
+}
+
+internal data class ZoneLinkCounts(val landCount: Int, val buildingCount: Int)
+
+// listZoneBusinessLinks (詳細取得用) と同じ結合条件で、一覧向けに区域内の土地・建物件数だけを数える。
+// (プロジェクト, 区域レイヤ) ごとに 1 クエリへまとめ、区域ごとの空間検索 N+1 を避ける
+private fun Database.countZoneBusinessLinksBatch(connection: Connection, zones: List<ZoneDto>): Map<String, ZoneLinkCounts> {
+    val result = mutableMapOf<String, ZoneLinkCounts>()
+    val sourceLayersByProject = mutableMapOf<String, List<LayerDto>>()
+    for ((key, group) in zones.groupBy { it.projectId to it.zoneLayerId }) {
+        val (projectId, zoneLayerId) = key
+        val targetLayer = getLayer(zoneLayerId)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "intersectsLayerId not found")
+        if (targetLayer.projectId != projectId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "intersectsLayerId belongs to another project")
+        }
+        val sourceLayers = sourceLayersByProject.getOrPut(projectId) {
+            listLayers(projectId).filter { !it.isResult && it.layerRole != "zone" }
+        }
+        if (sourceLayers.isEmpty()) {
+            group.forEach { result[it.id] = ZoneLinkCounts(0, 0) }
+            continue
+        }
+        val counts = queryZoneLinkCounts(connection, targetLayer, sourceLayers, projectId, group.map { it.zoneFeatureId })
+        for (zone in group) {
+            result[zone.id] = counts[zone.zoneFeatureId] ?: ZoneLinkCounts(0, 0)
+        }
+    }
+    return result
+}
+
+// 区域レイヤの各フィーチャに対し、ソースレイヤ経由で紐づく土地・建物の件数を 1 クエリで数える。
+// 結合条件 (source_layer_id / source_feature_id / && + ST_Intersects / SRID 変換) は
+// addBusinessListSpatialFilters の intersects 述語と同じ意味論を保つこと
+private fun Database.queryZoneLinkCounts(
+    connection: Connection,
+    targetLayer: LayerDto,
+    sourceLayers: List<LayerDto>,
+    projectId: String,
+    zoneFeatureIds: List<String>
+): Map<String, ZoneLinkCounts> {
+    val targetTableRef = "${quoteIdent(targetLayer.schemaName)}.${quoteIdent(targetLayer.tableName)}"
+    val targetFeatureIdRef = "target.${quoteIdent(targetLayer.featureIdColumn)}"
+    val rawTargetGeom = "target.${quoteIdent(targetLayer.geometryColumn)}"
+    val selects = mutableListOf<String>()
+    val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
+    for (sourceLayer in sourceLayers) {
+        val sourceTableRef = "${quoteIdent(sourceLayer.schemaName)}.${quoteIdent(sourceLayer.tableName)}"
+        val sourceFeatureIdRef = "src.${quoteIdent(sourceLayer.featureIdColumn)}"
+        val sourceGeomRef = "src.${quoteIdent(sourceLayer.geometryColumn)}"
+        val targetGeomRef = if (targetLayer.displaySrid == sourceLayer.displaySrid) {
+            rawTargetGeom
+        } else {
+            "ST_Transform($rawTargetGeom, ${sourceLayer.displaySrid})"
+        }
+        for ((entityType, entityTable) in listOf("land" to "app.lands", "building" to "app.buildings")) {
+            selects.add(
+                """
+                SELECT $targetFeatureIdRef::text AS zone_feature_id, '$entityType' AS entity_type, e.id AS entity_id
+                FROM $targetTableRef AS target
+                JOIN $sourceTableRef AS src
+                  ON $sourceGeomRef IS NOT NULL
+                 AND $rawTargetGeom IS NOT NULL
+                 AND $sourceGeomRef && $targetGeomRef
+                 AND ST_Intersects($sourceGeomRef, $targetGeomRef)
+                JOIN $entityTable AS e
+                  ON e.source_layer_id = ?::uuid
+                 AND e.source_feature_id = $sourceFeatureIdRef::text
+                WHERE e.project_id = ?::uuid
+                  AND $targetFeatureIdRef::text = ANY(?)
+                """.trimIndent()
+            )
+            binders.add { stmt, index -> stmt.setString(index, sourceLayer.id) }
+            binders.add { stmt, index -> stmt.setString(index, projectId) }
+            binders.add { stmt, index -> stmt.setArray(index, connection.createArrayOf("text", zoneFeatureIds.toTypedArray())) }
+        }
+    }
+    val sql = """
+        SELECT zone_feature_id, entity_type, count(DISTINCT entity_id)::int AS cnt
+        FROM (
+        ${selects.joinToString("\nUNION ALL\n")}
+        ) AS matches
+        GROUP BY zone_feature_id, entity_type
+    """.trimIndent()
+    val landCounts = mutableMapOf<String, Int>()
+    val buildingCounts = mutableMapOf<String, Int>()
+    connection.prepareStatement(sql).use { stmt ->
+        bindPatchValues(stmt, binders)
+        stmt.executeQuery().use { rs ->
+            while (rs.next()) {
+                val featureId = rs.getString("zone_feature_id")
+                when (rs.getString("entity_type")) {
+                    "land" -> landCounts[featureId] = rs.getInt("cnt")
+                    "building" -> buildingCounts[featureId] = rs.getInt("cnt")
+                }
+            }
+        }
+    }
+    return (landCounts.keys + buildingCounts.keys).associateWith { featureId ->
+        ZoneLinkCounts(landCounts[featureId] ?: 0, buildingCounts[featureId] ?: 0)
     }
 }
 
@@ -394,7 +502,7 @@ private fun Database.listZoneBusinessLinks(zone: ZoneDto): BusinessLinksDto {
             intersectsFeatureId = zone.zoneFeatureId,
             distanceMeters = null
         )
-    ).map { land -> BusinessEntityLinkDto(land.id, "${land.lotNumber} · ${land.address}") }
+    ).items.map { land -> BusinessEntityLinkDto(land.id, "${land.lotNumber} · ${land.address}") }
     val buildingLinks = listBuildings(
         BuildingListQuery(
             projectId = zone.projectId,
@@ -411,7 +519,7 @@ private fun Database.listZoneBusinessLinks(zone: ZoneDto): BusinessLinksDto {
             intersectsFeatureId = zone.zoneFeatureId,
             distanceMeters = null
         )
-    ).map { building -> BusinessEntityLinkDto(building.id, building.name) }
+    ).items.map { building -> BusinessEntityLinkDto(building.id, building.name) }
     return BusinessLinksDto(lands = landLinks, buildings = buildingLinks)
 }
 

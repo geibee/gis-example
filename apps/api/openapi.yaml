@@ -260,15 +260,20 @@ paths:
         - { name: intersectsLayerId, in: query, schema: { type: string } }
         - { name: intersectsFeatureId, in: query, schema: { type: string } }
         - { name: distanceMeters, in: query, schema: { type: number } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Land"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [business]
       operationId: createLand
@@ -353,15 +358,20 @@ paths:
         - { name: intersectsLayerId, in: query, schema: { type: string } }
         - { name: intersectsFeatureId, in: query, schema: { type: string } }
         - { name: distanceMeters, in: query, schema: { type: number } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Building"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [business]
       operationId: createBuilding
@@ -439,15 +449,20 @@ paths:
         - { name: relationType, in: query, schema: { type: string } }
         - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
         - { name: targetType, in: query, schema: { type: string, enum: [land, building] } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Party"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [business]
       operationId: createParty
@@ -578,15 +593,20 @@ paths:
         - { name: linkedOnly, in: query, schema: { type: boolean, default: false } }
         - { name: zoneLayerId, in: query, schema: { type: string } }
         - { name: sourceLayerId, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
       responses:
         "200":
           description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Zone"
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       tags: [zones]
       operationId: createZone
@@ -818,11 +838,26 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ListLimit:
+      name: limit
+      in: query
+      description: 1 ページの最大件数
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+    ListOffset:
+      name: offset
+      in: query
+      description: 読み飛ばす件数
+      schema: { type: integer, minimum: 0, default: 0 }
     PathFeatureId:
       name: featureId
       in: path
       required: true
       schema: { type: string }
+
+  headers:
+    XTotalCount:
+      description: フィルタ適用後の総件数 (limit/offset 適用前)
+      schema: { type: integer, format: int64 }
 
   responses:
     BadRequest:

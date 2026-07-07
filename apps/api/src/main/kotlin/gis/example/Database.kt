@@ -6,6 +6,13 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import kotlinx.serialization.json.Json
 
+// 一覧 API のページ結果。totalCount はフィルタ適用後の総件数 (X-Total-Count で返す)
+data class PagedList<T>(
+    val items: List<T>,
+    val totalCount: Long
+)
+
+// limit = null は内部呼び出し用の無制限 (HTTP ルートは必ず検証済みの値を渡す)
 data class LandListQuery(
     val projectId: String?,
     val q: String?,
@@ -18,7 +25,9 @@ data class LandListQuery(
     val bbox: String?,
     val intersectsLayerId: String?,
     val intersectsFeatureId: String?,
-    val distanceMeters: Double?
+    val distanceMeters: Double?,
+    val limit: Int? = null,
+    val offset: Int = 0
 )
 
 data class BuildingListQuery(
@@ -34,7 +43,9 @@ data class BuildingListQuery(
     val bbox: String?,
     val intersectsLayerId: String?,
     val intersectsFeatureId: String?,
-    val distanceMeters: Double?
+    val distanceMeters: Double?,
+    val limit: Int? = null,
+    val offset: Int = 0
 )
 
 data class PartyListQuery(
@@ -43,7 +54,9 @@ data class PartyListQuery(
     val partyType: String?,
     val relationType: String?,
     val linkedOnly: Boolean,
-    val targetType: String?
+    val targetType: String?,
+    val limit: Int? = null,
+    val offset: Int = 0
 )
 
 data class ZoneListQuery(
@@ -53,8 +66,16 @@ data class ZoneListQuery(
     val zoneType: String?,
     val linkedOnly: Boolean,
     val zoneLayerId: String?,
-    val sourceLayerId: String?
+    val sourceLayerId: String?,
+    val limit: Int? = null,
+    val offset: Int = 0
 )
+
+// limit/offset は検証済みの Int のみを受け取り SQL へ直接埋め込む (バインド順を保つため)
+internal fun pagingClause(limit: Int?, offset: Int): String = buildString {
+    if (limit != null) append(" LIMIT ").append(limit)
+    if (offset > 0) append(" OFFSET ").append(offset)
+}
 
 internal const val SOURCE_ZONE_BUFFER_METERS = 1000.0
 

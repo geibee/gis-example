@@ -926,10 +926,17 @@ export interface components {
     };
     parameters: {
         PathId: string;
+        /** @description 1 ページの最大件数 */
+        ListLimit: number;
+        /** @description 読み飛ばす件数 */
+        ListOffset: number;
         PathFeatureId: string;
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /** @description フィルタ適用後の総件数 (limit/offset 適用前) */
+        XTotalCount: number;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -1238,6 +1245,10 @@ export interface operations {
                 intersectsLayerId?: string;
                 intersectsFeatureId?: string;
                 distanceMeters?: number;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1248,12 +1259,14 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Land"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
         };
     };
     createLand: {
@@ -1369,6 +1382,10 @@ export interface operations {
                 intersectsLayerId?: string;
                 intersectsFeatureId?: string;
                 distanceMeters?: number;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1379,12 +1396,14 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Building"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
         };
     };
     createBuilding: {
@@ -1493,6 +1512,10 @@ export interface operations {
                 relationType?: string;
                 linkedOnly?: boolean;
                 targetType?: "land" | "building";
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1503,12 +1526,14 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Party"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
         };
     };
     createParty: {
@@ -1692,6 +1717,10 @@ export interface operations {
                 linkedOnly?: boolean;
                 zoneLayerId?: string;
                 sourceLayerId?: string;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
             };
             header?: never;
             path?: never;
@@ -1702,12 +1731,14 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Zone"][];
                 };
             };
+            400: components["responses"]["BadRequest"];
         };
     };
     createZone: {
