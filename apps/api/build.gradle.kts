@@ -48,6 +48,9 @@ dependencies {
     testImplementation(kotlin("test"))
     // 認証・認可の統合テストで HTTP 層 (PEP の配線) まで検証する
     testImplementation("io.ktor:ktor-server-test-host-jvm:2.3.12")
+    // 契約突合テスト (OpenApiContractSyncTest / ContractResponseIntegrationTest) が
+    // openapi.yaml をパースするための最小依存 (テスト限定。本体コードでは使わない)
+    testImplementation("org.yaml:snakeyaml:2.3")
 }
 
 // test = 単体テストのみ (DB 不要、軽量ゲート scripts/verify.sh が実行)
