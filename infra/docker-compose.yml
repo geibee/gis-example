@@ -88,14 +88,18 @@ services:
       DATABASE_USER: gis
       DATABASE_PASSWORD: gis
       UPLOAD_DIR: /data/uploads
+      # URL 系はすべて localhost = dev 専用の値。本番 (CloudFront/ALB 配下) では
+      # 公開 HTTPS URL を注入する (一覧と信頼境界は docs/reverse-proxy.md)
       API_PUBLIC_URL: http://localhost:8080
-      MARTIN_PUBLIC_URL: http://localhost:3000
       WEB_ORIGIN: http://localhost:5173
       # iss クレームはブラウザから見た Keycloak の URL、JWKS の取得はコンテナ間ネットワーク経由
       OIDC_ISSUER: http://localhost:8081/realms/gis
       OIDC_AUDIENCE: gis-api
       OIDC_JWKS_URL: http://keycloak:8080/realms/gis/protocol/openid-connect/certs
       AUTH_ADMIN_EMAILS: admin@gis.example
+      # dev は API を直接公開するため X-Forwarded-* を信頼しない (0 = プラグイン無効)。
+      # 本番は信頼できるプロキシ段数 (例: CloudFront+ALB=2) を設定する
+      TRUSTED_PROXY_COUNT: "0"
     ports:
       - "8080:8080"
     volumes:

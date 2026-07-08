@@ -26,6 +26,8 @@ dependencies {
     implementation("io.ktor:ktor-server-auth-jwt-jvm:2.3.12")
     implementation("io.ktor:ktor-server-call-logging-jvm:2.3.12")
     implementation("io.ktor:ktor-server-cors-jvm:2.3.12")
+    // CloudFront/ALB 背後で X-Forwarded-* を解釈する (ForwardedHeaders.kt、TRUSTED_PROXY_COUNT で有効化)
+    implementation("io.ktor:ktor-server-forwarded-header-jvm:2.3.12")
     implementation("io.ktor:ktor-server-status-pages-jvm:2.3.12")
     implementation("io.ktor:ktor-server-content-negotiation-jvm:2.3.12")
     implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:2.3.12")
