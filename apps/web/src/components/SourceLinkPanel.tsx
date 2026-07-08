@@ -1,5 +1,5 @@
 import { Map as MapIcon } from "lucide-react";
-import type { Layer } from "../types";
+import type { Layer } from "../contracts";
 
 export function SourceLinkPanel({
   layers,

@@ -1,4 +1,4 @@
-import type { BusinessLinks } from "./types";
+import type { BusinessLinks } from "./contracts";
 
 export const baseStyle = {
   version: 8,
