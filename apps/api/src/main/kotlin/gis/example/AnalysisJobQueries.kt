@@ -115,41 +115,31 @@ fun Database.executeClaimedAnalysisJob(job: ClaimedAnalysisJob) {
     try {
         val request = databaseJson.decodeFromString<AnalysisJobRequest>(job.criteriaJson)
         val operation = request.operation?.takeIf { it.isNotBlank() }?.lowercase() ?: "and_filter"
-        val outcome = dataSource.connection.use { connection ->
-            val previousAutoCommit = connection.autoCommit
-            connection.autoCommit = false
-            try {
-                setLocalStatementTimeout(connection, heavyStatementTimeoutMillis)
-                val outcome = when (operation) {
-                    "condition_search" -> executeConditionSearchAnalysisJob(connection, job, request)
-                    "and_filter" -> executeAndFilterAnalysisJob(connection, job, request)
-                    else -> throw IllegalArgumentException("Unsupported analysis operation: ${request.operation}")
-                }
-                connection.prepareStatement(
-                    """
-                    UPDATE app.analysis_jobs
-                    SET status = 'succeeded',
-                        result_layer_id = ?::uuid,
-                        result_set_id = ?::uuid,
-                        result_count = ?,
-                        finished_at = now()
-                    WHERE id = ?::uuid
-                    """.trimIndent()
-                ).use { stmt ->
-                    setNullableUuidString(stmt, 1, outcome.resultLayerId)
-                    setNullableUuidString(stmt, 2, outcome.resultSetId)
-                    stmt.setLong(3, outcome.resultCount)
-                    stmt.setString(4, job.id)
-                    stmt.executeUpdate()
-                }
-                connection.commit()
-                outcome
-            } catch (exc: Exception) {
-                connection.rollback()
-                throw exc
-            } finally {
-                connection.autoCommit = previousAutoCommit
+        val outcome = withTransaction { connection ->
+            setLocalStatementTimeout(connection, heavyStatementTimeoutMillis)
+            val outcome = when (operation) {
+                "condition_search" -> executeConditionSearchAnalysisJob(connection, job, request)
+                "and_filter" -> executeAndFilterAnalysisJob(connection, job, request)
+                else -> throw IllegalArgumentException("Unsupported analysis operation: ${request.operation}")
             }
+            connection.prepareStatement(
+                """
+                UPDATE app.analysis_jobs
+                SET status = 'succeeded',
+                    result_layer_id = ?::uuid,
+                    result_set_id = ?::uuid,
+                    result_count = ?,
+                    finished_at = now()
+                WHERE id = ?::uuid
+                """.trimIndent()
+            ).use { stmt ->
+                setNullableUuidString(stmt, 1, outcome.resultLayerId)
+                setNullableUuidString(stmt, 2, outcome.resultSetId)
+                stmt.setLong(3, outcome.resultCount)
+                stmt.setString(4, job.id)
+                stmt.executeUpdate()
+            }
+            outcome
         }
         databaseLogger.info(
             "Analysis job {} succeeded (layer={}, resultSet={}, count={})",

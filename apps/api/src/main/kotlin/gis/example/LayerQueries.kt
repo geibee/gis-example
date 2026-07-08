@@ -145,32 +145,21 @@ fun Database.listAttributeValues(layerId: String, field: String, limit: Int): Li
 }
 
 fun Database.deleteLayer(id: String) {
-    dataSource.connection.use { connection ->
-        val previousAutoCommit = connection.autoCommit
-        connection.autoCommit = false
-        try {
+    try {
+        withTransaction { connection ->
             val layer = loadDeletedLayerForUpdate(connection, id)
                 ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
             deleteLayerInTransaction(connection, layer)
             layer.resultSetId?.let { deleteResultSetIfEmpty(connection, it) }
-            connection.commit()
-        } catch (exc: ApiException) {
-            connection.rollback()
-            throw exc
-        } catch (exc: SQLException) {
-            connection.rollback()
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Layer delete failed: ${exc.message ?: "invalid layer delete"}")
-        } finally {
-            connection.autoCommit = previousAutoCommit
         }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Layer delete failed: ${exc.message ?: "invalid layer delete"}")
     }
 }
 
 fun Database.deleteResultSet(id: String) {
-    dataSource.connection.use { connection ->
-        val previousAutoCommit = connection.autoCommit
-        connection.autoCommit = false
-        try {
+    try {
+        withTransaction { connection ->
             val resultSetExists = connection.prepareStatement(
                 "SELECT id::text FROM app.result_sets WHERE id = ?::uuid FOR UPDATE"
             ).use { stmt ->
@@ -187,16 +176,9 @@ fun Database.deleteResultSet(id: String) {
                 deleteLayerInTransaction(connection, layer)
             }
             deleteResultSetRecord(connection, id)
-            connection.commit()
-        } catch (exc: ApiException) {
-            connection.rollback()
-            throw exc
-        } catch (exc: SQLException) {
-            connection.rollback()
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Result set delete failed: ${exc.message ?: "invalid result set delete"}")
-        } finally {
-            connection.autoCommit = previousAutoCommit
         }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Result set delete failed: ${exc.message ?: "invalid result set delete"}")
     }
 }
 

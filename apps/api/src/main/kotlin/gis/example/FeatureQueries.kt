@@ -241,10 +241,8 @@ fun Database.updateFeature(layerId: String, featureId: String, request: FeatureU
             ST_AsGeoJSON(ST_Transform(t.${quoteIdent(layer.geometryColumn)}, 4326), 6)::text AS geometry
     """.trimIndent()
 
-    return dataSource.connection.use { connection ->
-        val previousAutoCommit = connection.autoCommit
-        connection.autoCommit = false
-        try {
+    return try {
+        withTransaction { connection ->
             val updated = connection.prepareStatement(sql).use { stmt ->
                 var index = 1
                 stmt.setString(index++, databaseJson.encodeToString(filteredProperties))
@@ -268,20 +266,13 @@ fun Database.updateFeature(layerId: String, featureId: String, request: FeatureU
             if (geometry != null) {
                 refreshLayerMetadata(connection, layer)
             }
-            connection.commit()
             updated
-        } catch (exc: ApiException) {
-            connection.rollback()
-            throw exc
-        } catch (exc: SQLException) {
-            connection.rollback()
-            throw ApiException(
-                io.ktor.http.HttpStatusCode.BadRequest,
-                "Feature update failed: ${exc.message ?: "invalid feature update"}"
-            )
-        } finally {
-            connection.autoCommit = previousAutoCommit
         }
+    } catch (exc: SQLException) {
+        throw ApiException(
+            io.ktor.http.HttpStatusCode.BadRequest,
+            "Feature update failed: ${exc.message ?: "invalid feature update"}"
+        )
     }
 }
 
