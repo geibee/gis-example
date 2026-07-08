@@ -50,7 +50,7 @@ const indexRoute = createRoute({
   }
 });
 
-const screenRoutes = screenDefinitions.flatMap((definition) => {
+const screenRoutes = screenDefinitions.map((definition) => {
   const component = lazyRouteComponent(definition.loadComponent);
   const staticData = { screen: definition.meta };
   const listRoute = createRoute({
@@ -59,14 +59,16 @@ const screenRoutes = screenDefinitions.flatMap((definition) => {
     staticData,
     component
   });
-  if (!definition.detail) return [listRoute];
+  if (!definition.detail) return listRoute;
+  // 詳細 ($id) は一覧ルートの子とする。画面コンポーネントは一覧ルート側にだけ
+  // 付き、一覧 ↔ 詳細の遷移で再マウントされない (検索条件など画面ローカル state を
+  // 維持するため)。$id は従来どおり activeScreenObjectId が matches から読む。
   const detailRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: `${definition.basePath}/$id` as const,
-    staticData,
-    component
+    getParentRoute: () => listRoute,
+    path: "$id",
+    staticData
   });
-  return [listRoute, detailRoute];
+  return listRoute.addChildren([detailRoute]);
 });
 
 export const router = createRouter({
