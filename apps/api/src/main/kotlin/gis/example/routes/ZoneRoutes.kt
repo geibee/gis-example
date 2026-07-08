@@ -4,16 +4,22 @@ package gis.example.routes
 import gis.example.Action
 import gis.example.ApiException
 import gis.example.ProjectResourceType
+import gis.example.RouteAuthz.CheckedInHandler
+import gis.example.RouteAuthz.ProjectFromBodyField
+import gis.example.RouteAuthz.ProjectFromQuery
+import gis.example.RouteAuthz.ResourceFromPath
 import gis.example.ZoneLayerFromImportRequest
 import gis.example.ZoneListQuery
+import gis.example.authorizedJsonBody
+import gis.example.authorizedProjectId
+import gis.example.authorizedResourceId
+import gis.example.authorizedRoutes
 import gis.example.createZone
 import gis.example.createZoneLayerFromImport
 import gis.example.deleteZone
 import gis.example.getZone
 import gis.example.getZonePartySummary
 import gis.example.listZones
-import gis.example.readRequiredUuid
-import gis.example.requireProjectPermission
 import gis.example.requireResourcePermission
 import gis.example.updateZone
 import io.ktor.http.HttpStatusCode
@@ -22,75 +28,63 @@ import io.ktor.server.request.receive
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
-import io.ktor.server.routing.delete
-import io.ktor.server.routing.get
-import io.ktor.server.routing.patch
-import io.ktor.server.routing.post
 import kotlinx.serialization.json.JsonObject
 
 fun Route.zoneRoutes(deps: AppDependencies) {
     val db = deps.db
 
-    get("/api/zones") {
-        val params = call.request.queryParameters
-        val projectId = requireUuid(
-            params["projectId"] ?: throw ApiException(HttpStatusCode.BadRequest, "projectId is required"),
-            "projectId"
-        )
-        call.requireProjectPermission(Action.BUSINESS_READ, projectId)
-        val result = db.listZones(
-            ZoneListQuery(
-                projectId = projectId,
-                q = params["q"],
-                status = params["status"],
-                zoneType = params["zoneType"],
-                linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
-                zoneLayerId = optionalUuid(params["zoneLayerId"], "zoneLayerId"),
-                sourceLayerId = params["sourceLayerId"],
-                limit = parseListLimit(params["limit"]),
-                offset = parseListOffset(params["offset"])
+    authorizedRoutes(db) {
+        get("/api/zones", ProjectFromQuery(Action.BUSINESS_READ)) {
+            val params = call.request.queryParameters
+            val result = db.listZones(
+                ZoneListQuery(
+                    projectId = call.authorizedProjectId(),
+                    q = params["q"],
+                    status = params["status"],
+                    zoneType = params["zoneType"],
+                    linkedOnly = params["linkedOnly"]?.equals("true", ignoreCase = true) == true,
+                    zoneLayerId = optionalUuid(params["zoneLayerId"], "zoneLayerId"),
+                    sourceLayerId = params["sourceLayerId"],
+                    limit = parseListLimit(params["limit"]),
+                    offset = parseListOffset(params["offset"])
+                )
             )
-        )
-        call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
-        call.respond(result.items)
-    }
+            call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
+            call.respond(result.items)
+        }
 
-    post("/api/zones") {
-        val body = call.receive<JsonObject>()
-        call.requireProjectPermission(Action.BUSINESS_WRITE, readRequiredUuid(body, "projectId"))
-        call.respond(HttpStatusCode.Created, db.createZone(body))
-    }
+        post("/api/zones", ProjectFromBodyField(Action.BUSINESS_WRITE)) {
+            call.respond(HttpStatusCode.Created, db.createZone(call.authorizedJsonBody()))
+        }
 
-    get("/api/zones/{id}") {
-        val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
-        call.requireResourcePermission(db, Action.BUSINESS_READ, ProjectResourceType.ZONE, id)
-        call.respond(db.getZone(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
-    }
+        get("/api/zones/{id}", ResourceFromPath(Action.BUSINESS_READ, ProjectResourceType.ZONE)) {
+            val id = call.authorizedResourceId()
+            call.respond(db.getZone(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
+        }
 
-    get("/api/zones/{id}/party-summary") {
-        val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
-        call.requireResourcePermission(db, Action.BUSINESS_READ, ProjectResourceType.ZONE, id)
-        call.respond(db.getZonePartySummary(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
-    }
+        get("/api/zones/{id}/party-summary", ResourceFromPath(Action.BUSINESS_READ, ProjectResourceType.ZONE)) {
+            val id = call.authorizedResourceId()
+            call.respond(db.getZonePartySummary(id) ?: throw ApiException(HttpStatusCode.NotFound, "Zone not found"))
+        }
 
-    patch("/api/zones/{id}") {
-        val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
-        call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.ZONE, id)
-        call.respond(db.updateZone(id, call.receive<JsonObject>()))
-    }
+        patch("/api/zones/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.ZONE)) {
+            call.respond(db.updateZone(call.authorizedResourceId(), call.receive<JsonObject>()))
+        }
 
-    delete("/api/zones/{id}") {
-        val id = call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Zone id is required")
-        call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.ZONE, id)
-        db.deleteZone(id)
-        call.respond(HttpStatusCode.NoContent)
-    }
+        delete("/api/zones/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.ZONE)) {
+            db.deleteZone(call.authorizedResourceId())
+            call.respond(HttpStatusCode.NoContent)
+        }
 
-    post("/api/zone-layers/from-import") {
-        val request = call.receive<ZoneLayerFromImportRequest>()
-        val layerId = request.layerId.trim().takeIf { it.isNotEmpty() }
-            ?: throw ApiException(HttpStatusCode.BadRequest, "layerId is required")
-        call.requireResourcePermission(db, Action.LAYER_WRITE, ProjectResourceType.LAYER, layerId)
-        call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(request))
+        post(
+            "/api/zone-layers/from-import",
+            CheckedInHandler(Action.LAYER_WRITE, "対象 layerId がボディにあり trim・空文字検証と認可判定が分離できない")
+        ) {
+            val request = call.receive<ZoneLayerFromImportRequest>()
+            val layerId = request.layerId.trim().takeIf { it.isNotEmpty() }
+                ?: throw ApiException(HttpStatusCode.BadRequest, "layerId is required")
+            call.requireResourcePermission(db, Action.LAYER_WRITE, ProjectResourceType.LAYER, layerId)
+            call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(request))
+        }
     }
 }
