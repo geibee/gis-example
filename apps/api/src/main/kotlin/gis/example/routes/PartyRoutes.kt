@@ -8,6 +8,7 @@ import gis.example.ProjectResourceType
 import gis.example.RouteAuthz.ProjectFromBodyField
 import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
+import gis.example.auditTrail
 import gis.example.authorizedJsonBody
 import gis.example.authorizedProjectId
 import gis.example.authorizedResourceId
@@ -51,7 +52,7 @@ fun Route.partyRoutes(deps: AppDependencies) {
         }
 
         post("/api/parties", ProjectFromBodyField(Action.BUSINESS_WRITE)) {
-            call.respond(HttpStatusCode.Created, db.createParty(call.authorizedJsonBody()))
+            call.respond(HttpStatusCode.Created, db.createParty(call.authorizedJsonBody(), call.auditTrail()))
         }
 
         get("/api/parties/{id}", ResourceFromPath(Action.BUSINESS_READ, ProjectResourceType.PARTY)) {
@@ -60,30 +61,30 @@ fun Route.partyRoutes(deps: AppDependencies) {
         }
 
         patch("/api/parties/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.PARTY)) {
-            call.respond(db.updateParty(call.authorizedResourceId(), call.receive<JsonObject>()))
+            call.respond(db.updateParty(call.authorizedResourceId(), call.receive<JsonObject>(), call.auditTrail()))
         }
 
         delete("/api/parties/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.PARTY)) {
-            db.deleteParty(call.authorizedResourceId())
+            db.deleteParty(call.authorizedResourceId(), call.auditTrail())
             call.respond(HttpStatusCode.NoContent)
         }
 
         post("/api/party-relationships", ProjectFromBodyField(Action.BUSINESS_WRITE)) {
-            call.respond(HttpStatusCode.Created, db.createPartyRelationship(call.authorizedJsonBody()))
+            call.respond(HttpStatusCode.Created, db.createPartyRelationship(call.authorizedJsonBody(), call.auditTrail()))
         }
 
         patch(
             "/api/party-relationships/{id}",
             ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.PARTY_RELATIONSHIP)
         ) {
-            call.respond(db.updatePartyRelationship(call.authorizedResourceId(), call.receive<JsonObject>()))
+            call.respond(db.updatePartyRelationship(call.authorizedResourceId(), call.receive<JsonObject>(), call.auditTrail()))
         }
 
         delete(
             "/api/party-relationships/{id}",
             ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.PARTY_RELATIONSHIP)
         ) {
-            db.deletePartyRelationship(call.authorizedResourceId())
+            db.deletePartyRelationship(call.authorizedResourceId(), call.auditTrail())
             call.respond(HttpStatusCode.NoContent)
         }
     }

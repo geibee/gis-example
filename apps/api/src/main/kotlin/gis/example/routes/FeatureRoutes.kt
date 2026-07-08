@@ -10,6 +10,7 @@ import gis.example.ProjectResourceType
 import gis.example.RouteAuthz.CheckedInHandler
 import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
+import gis.example.auditTrail
 import gis.example.authorizedProjectId
 import gis.example.authorizedResourceId
 import gis.example.authorizedRoutes
@@ -48,7 +49,7 @@ fun Route.featureRoutes(deps: AppDependencies) {
             val featureId = call.parameters["featureId"]
                 ?: throw ApiException(HttpStatusCode.BadRequest, "Feature id is required")
             val request = call.receive<FeatureUpdateRequest>()
-            call.respond(db.updateFeature(layerId, featureId, request))
+            call.respond(db.updateFeature(layerId, featureId, request, call.auditTrail()))
         }
 
         get("/api/features/search", ProjectFromQuery(Action.FEATURE_READ)) {

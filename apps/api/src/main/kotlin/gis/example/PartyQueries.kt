@@ -105,7 +105,7 @@ fun Database.getParty(id: String): PartyDto? = dataSource.connection.use { conne
     party.copy(relationships = listRelationshipsForParty(connection, id))
 }
 
-fun Database.createParty(request: JsonObject): PartyDto = try {
+fun Database.createParty(request: JsonObject, audit: AuditTrail): PartyDto = try {
     dataSource.connection.use { connection ->
         val id = readRequiredText(request, "id")
         val projectId = readRequiredUuid(request, "projectId")
@@ -132,7 +132,9 @@ fun Database.createParty(request: JsonObject): PartyDto = try {
             stmt.setArray(8, connection.createArrayOf("text", tags.toTypedArray()))
             stmt.executeQuery().use { rs ->
                 rs.next()
-                getParty(rs.getString("id")) ?: error("Created party disappeared")
+                val created = getParty(rs.getString("id")) ?: error("Created party disappeared")
+                audit.recordCreate("party", created.id, created.auditSnapshot())
+                created
             }
         }
     }
@@ -140,8 +142,10 @@ fun Database.createParty(request: JsonObject): PartyDto = try {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Party create failed: ${exc.message ?: "invalid party create"}")
 }
 
-fun Database.updateParty(id: String, request: JsonObject): PartyDto = try {
+fun Database.updateParty(id: String, request: JsonObject, audit: AuditTrail): PartyDto = try {
     dataSource.connection.use { connection ->
+        // 監査 diff 用の変更前スナップショット (存在しない ID は従来どおり 404)
+        val before = getParty(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Party not found")
         val setters = mutableListOf<String>()
         val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
         addTextPatch(request, "name", "name", setters, binders, required = true)
@@ -151,7 +155,8 @@ fun Database.updateParty(id: String, request: JsonObject): PartyDto = try {
         addTextPatch(request, "memo", "memo", setters, binders)
         addTextArrayPatch(request, "tags", "tags", setters, binders)
         if (setters.isEmpty()) {
-            return@use getParty(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Party not found")
+            audit.recordUpdate("party", id, before.auditSnapshot(), before.auditSnapshot())
+            return@use before
         }
 
         val updated = connection.prepareStatement(
@@ -171,13 +176,17 @@ fun Database.updateParty(id: String, request: JsonObject): PartyDto = try {
                 rs.toPartyDto()
             }
         }
-        updated.copy(relationships = listRelationshipsForParty(connection, id))
+        val result = updated.copy(relationships = listRelationshipsForParty(connection, id))
+        audit.recordUpdate("party", id, before.auditSnapshot(), result.auditSnapshot())
+        result
     }
 } catch (exc: SQLException) {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Party update failed: ${exc.message ?: "invalid party update"}")
 }
 
-fun Database.deleteParty(id: String) {
+fun Database.deleteParty(id: String, audit: AuditTrail) {
+    // 監査 diff 用の削除前スナップショット (存在しない ID は従来どおり 404)
+    val before = getParty(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Party not found")
     dataSource.connection.use { connection ->
         val deleted = connection.prepareStatement("DELETE FROM app.parties WHERE id = ?").use { stmt ->
             stmt.setString(1, id)
@@ -187,9 +196,10 @@ fun Database.deleteParty(id: String) {
             throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Party not found")
         }
     }
+    audit.recordDelete("party", id, before.auditSnapshot())
 }
 
-fun Database.createPartyRelationship(request: JsonObject): PartyRelationshipDto = try {
+fun Database.createPartyRelationship(request: JsonObject, audit: AuditTrail): PartyRelationshipDto = try {
     dataSource.connection.use { connection ->
         val projectId = readRequiredUuid(request, "projectId")
         val partyId = readRequiredText(request, "partyId")
@@ -213,7 +223,10 @@ fun Database.createPartyRelationship(request: JsonObject): PartyRelationshipDto 
             setNullableString(stmt, 6, note)
             stmt.executeQuery().use { rs ->
                 rs.next()
-                getPartyRelationship(connection, rs.getString("id")) ?: error("Created relationship disappeared")
+                val created = getPartyRelationship(connection, rs.getString("id"))
+                    ?: error("Created relationship disappeared")
+                audit.recordCreate("partyRelationship", created.id, created.auditSnapshot())
+                created
             }
         }
     }
@@ -221,7 +234,7 @@ fun Database.createPartyRelationship(request: JsonObject): PartyRelationshipDto 
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Relationship create failed: ${exc.message ?: "invalid relationship create"}")
 }
 
-fun Database.updatePartyRelationship(id: String, request: JsonObject): PartyRelationshipDto = try {
+fun Database.updatePartyRelationship(id: String, request: JsonObject, audit: AuditTrail): PartyRelationshipDto = try {
     dataSource.connection.use { connection ->
         val current = getPartyRelationship(connection, id)
             ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Relationship not found")
@@ -247,7 +260,10 @@ fun Database.updatePartyRelationship(id: String, request: JsonObject): PartyRela
             stmt.setString(6, id)
             stmt.executeQuery().use { rs ->
                 if (!rs.next()) throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Relationship not found")
-                getPartyRelationship(connection, rs.getString("id")) ?: error("Updated relationship disappeared")
+                val updated = getPartyRelationship(connection, rs.getString("id"))
+                    ?: error("Updated relationship disappeared")
+                audit.recordUpdate("partyRelationship", id, current.auditSnapshot(), updated.auditSnapshot())
+                updated
             }
         }
     }
@@ -255,8 +271,11 @@ fun Database.updatePartyRelationship(id: String, request: JsonObject): PartyRela
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Relationship update failed: ${exc.message ?: "invalid relationship update"}")
 }
 
-fun Database.deletePartyRelationship(id: String) {
+fun Database.deletePartyRelationship(id: String, audit: AuditTrail) {
     dataSource.connection.use { connection ->
+        // 監査 diff 用の削除前スナップショット (存在しない ID は従来どおり 404)
+        val before = getPartyRelationship(connection, id)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Relationship not found")
         val deleted = connection.prepareStatement("DELETE FROM app.party_relationships WHERE id = ?::uuid").use { stmt ->
             stmt.setString(1, id)
             stmt.executeUpdate()
@@ -264,6 +283,7 @@ fun Database.deletePartyRelationship(id: String) {
         if (deleted == 0) {
             throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Relationship not found")
         }
+        audit.recordDelete("partyRelationship", id, before.auditSnapshot())
     }
 }
 

@@ -10,6 +10,7 @@ import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
 import gis.example.ZoneLayerFromImportRequest
 import gis.example.ZoneListQuery
+import gis.example.auditTrail
 import gis.example.authorizedJsonBody
 import gis.example.authorizedProjectId
 import gis.example.authorizedResourceId
@@ -54,7 +55,7 @@ fun Route.zoneRoutes(deps: AppDependencies) {
         }
 
         post("/api/zones", ProjectFromBodyField(Action.BUSINESS_WRITE)) {
-            call.respond(HttpStatusCode.Created, db.createZone(call.authorizedJsonBody()))
+            call.respond(HttpStatusCode.Created, db.createZone(call.authorizedJsonBody(), call.auditTrail()))
         }
 
         get("/api/zones/{id}", ResourceFromPath(Action.BUSINESS_READ, ProjectResourceType.ZONE)) {
@@ -68,11 +69,11 @@ fun Route.zoneRoutes(deps: AppDependencies) {
         }
 
         patch("/api/zones/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.ZONE)) {
-            call.respond(db.updateZone(call.authorizedResourceId(), call.receive<JsonObject>()))
+            call.respond(db.updateZone(call.authorizedResourceId(), call.receive<JsonObject>(), call.auditTrail()))
         }
 
         delete("/api/zones/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.ZONE)) {
-            db.deleteZone(call.authorizedResourceId())
+            db.deleteZone(call.authorizedResourceId(), call.auditTrail())
             call.respond(HttpStatusCode.NoContent)
         }
 
@@ -84,7 +85,7 @@ fun Route.zoneRoutes(deps: AppDependencies) {
             val layerId = request.layerId.trim().takeIf { it.isNotEmpty() }
                 ?: throw ApiException(HttpStatusCode.BadRequest, "layerId is required")
             call.requireResourcePermission(db, Action.LAYER_WRITE, ProjectResourceType.LAYER, layerId)
-            call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(request))
+            call.respond(HttpStatusCode.Created, db.createZoneLayerFromImport(request, call.auditTrail()))
         }
     }
 }

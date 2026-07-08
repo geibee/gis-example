@@ -212,7 +212,7 @@ fun Database.getZonePartySummary(id: String): ZonePartySummaryDto? {
     }
 }
 
-fun Database.createZone(request: JsonObject): ZoneDto = try {
+fun Database.createZone(request: JsonObject, audit: AuditTrail): ZoneDto = try {
     val id = readRequiredText(request, "id")
     val projectId = readRequiredUuid(request, "projectId")
     val name = readRequiredText(request, "name")
@@ -245,7 +245,9 @@ fun Database.createZone(request: JsonObject): ZoneDto = try {
             stmt.setString(10, zoneFeatureId)
             stmt.executeQuery().use { rs ->
                 rs.next()
-                getZone(rs.getString("id")) ?: error("Created zone disappeared")
+                val created = getZone(rs.getString("id")) ?: error("Created zone disappeared")
+                audit.recordCreate("zone", created.id, created.auditSnapshot())
+                created
             }
         }
     }
@@ -253,7 +255,7 @@ fun Database.createZone(request: JsonObject): ZoneDto = try {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone create failed: ${exc.message ?: "invalid zone create"}")
 }
 
-fun Database.updateZone(id: String, request: JsonObject): ZoneDto = try {
+fun Database.updateZone(id: String, request: JsonObject, audit: AuditTrail): ZoneDto = try {
     dataSource.connection.use { connection ->
         val existing = getZone(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Zone not found")
         val setters = mutableListOf<String>()
@@ -263,6 +265,7 @@ fun Database.updateZone(id: String, request: JsonObject): ZoneDto = try {
         addTextPatch(request, "status", "status", setters, binders, required = true)
         addTextPatch(request, "memo", "memo", setters, binders)
         if (setters.isEmpty()) {
+            audit.recordUpdate("zone", id, existing.auditSnapshot(), existing.auditSnapshot())
             return@use existing
         }
 
@@ -283,13 +286,17 @@ fun Database.updateZone(id: String, request: JsonObject): ZoneDto = try {
                 rs.getString("id")
             }
         }
-        getZone(updatedId) ?: error("Updated zone disappeared")
+        val result = getZone(updatedId) ?: error("Updated zone disappeared")
+        audit.recordUpdate("zone", id, existing.auditSnapshot(), result.auditSnapshot())
+        result
     }
 } catch (exc: SQLException) {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone update failed: ${exc.message ?: "invalid zone update"}")
 }
 
-fun Database.deleteZone(id: String) {
+fun Database.deleteZone(id: String, audit: AuditTrail) {
+    // 監査 diff 用の削除前スナップショット (存在しない ID は従来どおり 404)
+    val before = getZone(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Zone not found")
     dataSource.connection.use { connection ->
         val deleted = connection.prepareStatement("DELETE FROM app.zones WHERE id = ?").use { stmt ->
             stmt.setString(1, id)
@@ -299,9 +306,10 @@ fun Database.deleteZone(id: String) {
             throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Zone not found")
         }
     }
+    audit.recordDelete("zone", id, before.auditSnapshot())
 }
 
-fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest): ZoneLayerOperationDto {
+fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest, audit: AuditTrail): ZoneLayerOperationDto {
     val requestedLayerId = request.layerId.trim().takeIf { it.isNotEmpty() }
         ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "layerId is required")
     val sourceLayer = getLayer(requestedLayerId)
@@ -355,6 +363,9 @@ fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest): Zon
             )
         }
         val createdLayer = getLayer(layerId) ?: error("Created layer disappeared")
+        // 生成された区域レイヤ本体を記録する。区域行の一括 upsert は件数が多く detail を
+        // 肥大化させるため個別には記録しない (レイヤ ID から app.zones を辿れる)
+        audit.recordCreate("layer", createdLayer.id, createdLayer.auditSnapshot())
         ZoneLayerOperationDto(
             layer = createdLayer,
             zonesCreated = counts.created,

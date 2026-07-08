@@ -8,6 +8,7 @@ import gis.example.ProjectResourceType
 import gis.example.RouteAuthz.ProjectFromBodyField
 import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
+import gis.example.auditTrail
 import gis.example.authorizedJsonBody
 import gis.example.authorizedProjectId
 import gis.example.authorizedResourceId
@@ -55,7 +56,7 @@ fun Route.buildingRoutes(deps: AppDependencies) {
         }
 
         post("/api/buildings", ProjectFromBodyField(Action.BUSINESS_WRITE)) {
-            call.respond(HttpStatusCode.Created, db.createBuilding(call.authorizedJsonBody()))
+            call.respond(HttpStatusCode.Created, db.createBuilding(call.authorizedJsonBody(), call.auditTrail()))
         }
 
         get("/api/buildings/{id}", ResourceFromPath(Action.BUSINESS_READ, ProjectResourceType.BUILDING)) {
@@ -64,11 +65,11 @@ fun Route.buildingRoutes(deps: AppDependencies) {
         }
 
         patch("/api/buildings/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.BUILDING)) {
-            call.respond(db.updateBuilding(call.authorizedResourceId(), call.receive<JsonObject>()))
+            call.respond(db.updateBuilding(call.authorizedResourceId(), call.receive<JsonObject>(), call.auditTrail()))
         }
 
         delete("/api/buildings/{id}", ResourceFromPath(Action.BUSINESS_WRITE, ProjectResourceType.BUILDING)) {
-            db.deleteBuilding(call.authorizedResourceId())
+            db.deleteBuilding(call.authorizedResourceId(), call.auditTrail())
             call.respond(HttpStatusCode.NoContent)
         }
     }

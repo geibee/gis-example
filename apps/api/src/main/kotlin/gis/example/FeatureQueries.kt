@@ -188,7 +188,7 @@ fun Database.searchFeatures(
     }
 }
 
-fun Database.updateFeature(layerId: String, featureId: String, request: FeatureUpdateRequest): FeatureDto {
+fun Database.updateFeature(layerId: String, featureId: String, request: FeatureUpdateRequest, audit: AuditTrail): FeatureDto {
     val layer = getLayer(layerId)
         ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
     val editableAttributes = layer.attributes
@@ -205,12 +205,17 @@ fun Database.updateFeature(layerId: String, featureId: String, request: FeatureU
 
     val propertyNames = request.properties.keys.sorted()
     val geometry = request.geometry?.takeUnless { it is JsonNull }
+    val auditEntityId = "$layerId/$featureId"
     if (propertyNames.isEmpty() && geometry == null) {
-        return getFeature(layerId, featureId)
+        val current = getFeature(layerId, featureId)
+        audit.recordUpdate("feature", auditEntityId, current.auditSnapshot(), current.auditSnapshot())
+        return current
     }
     if (geometry != null && geometry !is JsonObject) {
         throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Geometry must be a GeoJSON object")
     }
+    // 監査 diff 用の変更前スナップショット (存在しないフィーチャは従来どおり 404)
+    val before = getFeature(layerId, featureId)
 
     val tableRef = "${quoteIdent(layer.schemaName)}.${quoteIdent(layer.tableName)}"
     val rawGeometryUpdate = "ST_MakeValid(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(?), 4326), 3857))"
@@ -241,7 +246,7 @@ fun Database.updateFeature(layerId: String, featureId: String, request: FeatureU
             ST_AsGeoJSON(ST_Transform(t.${quoteIdent(layer.geometryColumn)}, 4326), 6)::text AS geometry
     """.trimIndent()
 
-    return try {
+    val result = try {
         withTransaction { connection ->
             val updated = connection.prepareStatement(sql).use { stmt ->
                 var index = 1
@@ -274,6 +279,8 @@ fun Database.updateFeature(layerId: String, featureId: String, request: FeatureU
             "Feature update failed: ${exc.message ?: "invalid feature update"}"
         )
     }
+    audit.recordUpdate("feature", auditEntityId, before.auditSnapshot(), result.auditSnapshot())
+    return result
 }
 
 fun Database.getMvtTile(layerId: String, z: Int, x: Int, y: Int): ByteArray {
