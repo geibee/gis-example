@@ -1,6 +1,7 @@
 package gis.example
 
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 
 // app.analysis_jobs をポーリングして分析ジョブを実行するバックグラウンドランナー。
 // worker-gis が担っていた分析実行を API プロセスへ移したもので、
@@ -50,8 +51,14 @@ class AnalysisJobRunner(
                 }
                 continue
             }
-            // executeClaimedAnalysisJob は例外を投げず、失敗時は failed をジョブに記録する
-            db.executeClaimedAnalysisJob(job)
+            // executeClaimedAnalysisJob は例外を投げず、失敗時は failed をジョブに記録する。
+            // ランナースレッドの MDC に jobId / projectId を載せ、実行中の全ログ行を
+            // ジョブ単位で串刺し検索できるようにする (HTTP の callId に相当する相関 ID)
+            MDC.putCloseable("jobId", job.id).use {
+                MDC.putCloseable("projectId", job.projectId).use {
+                    db.executeClaimedAnalysisJob(job)
+                }
+            }
         }
     }
 

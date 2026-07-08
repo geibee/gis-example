@@ -1,11 +1,28 @@
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <!--
+      LOG_FORMAT (env) でエンコーダを切り替える (既定 text):
+      - text: dev 向けの人間可読 1 行フォーマット
+      - json: 本番向けの JSON lines (logstash-logback-encoder)。CloudWatch Logs へ
+        stdout ごと収集され、Logs Insights でフィールド検索する前提。
+        @timestamp / level / logger_name / message / thread_name / MDC (callId 等) /
+        stack_trace を含む
+      不正値は appender 解決に失敗して無ログ起動になるため、Application.kt の
+      validateLogFormatEnv が起動時に text | json 以外を拒否する (fail fast)。
+      詳細は docs/observability.md
+    -->
+    <variable name="ACTIVE_LOG_FORMAT" value="${LOG_FORMAT:-text}" />
+
+    <appender name="STDOUT_text" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} [%X{callId}] - %msg%n</pattern>
         </encoder>
     </appender>
 
+    <appender name="STDOUT_json" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder" />
+    </appender>
+
     <root level="INFO">
-        <appender-ref ref="STDOUT" />
+        <appender-ref ref="STDOUT_${ACTIVE_LOG_FORMAT}" />
     </root>
 </configuration>

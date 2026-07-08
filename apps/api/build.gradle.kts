@@ -25,6 +25,8 @@ dependencies {
     implementation("io.ktor:ktor-server-auth-jvm:2.3.12")
     implementation("io.ktor:ktor-server-auth-jwt-jvm:2.3.12")
     implementation("io.ktor:ktor-server-call-logging-jvm:2.3.12")
+    // requestId (callId) の受入・生成・応答ヘッダ反映 (Observability.kt、MDC で全ログ行へ伝播)
+    implementation("io.ktor:ktor-server-call-id-jvm:2.3.12")
     implementation("io.ktor:ktor-server-cors-jvm:2.3.12")
     // CloudFront/ALB 背後で X-Forwarded-* を解釈する (ForwardedHeaders.kt、TRUSTED_PROXY_COUNT で有効化)
     implementation("io.ktor:ktor-server-forwarded-header-jvm:2.3.12")
@@ -40,6 +42,8 @@ dependencies {
     implementation("org.flywaydb:flyway-core:12.9.0")
     implementation("org.flywaydb:flyway-database-postgresql:12.9.0")
     implementation("ch.qos.logback:logback-classic:1.5.12")
+    // LOG_FORMAT=json で構造化 JSON ログへ切替 (logback.xml。CloudWatch Logs Insights 前提)
+    implementation("net.logstash.logback:logstash-logback-encoder:8.0")
 
     testImplementation(kotlin("test"))
     // 認証・認可の統合テストで HTTP 層 (PEP の配線) まで検証する
