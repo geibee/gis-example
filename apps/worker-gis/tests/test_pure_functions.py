@@ -2,14 +2,19 @@
 # DB / GDAL 不要で実行できるものだけをここに置く
 import json
 import logging
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from src.worker import (
+    DEFAULT_ZIP_MAX_ENTRIES,
+    DEFAULT_ZIP_MAX_TOTAL_BYTES,
     JsonLinesFormatter,
     configure_logging,
     fetch_upload,
+    input_driver,
+    inspect_zip_archive,
     is_s3_uri,
     make_table_name,
     normalize_layer_role,
@@ -17,6 +22,7 @@ from src.worker import (
     parse_s3_uri,
     qtable,
     quote_ident,
+    zip_limits,
 )
 
 
@@ -102,6 +108,114 @@ class TestFetchUpload:
             fetch_upload("s3://bucket/uploads/a.zip")
         assert created, "一時ディレクトリが作られるはず"
         assert not Path(created[0]).exists(), "ダウンロード失敗時は一時ディレクトリを残さない"
+
+
+class TestInputDriver:
+    def test_maps_accepted_formats_to_allowlisted_drivers(self) -> None:
+        # 受付形式と 1:1 の allowlist (GeoJSON / ESRI Shapefile のみ)
+        assert input_driver("geojson") == "GeoJSON"
+        assert input_driver("shapefile") == "ESRI Shapefile"
+
+    @pytest.mark.parametrize("fmt", ["vrt", "csv", "gml", "kml", "gpx", "", "GeoJSON"])
+    def test_rejects_formats_outside_allowlist(self, fmt: str) -> None:
+        # VRT 等の危険ドライバはもちろん、allowlist 外はすべて取込前に拒否する
+        with pytest.raises(ValueError, match="許可されていない取込形式"):
+            input_driver(fmt)
+
+
+def make_zip(path: Path, entries: dict[str, bytes]) -> str:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+    return str(path)
+
+
+class TestInspectZipArchive:
+    def test_accepts_ordinary_shapefile_zip(self, tmp_path: Path) -> None:
+        path = make_zip(tmp_path / "ok.zip", {"a.shp": b"x" * 10, "a.dbf": b"y" * 10, "folder/a.prj": b"z"})
+        inspect_zip_archive(path, max_entries=100, max_total_bytes=1024)
+
+    def test_rejects_non_zip_content(self, tmp_path: Path) -> None:
+        fake = tmp_path / "fake.zip"
+        fake.write_text('{"type": "FeatureCollection"}')
+        with pytest.raises(ValueError, match="zip アーカイブとして読み込めません"):
+            inspect_zip_archive(str(fake), max_entries=100, max_total_bytes=1024)
+
+    def test_rejects_too_many_entries(self, tmp_path: Path) -> None:
+        path = make_zip(tmp_path / "many.zip", {f"f{i}.dat": b"x" for i in range(5)})
+        with pytest.raises(ValueError, match="エントリ数が上限"):
+            inspect_zip_archive(path, max_entries=4, max_total_bytes=1024)
+
+    def test_rejects_total_uncompressed_size_over_limit(self, tmp_path: Path) -> None:
+        # 高圧縮率の zip 爆弾: 圧縮後は小さくても宣言展開サイズで拒否する
+        path = make_zip(tmp_path / "bomb.zip", {"zeros.shp": b"\0" * (1024 * 1024)})
+        assert Path(path).stat().st_size < 16 * 1024, "テスト前提: 圧縮後は小さい"
+        with pytest.raises(ValueError, match="合計展開サイズが上限"):
+            inspect_zip_archive(path, max_entries=100, max_total_bytes=1024 * 512)
+
+    def test_rejects_nested_zip(self, tmp_path: Path) -> None:
+        path = make_zip(tmp_path / "nested.zip", {"inner.ZIP": b"PK\x03\x04junk"})
+        with pytest.raises(ValueError, match="ネストされた zip"):
+            inspect_zip_archive(path, max_entries=100, max_total_bytes=1024)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "../evil.shp",
+            "dir/../../evil.shp",
+            "/etc/passwd",
+            "\\\\server\\share\\evil.shp",
+            "..\\evil.shp",
+            "C:/windows/evil.shp",
+        ],
+    )
+    def test_rejects_path_traversal_entries(self, tmp_path: Path, name: str) -> None:
+        path = make_zip(tmp_path / "traversal.zip", {name: b"x"})
+        with pytest.raises(ValueError, match="パストラバーサル"):
+            inspect_zip_archive(path, max_entries=100, max_total_bytes=1024)
+
+
+class TestRunOgr2ogrCommand:
+    def test_password_stays_out_of_argv_and_driver_is_pinned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # DB パスワードはプロセス引数 (ps で他プロセスから可視) に乗せず、
+        # サブプロセスの PGPASSWORD 環境変数でのみ渡す。入力ドライバは -if で明示する
+        from src.worker import run_ogr2ogr
+
+        monkeypatch.setenv("PGPASSWORD", "s3cr3t-value")
+        captured: dict[str, object] = {}
+
+        def fake_run(command: list[str], **kwargs: object) -> object:
+            captured["command"] = command
+            captured["env"] = kwargs.get("env")
+            return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+
+        monkeypatch.setattr("src.worker.subprocess", type("S", (), {"run": staticmethod(fake_run)}))
+        run_ogr2ogr("/tmp/a.geojson", "layer_x", 4326, "GeoJSON")
+
+        command = captured["command"]
+        assert isinstance(command, list)
+        assert all("s3cr3t-value" not in arg for arg in command), "パスワードが引数に漏れている"
+        assert all("password" not in arg for arg in command), "接続文字列に password キーを含めない"
+        index = command.index("-if")
+        assert command[index + 1] == "GeoJSON"
+        env = captured["env"]
+        assert isinstance(env, dict)
+        assert env["PGPASSWORD"] == "s3cr3t-value"
+        assert env["PG_USE_COPY"] == "YES"
+
+
+class TestZipLimits:
+    def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("IMPORT_ZIP_MAX_ENTRIES", raising=False)
+        monkeypatch.delenv("IMPORT_ZIP_MAX_TOTAL_BYTES", raising=False)
+        assert zip_limits() == (DEFAULT_ZIP_MAX_ENTRIES, DEFAULT_ZIP_MAX_TOTAL_BYTES)
+        assert DEFAULT_ZIP_MAX_ENTRIES == 100
+        assert DEFAULT_ZIP_MAX_TOTAL_BYTES == 2 * 1024**3
+
+    def test_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("IMPORT_ZIP_MAX_ENTRIES", "7")
+        monkeypatch.setenv("IMPORT_ZIP_MAX_TOTAL_BYTES", "12345")
+        assert zip_limits() == (7, 12345)
 
 
 class TestNormalizeLayerRole:

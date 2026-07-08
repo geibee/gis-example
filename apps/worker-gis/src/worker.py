@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,19 @@ import psycopg
 from psycopg.rows import DictRow, dict_row
 
 logger = logging.getLogger("worker-gis")
+
+# 受付形式 → GDAL 入力ドライバの allowlist (issue #19)。
+# ogr2ogr へ -if で明示し、拡張子偽装や VRT 等による別ドライバの自動選択
+# (ローカルファイル読取・外部フェッチの起点) を封じる。api 側の受付形式
+# (JobRoutes.kt の validateImportFormat) より狭く、ここに無い形式は取込前に failed にする
+INPUT_DRIVERS: dict[str, str] = {
+    "geojson": "GeoJSON",
+    "shapefile": "ESRI Shapefile",
+}
+
+# zip 展開前検査の既定値 (env で上書き可能 — docs/environment-variables.md)
+DEFAULT_ZIP_MAX_ENTRIES = 100
+DEFAULT_ZIP_MAX_TOTAL_BYTES = 2 * 1024**3  # 2GiB
 
 # logging.LogRecord の組込み属性名。これ以外 (extra= で渡した job_id 等) を JSON フィールドとして出力する
 _BUILTIN_LOG_ATTRS = frozenset(vars(logging.makeLogRecord({})).keys()) | {"taskName", "message", "asctime"}
@@ -148,11 +162,16 @@ def run_import_job(conn: psycopg.Connection[DictRow], job: dict[str, Any]) -> No
     try:
         table_name = make_table_name(job["filename"], job["id"])
         source_srid = int(job["source_srid"] or 4326)
+        # 許可外形式はダウンロードや ogr2ogr 実行より前に拒否する (failed + 理由)
+        driver = input_driver(job["format"])
         # upload_path が s3:// 参照なら一時ファイルへダウンロードして従来どおりローカルとして扱う
         local_path, temp_dir = fetch_upload(job["upload_path"])
+        if job["format"] == "shapefile":
+            max_entries, max_total_bytes = zip_limits()
+            inspect_zip_archive(local_path, max_entries=max_entries, max_total_bytes=max_total_bytes)
         source = ogr_source(local_path, job["format"])
 
-        run_ogr2ogr(source, table_name, source_srid)
+        run_ogr2ogr(source, table_name, source_srid, driver)
 
         with conn.transaction():
             normalize_imported_table(conn, table_name)
@@ -191,17 +210,22 @@ def run_import_job(conn: psycopg.Connection[DictRow], job: dict[str, Any]) -> No
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def run_ogr2ogr(source: str, table_name: str, source_srid: int) -> None:
+def run_ogr2ogr(source: str, table_name: str, source_srid: int, input_driver_name: str) -> None:
+    # 接続文字列に password を含めない (プロセス引数は ps 等で同一ホストの他プロセスから
+    # 見えるため)。libpq 標準の PGPASSWORD 環境変数でサブプロセスにだけ渡す
     pg_conn = (
         f"PG:host={os.getenv('PGHOST', 'localhost')} "
         f"port={os.getenv('PGPORT', '5432')} "
         f"dbname={os.getenv('PGDATABASE', 'gis')} "
-        f"user={os.getenv('PGUSER', 'gis')} "
-        f"password={require_pgpassword()}"
+        f"user={os.getenv('PGUSER', 'gis')}"
     )
     command = [
         "ogr2ogr",
         "-overwrite",
+        # 入力ドライバを明示 (-if は GDAL 3.2+。worker イメージは gdal 3.9.2)。
+        # 自動判別に任せると VRT / CSV 等の意図しないドライバが選択され得る
+        "-if",
+        input_driver_name,
         "-f",
         "PostgreSQL",
         pg_conn,
@@ -223,6 +247,7 @@ def run_ogr2ogr(source: str, table_name: str, source_srid: int) -> None:
     ]
     env = os.environ.copy()
     env["PG_USE_COPY"] = "YES"
+    env["PGPASSWORD"] = require_pgpassword()
     result = subprocess.run(command, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         raise RuntimeError(f"ogr2ogr failed: {result.stderr.strip() or result.stdout.strip()}")
@@ -441,6 +466,55 @@ def fetch_upload(upload_path: str) -> tuple[str, str | None]:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
     return local_path, temp_dir
+
+
+def input_driver(import_format: str) -> str:
+    """受付形式に対応する GDAL 入力ドライバを返す。allowlist 外は取込前に拒否する"""
+    driver = INPUT_DRIVERS.get(import_format)
+    if driver is None:
+        allowed = ", ".join(sorted(INPUT_DRIVERS))
+        raise ValueError(f"許可されていない取込形式です: {import_format} (許可: {allowed})")
+    return driver
+
+
+def zip_limits() -> tuple[int, int]:
+    # 呼び出し時に読む (プロセス生存中の env 変更をテストで扱いやすくするのと、起動順序に依存しない)
+    return (
+        int(os.getenv("IMPORT_ZIP_MAX_ENTRIES", str(DEFAULT_ZIP_MAX_ENTRIES))),
+        int(os.getenv("IMPORT_ZIP_MAX_TOTAL_BYTES", str(DEFAULT_ZIP_MAX_TOTAL_BYTES))),
+    )
+
+
+def inspect_zip_archive(path: str, *, max_entries: int, max_total_bytes: int) -> None:
+    """ogr2ogr (/vsizip) へ渡す前の zip 検査。違反は ValueError → import ジョブ failed + 理由。
+
+    - zip として読めないものを拒否する (拡張子偽装)
+    - エントリ数上限 (IMPORT_ZIP_MAX_ENTRIES)
+    - 合計展開サイズ上限 (IMPORT_ZIP_MAX_TOTAL_BYTES)。セントラルディレクトリの宣言値で
+      判定する (zipfile は宣言超過の伸長を許さないため、宣言を偽っても実体は取り出せない)
+    - ネストされた zip の拒否 (再帰展開型の zip 爆弾)
+    - パストラバーサル (絶対パス・ドライブレター・`..` セグメント) の拒否
+    """
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entries = archive.infolist()
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"zip アーカイブとして読み込めません: {exc}") from exc
+
+    if len(entries) > max_entries:
+        raise ValueError(f"zip のエントリ数が上限を超えています: {len(entries)} > {max_entries}")
+
+    total_bytes = 0
+    for entry in entries:
+        name = entry.filename
+        segments = re.split(r"[\\/]+", name)
+        if name.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", name) or ".." in segments:
+            raise ValueError(f"zip エントリのパスが不正です (パストラバーサル): {name}")
+        if name.lower().endswith(".zip"):
+            raise ValueError(f"ネストされた zip は許可されていません: {name}")
+        total_bytes += entry.file_size
+        if total_bytes > max_total_bytes:
+            raise ValueError(f"zip の合計展開サイズが上限を超えています: {total_bytes} > {max_total_bytes} バイト")
 
 
 def ogr_source(upload_path: str, import_format: str) -> str:
