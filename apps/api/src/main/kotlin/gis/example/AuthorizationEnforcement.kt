@@ -35,6 +35,7 @@ fun ApplicationCall.appPrincipal(): AppPrincipal =
 
 // projectId をリクエストが明示する操作用。拒否は 403
 fun ApplicationCall.requireProjectPermission(action: Action, projectId: String) {
+    attributes.put(AuthzEnforcedKey, Unit)
     attributes.put(AuditedAction, action)
     attributes.put(AuditedProjectId, projectId)
     if (!AccessPolicy.allows(appPrincipal(), action, AuthzResource.Project(projectId))) {
@@ -44,6 +45,7 @@ fun ApplicationCall.requireProjectPermission(action: Action, projectId: String) 
 
 // ユーザー・メンバー管理などのシステム操作用。拒否は 403
 fun ApplicationCall.requireSystemPermission(action: Action) {
+    attributes.put(AuthzEnforcedKey, Unit)
     attributes.put(AuditedAction, action)
     if (!AccessPolicy.allows(appPrincipal(), action, AuthzResource.System)) {
         throw ApiException(HttpStatusCode.Forbidden, "Permission denied")
@@ -57,6 +59,7 @@ fun ApplicationCall.requireResourcePermission(
     type: ProjectResourceType,
     id: String
 ): String {
+    attributes.put(AuthzEnforcedKey, Unit)
     attributes.put(AuditedAction, action)
     val notFound = ApiException(HttpStatusCode.NotFound, type.notFoundMessage)
     val projectId = db.projectIdOf(type, id) ?: throw notFound
