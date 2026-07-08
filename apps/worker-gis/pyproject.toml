@@ -30,6 +30,12 @@ python_version = "3.11"
 strict = true
 files = ["src"]
 
+# boto3 は型スタブを同梱しない。S3 クライアントは s3_client() の戻り値 (Any) に閉じ込め、
+# それ以外のコードの strict 検査は維持する
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

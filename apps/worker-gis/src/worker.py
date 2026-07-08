@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 import traceback
 from pathlib import Path
 from typing import Any
 
+import boto3
 import psycopg
 from psycopg.rows import DictRow, dict_row
 
@@ -94,10 +97,13 @@ def claim_import_job(conn: psycopg.Connection[DictRow]) -> dict[str, Any] | None
 
 
 def run_import_job(conn: psycopg.Connection[DictRow], job: dict[str, Any]) -> None:
+    temp_dir: str | None = None
     try:
         table_name = make_table_name(job["filename"], job["id"])
         source_srid = int(job["source_srid"] or 4326)
-        source = ogr_source(job["upload_path"], job["format"])
+        # upload_path が s3:// 参照なら一時ファイルへダウンロードして従来どおりローカルとして扱う
+        local_path, temp_dir = fetch_upload(job["upload_path"])
+        source = ogr_source(local_path, job["format"])
 
         run_ogr2ogr(source, table_name, source_srid)
 
@@ -125,6 +131,12 @@ def run_import_job(conn: psycopg.Connection[DictRow], job: dict[str, Any]) -> No
         print(f"Import job {job['id']} succeeded as layer {layer_id}", flush=True)
     except Exception as exc:
         mark_import_failed(conn, job["id"], exc)
+    finally:
+        # S3 からのダウンロード一時ファイルだけを片付ける。アップロード本体は成功/失敗に
+        # かかわらず削除しない (ローカル volume 時代からの踏襲。S3 側の失効は
+        # ライフサイクルルールに委譲する — docs/backup-restore.md)
+        if temp_dir is not None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def run_ogr2ogr(source: str, table_name: str, source_srid: int) -> None:
@@ -332,6 +344,51 @@ def mark_import_failed(conn: psycopg.Connection[DictRow], job_id: str, exc: Exce
             (message, job_id),
         )
     print(f"Import job {job_id} failed: {message}", flush=True)
+
+
+def is_s3_uri(reference: str) -> bool:
+    # api 側 (UploadStorage.kt の isS3Reference) と対で保つ
+    return reference.startswith("s3://")
+
+
+def parse_s3_uri(reference: str) -> tuple[str, str]:
+    """`s3://bucket/key` を (bucket, key) に分解する"""
+    if not is_s3_uri(reference):
+        raise ValueError(f"Not an s3:// reference: {reference}")
+    bucket, _, key = reference.removeprefix("s3://").partition("/")
+    if not bucket or not key:
+        raise ValueError(f"Malformed s3:// reference: {reference}")
+    return bucket, key
+
+
+def s3_client() -> Any:
+    # 認証は boto3 の既定チェーン (本番: ECS タスクロール / dev: AWS_ACCESS_KEY_ID 等)。
+    # S3_ENDPOINT_URL は MinIO 等の dev 用 (compose は未設定を空文字で渡すため or None)
+    endpoint = os.getenv("S3_ENDPOINT_URL") or None
+    return boto3.client("s3", endpoint_url=endpoint)
+
+
+def fetch_upload(upload_path: str) -> tuple[str, str | None]:
+    """アップロード参照をローカルパスへ解決する。戻り値は (ローカルパス, 後始末する一時ディレクトリ | None)。
+
+    S3 参照は GDAL /vsis3 の直読みではなく一時ファイルへのダウンロードで扱う:
+    - 取込前のアーカイブ検査 (zip 展開検査、issue #19 予定) はローカル実体が前提になる
+    - shapefile (/vsizip) は zip 内の複数メンバーを繰り返し読むため、1 回のダウンロードの方が
+      HTTP レンジアクセスより単純で決定的
+    - MinIO 向けの endpoint / path-style 設定を boto3 に一元化できる (GDAL の AWS_* 環境変数と
+      二重管理しない)
+    """
+    if not is_s3_uri(upload_path):
+        return upload_path, None
+    bucket, key = parse_s3_uri(upload_path)
+    temp_dir = tempfile.mkdtemp(prefix="import-s3-")
+    local_path = os.path.join(temp_dir, os.path.basename(key) or "upload.dat")
+    try:
+        s3_client().download_file(bucket, key, local_path)
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+    return local_path, temp_dir
 
 
 def ogr_source(upload_path: str, import_format: str) -> str:
