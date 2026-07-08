@@ -32,6 +32,8 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation-jvm:2.3.12")
     implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:2.3.12")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // アップロードの S3 保存 (UploadStorage.kt、UPLOAD_STORAGE=s3 で有効化。認証は既定チェーン)
+    implementation("software.amazon.awssdk:s3:2.29.52")
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.4")
     // スキーママイグレーション (versioned migration の SSoT は src/main/resources/db/migration)
