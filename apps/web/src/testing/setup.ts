@@ -6,6 +6,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
+import { authStub, makeAuthStub } from "./authStub";
 import { server } from "./server";
 
 // maplibre-gl (WebGL 前提) は jsdom で動作しないため、遅延ロードされる地図ペインを
@@ -13,23 +14,15 @@ import { server } from "./server";
 // (mapState / utils) にあるので、テスト対象はそのまま残る。
 vi.mock("../components/MapPane", () => ({ default: () => null }));
 
-// react-oidc-context は「認証済みユーザー」のスタブに差し替える。
-// 認証フロー (リダイレクト) 自体はテスト対象外で、App は useAuth しか使わない。
-vi.mock("react-oidc-context", () => ({
-  AuthProvider: ({ children }: { children: unknown }) => children,
-  useAuth: () => ({
-    isAuthenticated: true,
-    isLoading: false,
-    activeNavigator: undefined,
-    error: undefined,
-    user: {
-      access_token: "test-access-token",
-      profile: { preferred_username: "test-user", email: "test-user@example.com" }
-    },
-    signinRedirect: vi.fn(),
-    signoutRedirect: vi.fn()
-  })
-}));
+// react-oidc-context はスタブに差し替える (既定は「認証済みユーザー」= testing/authStub.ts)。
+// AuthGate のように認証状態を検証するテストは authStub.current を差し替える。
+vi.mock("react-oidc-context", async () => {
+  const { authStub: stub } = await import("./authStub");
+  return {
+    AuthProvider: ({ children }: { children: unknown }) => children,
+    useAuth: () => stub.current
+  };
+});
 
 // jsdom 未実装の scrollTo (ルーターのスクロール復元が呼ぶ) を no-op にして警告を消す
 window.scrollTo = vi.fn();
@@ -38,6 +31,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 
 afterEach(() => {
   server.resetHandlers();
+  authStub.current = makeAuthStub();
   cleanup();
 });
 

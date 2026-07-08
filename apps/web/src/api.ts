@@ -4,6 +4,7 @@
 // - Bearer トークン付与 (ミドルウェア)
 // - タイムアウト (REQUEST_TIMEOUT_MS)
 // - 冪等な GET のみの限定リトライ (1 回。ネットワークエラー / タイムアウト / 5xx)
+// - 401 時の silent renew → 新トークンでの再送 (1 回のみ)
 // - エラーレスポンス ({ error }) の Error への変換と 401 の再ログイン誘導
 import createClient, { type Middleware } from "openapi-fetch";
 import type { paths } from "./contracts/generated";
@@ -38,7 +39,7 @@ import type {
   ZoneWriteRequest
 } from "./contracts";
 import type { BusinessObjectFilters } from "./appTypes";
-import { getAccessToken, notifyUnauthorized } from "./auth";
+import { getAccessToken, notifyUnauthorized, tryRenewAccessToken } from "./auth";
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
@@ -47,23 +48,35 @@ const REQUEST_TIMEOUT_MS = 30_000;
 // 冪等 (GET) のみ 1 回だけ再試行する。POST/PATCH/DELETE は二重実行の危険があるため対象外
 async function fetchWithResilience(request: Request): Promise<Response> {
   const retryable = request.method === "GET";
-  const attempt = () =>
-    fetch(request.clone(), {
+  const attempt = (target: Request = request) =>
+    fetch(target.clone(), {
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
     });
+  let response: Response;
   try {
-    const response = await attempt();
+    response = await attempt();
     if (retryable && response.status >= 500) {
-      return await attempt();
+      response = await attempt();
     }
-    return response;
   } catch (error) {
     // 呼び出し側による中断は再試行しない (ネットワークエラー・タイムアウトのみ)
     if (retryable && !request.signal.aborted) {
-      return attempt();
+      response = await attempt();
+    } else {
+      throw error;
     }
-    throw error;
   }
+  if (response.status !== 401) return response;
+  // 401 = アクセストークン失効の可能性。silent renew (single-flight) を試し、
+  // 成功したら新トークンで同一リクエストを 1 回だけ再送する。401 はサーバが処理を
+  // 実行せず拒否した状態なので、非 GET でも再送は二重実行にならない。
+  // renew 不可 / 再送も 401 なら raiseApiError が notifyUnauthorized で再ログインへ誘導する
+  // (再送は 1 回のみ・renew は single-flight なので無限ループしない)
+  const renewedToken = await tryRenewAccessToken();
+  if (!renewedToken) return response;
+  const retryRequest = request.clone();
+  retryRequest.headers.set("Authorization", `Bearer ${renewedToken}`);
+  return attempt(retryRequest);
 }
 
 const authMiddleware: Middleware = {
@@ -79,7 +92,7 @@ client.use(authMiddleware);
 
 function raiseApiError(response: Response, error: unknown): never {
   if (response.status === 401) {
-    // トークン失効・ユーザー無効化。再ログインへ誘導する
+    // silent renew を試しても 401 (セッション失効・ユーザー無効化)。再ログインへ誘導する
     notifyUnauthorized();
     throw new Error("認証の有効期限が切れました。再ログインしてください");
   }
