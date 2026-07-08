@@ -24,7 +24,9 @@
 - 認可の設計原則は **「可変データは DB、ポリシーはコード」**:
   - 誰がどのプロジェクトのメンバーか (`app.users` / `app.project_members`) は DB
   - ロールが何をできるか (`Action` × ロールのマトリクス) は `Authorization.kt` の純粋関数 `AccessPolicy.allows`。判定に I/O を持ち込まない
-- エンドポイントを追加するときは必ず: (1) いずれかの `Action` へ割り当てて PEP (`requireProjectPermission` / `requireResourcePermission` / `requireSystemPermission`) を呼ぶ、(2) `AccessPolicyTest` の期待表を更新する、(3) openapi.yaml に 401/403 を記載する
+- 認可は宣言必須 (`AuthorizedRouting.kt`): ルートは `authorizedRoutes(db) { }` の中で `RouteAuthz` (要求 `Action` と対象スコープの解決方法) を宣言して登録する。生の `get`/`post` 等での登録は起動時検証 (`validateAuthorizedRoutes`) が拒否し、宣言はあるが PEP を通らない 2xx 応答は `authzGuardPlugin` が 500 に置き換える (fail-closed)
+- エンドポイントを追加するときは必ず: (1) いずれかの `Action` へ割り当てて `RouteAuthz` を宣言する (ボディ解釈と認可が不可分な場合のみ `CheckedInHandler` で理由を明記し、ハンドラ内で `requireProjectPermission` / `requireResourcePermission` / `requireSystemPermission` を呼ぶ)、(2) `AccessPolicyTest` の期待表を更新する、(3) openapi.yaml に 401/403 を記載する
+- 認証不要のルートは `unauthenticatedGet` (理由の明記必須) でのみ登録できる。現状は `/health` のみ
 - ステータスの使い分け: 非メンバーへの個別リソースは 404 (存在を隠す)、メンバーのロール不足と projectId 明示操作の拒否は 403
 - 監査ログ (`AuditLog.kt`) は mutate 成功と 401/403 を記録する。PEP が action / projectId を call attributes へ残す前提を崩さない
 
@@ -35,7 +37,7 @@
 
 | 層 | 置き場所 | 規約 |
 |---|---|---|
-| ルート | `routes/<機能>Routes.kt` | `fun Route.<機能>Routes(deps: AppDependencies)` 拡張関数。openapi.yaml の tag と対応させる。HTTP 入出力の検証と PEP 呼び出しのみを書き、SQL を書かない |
+| ルート | `routes/<機能>Routes.kt` | `fun Route.<機能>Routes(deps: AppDependencies)` 拡張関数。openapi.yaml の tag と対応させる。`authorizedRoutes(deps.db) { }` の中で `RouteAuthz` を宣言して登録し、HTTP 入出力の検証のみを書き、SQL を書かない |
 | クエリ | `<機能>Queries.kt` | `Database` の拡張関数。トランザクションは `withTransaction { }` を使い、`autoCommit` を手動管理しない |
 | モデル | `Models.kt` (DTO) / `Database.kt` (一覧クエリ条件) | リクエスト・レスポンスは `@Serializable` DTO |
 
