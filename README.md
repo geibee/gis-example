@@ -62,7 +62,7 @@ The GIS seed data is stored as PostGIS SQL dumps, not as the original source ZIP
 - 法務省 登記所備付地図データ（G空間情報センターで公開）
 - PLATEAU 3D都市モデル 建築物モデル
 
-PostgreSQL entrypoint seed scripts run only when the `postgres-data` volume is created. If you need to recreate the bundled sample state from scratch, remove the existing Compose volume first.
+Seeding happens in two stages: the PostgreSQL entrypoint loads the self-contained GIS dump (010) only when the `postgres-data` volume is created, while seeds that depend on `app` tables (020/040/050/060/070) are applied by the one-shot `seed` Compose service after the API has applied the Flyway migrations. Each seed is guarded by a sentinel row, so repeated `docker compose up` runs do not re-apply it. If you need to recreate the bundled sample state from scratch, remove the existing Compose volume first.
 
 Open-data fetch settings for the dense Tokyo demo live under `tools/open-data`.
 The direct G空間情報センター download URLs are configuration values because they can change by release year and may require a logged-in session:
@@ -110,6 +110,10 @@ Analysis jobs are executed by the API process (`AnalysisJobRunner`, poll interva
 Allowed spatial operators: `intersects`, `contains`, `within`, `dwithin`.
 
 Allowed attribute operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `LIKE`, `IN`, `IS NULL`.
+
+## Database Migrations
+
+スキーマ (`app.*`) の DDL は Flyway の versioned migration (`apps/api/src/main/resources/db/migration/V*.sql`) が SSoT。API 起動時に自動適用され、現在バージョンは `app.flyway_schema_history` で追跡できる。Flyway 導入前にテーブルが作成済みの既存 DB は初回起動時に自動で baseline (V1 適用済み扱い) され、以降の差分のみが適用される。V 番号の付け方・expand-contract (破壊的変更の段階分け)・既存 DB への導入手順は [`docs/db-migrations.md`](docs/db-migrations.md) を参照。
 
 ## Quality Gate
 

@@ -73,6 +73,8 @@ class AuthzIntegrationTest {
             connection.createStatement().use { stmt ->
                 stmt.execute(repoFile("infra/postgres/init.sql"))
             }
+            // init.sql は拡張・スキーマ作成のみ。テーブル定義は Flyway (db/migration) が適用する
+            IntegrationDb.migrate()
             val fixture = this::class.java.getResource("/integration-fixture.sql")
                 ?: fail("integration-fixture.sql がテストリソースにありません")
             connection.createStatement().use { stmt ->

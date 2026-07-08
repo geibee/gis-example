@@ -32,6 +32,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.4")
+    // スキーママイグレーション (versioned migration の SSoT は src/main/resources/db/migration)
+    implementation("org.flywaydb:flyway-core:12.9.0")
+    implementation("org.flywaydb:flyway-database-postgresql:12.9.0")
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
     testImplementation(kotlin("test"))

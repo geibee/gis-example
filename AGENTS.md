@@ -35,6 +35,24 @@
 - 属性演算子・空間演算子は allowlist 検証 (`AnalysisValidator.kt` / `validateConditionSearchConditions`) を通ったものだけを SQL 化する
 - ジオメトリの等価比較をテストで書くときは完全一致ではなく許容誤差付きで行う
 
+## スキーマ変更 (DB マイグレーション)
+
+DDL の SSoT は Flyway の versioned migration (`apps/api/src/main/resources/db/migration/V*.sql`)。
+運用ルールの詳細は [`docs/db-migrations.md`](docs/db-migrations.md)。
+
+- スキーマ変更は必ず `V<最大値+1>__<内容>.sql` の追加で行う。起動コードに DDL を書かない
+  (`CREATE TABLE IF NOT EXISTS` を起動時に流す旧 `SchemaSetup.kt` 方式は廃止済み)
+- **適用済みマイグレーションは編集・削除しない** (チェックサム不一致で起動が止まる)。
+  修正も新しいマイグレーションの追加で行う
+- 破壊的変更 (列削除・リネーム・型変更) は **expand-contract** で段階を分ける:
+  (1) expand: 新列を NULL 許容/DEFAULT 付きで追加 → (2) アプリを両対応にして backfill →
+  (3) contract: 全インスタンス移行後の次リリースで旧列を削除。単発の `RENAME COLUMN` は禁止
+  (ローリングデプロイ中の旧アプリが即死する)
+- `infra/postgres/init.sql` は拡張・スキーマ作成のみ (initdb 用)。テーブル DDL を書き足さない。
+  app テーブルに依存する開発シードは compose の `seed` サービス (`seed-dev-data.sh`) に置く
+- マイグレーションの適用検証は統合ティアの `MigrationIntegrationTest`
+  (クリーン DB 全適用 / 既存 DB baseline / スキーマ収束) が行う
+
 ## 品質ゲート
 
 コミット前の統合ゲートは `scripts/verify.sh`(api / worker / web を変更スコープで自動判定、fail-closed)。
