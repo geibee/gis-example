@@ -56,9 +56,12 @@ fun Application.module(
     oidcSettings: OidcSettings = OidcSettings.fromEnv()
 ) {
     db.migrateSchema()
+    val uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads")
     val deps = AppDependencies(
         db = db,
-        uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads"),
+        uploadDir = uploadDir,
+        // 本番 (ECS Fargate) は UPLOAD_STORAGE=s3。local 既定は dev / 単一ホスト専用
+        uploadStorage = uploadStorageFromEnv(System::getenv, uploadDir),
         // ブラウザから見た API の公開 URL (TileJSON の絶対 URL 生成に使う)。
         // localhost 既定は dev 専用。本番では CloudFront 配下の HTTPS URL を必ず設定する
         apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/'),
@@ -75,6 +78,7 @@ fun Application.module(
 
     environment.monitor.subscribe(ApplicationStopped) {
         analysisJobRunner.stop()
+        deps.uploadStorage.close()
         db.close()
     }
 

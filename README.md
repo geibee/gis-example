@@ -32,7 +32,7 @@ Martin と PostgreSQL のホスト公開はローカル開発用に `127.0.0.1` 
 
 本番は ECS タスク定義の `secrets` (Secrets Manager / SSM Parameter Store) で同じ環境変数を注入する。全コンポーネントの環境変数一覧 (ECS タスク定義のインプット)・シークレットローテーション運用・dev シード混入ガード・ROPC の扱いは [`docs/environment-variables.md`](docs/environment-variables.md) を参照。
 
-Uploaded files and generated runtime data are stored under `./data`.
+Uploaded files and generated runtime data are stored under `./data` (dev 既定の `UPLOAD_STORAGE=local`)。本番はアップロードを S3 に保存し、DB バックアップは RDS の自動バックアップ + PITR に委譲する — 構成とリストア runbook は [`docs/backup-restore.md`](docs/backup-restore.md) を参照。S3 経路は dev でも `infra/.env` の `UPLOAD_STORAGE=s3` + `docker compose --profile s3 up` (MinIO) で試せる。
 
 ## Bundled Tokyo Sample Data
 

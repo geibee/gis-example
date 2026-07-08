@@ -97,6 +97,16 @@ services:
       DATABASE_USER: ${POSTGRES_USER:-gis}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       UPLOAD_DIR: /data/uploads
+      # アップロード保存先 (local | s3)。dev 既定は従来どおり local (volume 共有)。
+      # S3 経路を試す場合は infra/.env で UPLOAD_STORAGE=s3 にして
+      # `docker compose --profile s3 up` で MinIO を同時に起動する。
+      # 本番は UPLOAD_STORAGE=s3 + 実 S3 (エンドポイント上書きなし、認証はタスクロール)
+      UPLOAD_STORAGE: ${UPLOAD_STORAGE:-local}
+      S3_BUCKET: ${S3_BUCKET:-gis-uploads}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-}
       # URL 系はすべて localhost = dev 専用の値。本番 (CloudFront/ALB 配下) では
       # 公開 HTTPS URL を注入する (一覧と信頼境界は docs/reverse-proxy.md)
       API_PUBLIC_URL: http://localhost:8080
@@ -128,11 +138,52 @@ services:
       PGUSER: ${POSTGRES_USER:-gis}
       PGPASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       POLL_INTERVAL_SECONDS: "2"
+      # upload_path が s3:// のジョブを読むための S3 設定 (api 側と対で切り替える)
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      AWS_REGION: ${S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-}
     volumes:
       - ../data:/data
     depends_on:
       postgres:
         condition: service_healthy
+
+  # S3 経路の開発用オブジェクトストレージ (S3 互換)。既定では起動しない:
+  #   UPLOAD_STORAGE=s3 を infra/.env に設定した上で
+  #   docker compose -f infra/docker-compose.yml --profile s3 up --build
+  # 本番は実 S3 を使うため、このサービスは本番構成に含めない
+  minio:
+    profiles: ["s3"]
+    restart: unless-stopped
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-secret}
+    # ローカル開発用にループバックのみ公開 (9001 は管理コンソール)
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+
+  # アップロード用バケットの one-shot 作成 (冪等: --ignore-existing)
+  minio-init:
+    profiles: ["s3"]
+    restart: "no"
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-secret}
+      S3_BUCKET: ${S3_BUCKET:-gis-uploads}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set dev http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 1; done
+        mc mb --ignore-existing "dev/$$S3_BUCKET"
+    depends_on:
+      - minio
 
   web:
     restart: unless-stopped
@@ -149,3 +200,4 @@ services:
 
 volumes:
   postgres-data:
+  minio-data:

@@ -1,8 +1,19 @@
 # worker の純粋関数に対する Level 1 (決定的) テスト。
 # DB / GDAL 不要で実行できるものだけをここに置く
+from pathlib import Path
+
 import pytest
 
-from src.worker import make_table_name, normalize_layer_role, ogr_source, qtable, quote_ident
+from src.worker import (
+    fetch_upload,
+    is_s3_uri,
+    make_table_name,
+    normalize_layer_role,
+    ogr_source,
+    parse_s3_uri,
+    qtable,
+    quote_ident,
+)
 
 
 class TestQuoteIdent:
@@ -42,6 +53,51 @@ class TestOgrSource:
 
     def test_other_formats_pass_through(self) -> None:
         assert ogr_source("/data/uploads/a.geojson", "geojson") == "/data/uploads/a.geojson"
+
+
+class TestS3Uri:
+    def test_is_s3_uri(self) -> None:
+        assert is_s3_uri("s3://gis-uploads/uploads/a.zip")
+        assert not is_s3_uri("/data/uploads/a.zip")
+
+    def test_parse_splits_bucket_and_key(self) -> None:
+        assert parse_s3_uri("s3://gis-uploads/uploads/abc-a.zip") == ("gis-uploads", "uploads/abc-a.zip")
+
+    def test_parse_rejects_non_s3_reference(self) -> None:
+        with pytest.raises(ValueError):
+            parse_s3_uri("/data/uploads/a.zip")
+
+    def test_parse_rejects_bucket_without_key(self) -> None:
+        with pytest.raises(ValueError):
+            parse_s3_uri("s3://bucket-only")
+
+
+class TestFetchUpload:
+    def test_local_path_passes_through_without_temp_dir(self) -> None:
+        # ローカル参照は S3 に触れず、後始末すべき一時ディレクトリも無い
+        local, temp_dir = fetch_upload("/data/uploads/a.geojson")
+        assert local == "/data/uploads/a.geojson"
+        assert temp_dir is None
+
+    def test_s3_download_failure_cleans_up_temp_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        created: list[str] = []
+        real_mkdtemp = __import__("tempfile").mkdtemp
+
+        def tracking_mkdtemp(prefix: str) -> str:
+            path = real_mkdtemp(prefix=prefix, dir=tmp_path)
+            created.append(path)
+            return path
+
+        class FailingClient:
+            def download_file(self, bucket: str, key: str, local_path: str) -> None:
+                raise RuntimeError("simulated download failure")
+
+        monkeypatch.setattr("src.worker.tempfile", type("T", (), {"mkdtemp": staticmethod(tracking_mkdtemp)}))
+        monkeypatch.setattr("src.worker.s3_client", lambda: FailingClient())
+        with pytest.raises(RuntimeError):
+            fetch_upload("s3://bucket/uploads/a.zip")
+        assert created, "一時ディレクトリが作られるはず"
+        assert not Path(created[0]).exists(), "ダウンロード失敗時は一時ディレクトリを残さない"
 
 
 class TestNormalizeLayerRole:

@@ -1,5 +1,6 @@
 // 取込・分析ジョブ系ルート (openapi.yaml tag: jobs)。
-// 取込はアップロードを uploadDir へ保存してジョブ登録のみ行い、変換は worker-gis が担う
+// 取込はアップロードを UploadStorage (local: uploadDir / s3: S3 バケット) へ保存して
+// ジョブ登録のみ行い、変換は worker-gis が担う (S3 参照は s3:// URI として upload_path に残る)
 package gis.example.routes
 
 import gis.example.Action
@@ -45,7 +46,7 @@ fun Route.jobRoutes(deps: AppDependencies) {
             var sourceSrid: Int? = null
             var layerRole: String? = null
             var filename: String? = null
-            var uploadPath: String? = null
+            var uploadReference: String? = null
 
             val multipart = call.receiveMultipart()
             multipart.forEachPart { part ->
@@ -61,11 +62,17 @@ fun Route.jobRoutes(deps: AppDependencies) {
                     is PartData.FileItem -> {
                         val original = sanitizeFileName(part.originalFileName ?: "upload.dat")
                         filename = original
-                        val target = deps.uploadDir.resolve("${UUID.randomUUID()}-$original")
-                        withContext(Dispatchers.IO) {
-                            writeUploadWithLimit(part, target, deps.maxUploadBytes)
+                        // いったんローカルへステージングしてサイズ上限を検査してから保存先へ渡す
+                        // (S3 でも上限超過分をバケットへ書かない)
+                        val staging = deps.uploadDir.resolve("staging-${UUID.randomUUID()}.part")
+                        uploadReference = withContext(Dispatchers.IO) {
+                            writeUploadWithLimit(part, staging, deps.maxUploadBytes)
+                            try {
+                                deps.uploadStorage.store(staging, "${UUID.randomUUID()}-$original")
+                            } finally {
+                                Files.deleteIfExists(staging)
+                            }
                         }
-                        uploadPath = target.toString()
                     }
                     else -> Unit
                 }
@@ -73,12 +80,13 @@ fun Route.jobRoutes(deps: AppDependencies) {
             }
 
             val actualFilename = filename ?: throw ApiException(HttpStatusCode.BadRequest, "File is required")
-            val actualUploadPath = uploadPath ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
+            val actualUploadReference = uploadReference
+                ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
             val resolvedProjectId = projectId ?: db.defaultProjectId()
             try {
                 call.requireProjectPermission(Action.IMPORT_EXECUTE, resolvedProjectId)
             } catch (exc: Exception) {
-                withContext(Dispatchers.IO) { Files.deleteIfExists(Path.of(actualUploadPath)) }
+                withContext(Dispatchers.IO) { deps.uploadStorage.delete(actualUploadReference) }
                 throw exc
             }
             val actualFormat = format ?: inferFormat(actualFilename)
@@ -89,7 +97,7 @@ fun Route.jobRoutes(deps: AppDependencies) {
                 filename = actualFilename,
                 format = actualFormat,
                 sourceSrid = sourceSrid,
-                uploadPath = actualUploadPath,
+                uploadPath = actualUploadReference,
                 layerRole = layerRole ?: "generic"
             )
             call.respond(HttpStatusCode.Created, job)

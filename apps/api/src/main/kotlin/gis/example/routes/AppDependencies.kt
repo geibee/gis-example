@@ -4,11 +4,15 @@
 package gis.example.routes
 
 import gis.example.Database
+import gis.example.UploadStorage
 import java.nio.file.Path
 
 data class AppDependencies(
     val db: Database,
+    // multipart 受信のステージング先 (ローカル FS)。保存先の正はあくまで uploadStorage
     val uploadDir: Path,
+    // アップロードの保存先 (local | s3)。参照文字列の形式は UploadStorage.kt を参照
+    val uploadStorage: UploadStorage,
     val apiPublicUrl: String,
     val maxUploadBytes: Long
 )
