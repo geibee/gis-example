@@ -13,7 +13,10 @@ PostGIS を正本データストアにした OSS ベースの Web GIS MVP です
 
 ## Run
 
+compose は**ローカル開発専用** (本番は ECS Fargate + Secrets Manager を前提とする。後述)。資格情報は `infra/.env` (gitignore 済み) から供給されるため、初回はテンプレートをコピーしてから起動する:
+
 ```bash
+cp infra/.env.example infra/.env   # 初回のみ (dev 既定の資格情報)
 docker compose -f infra/docker-compose.yml up --build
 ```
 
@@ -21,11 +24,13 @@ Services:
 
 - Web: http://localhost:5173
 - API health: http://localhost:8080/health
-- Keycloak (OIDC IdP): http://localhost:8081 (管理コンソール `admin` / `admin`)
+- Keycloak (OIDC IdP): http://localhost:8081 (管理コンソールは `infra/.env` の `KC_BOOTSTRAP_ADMIN_*`、既定 `admin` / `admin`)
 - Martin: http://localhost:3000 (ループバックのみ)
-- PostgreSQL: localhost:5432 (`gis` / `gis`、ループバックのみ)
+- PostgreSQL: localhost:5432 (`infra/.env` の `POSTGRES_*`、既定 `gis` / `gis`、ループバックのみ)
 
 Martin と PostgreSQL のホスト公開はローカル開発用に `127.0.0.1` バインドへ限定している。どちらも API の認可を迂回できる経路になるため、本番環境ではホストへ公開しないこと。
+
+本番は ECS タスク定義の `secrets` (Secrets Manager / SSM Parameter Store) で同じ環境変数を注入する。全コンポーネントの環境変数一覧 (ECS タスク定義のインプット)・シークレットローテーション運用・dev シード混入ガード・ROPC の扱いは [`docs/environment-variables.md`](docs/environment-variables.md) を参照。
 
 Uploaded files and generated runtime data are stored under `./data`.
 
@@ -164,7 +169,7 @@ nightly の重量ゲート(`.github/workflows/nightly.yml`、03:00 JST)は、セ
 
 web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-oidc-context`)、API 呼び出しと MapLibre のタイル取得 (`transformRequest`) に Bearer トークンを付与する。ビルド時の設定は `VITE_OIDC_AUTHORITY`(既定 `http://localhost:8081/realms/gis`)と `VITE_OIDC_CLIENT_ID`(既定 `gis-web`)。
 
-開発 realm (`infra/keycloak/realm-gis.json`) のユーザー: `gis-admin` / `gis-editor` / `gis-viewer` (パスワードはユーザー名と同じ)。compose のシード (`infra/postgres/070-seed-dev-users.sql`) が gis-editor / gis-viewer を Default project のメンバーとして登録済み。
+開発 realm (`infra/keycloak/realm-gis.json`) のユーザー: `gis-admin` / `gis-editor` / `gis-viewer` (パスワードはユーザー名と同じ)。compose のシード (`infra/postgres/070-seed-dev-users.sql`) が gis-editor / gis-viewer を Default project のメンバーとして登録済み。この realm と seed は**ローカル開発専用**で、本番イメージには含まれない (`scripts/check-dev-seed-isolation.sh` が verify で毎回検査)。開発 realm の ROPC (`directAccessGrantsEnabled`) はスモーク E2E のトークン取得用で、**本番 realm では無効化必須** — 詳細は [`docs/environment-variables.md`](docs/environment-variables.md)。
 
 ## Authorization
 
@@ -184,7 +189,7 @@ web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-
 
 ## Notes
 
-- API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。
+- API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。全環境変数の一覧と本番 (ECS + Secrets Manager) での供給元は [`docs/environment-variables.md`](docs/environment-variables.md)。
 - CORS の許可オリジンは `WEB_ORIGIN`(未設定時は `http://localhost:5173` のみ)。全開放 (`anyHost`) にはならない。
 - アップロード上限は API 側 `UPLOAD_MAX_BYTES`(既定 200MB)と web の nginx `client_max_body_size 200m` で揃えている。
 - API の SQL には `DATABASE_STATEMENT_TIMEOUT_MS`(既定 30 秒)の statement_timeout がかかる。分析ジョブ・区域レイヤ生成などの重い生成系処理はトランザクション内で `HEAVY_STATEMENT_TIMEOUT_MS`(既定 0 = 無制限)に差し替わる。
