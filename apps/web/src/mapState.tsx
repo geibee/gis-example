@@ -12,6 +12,8 @@ import {
 import { useRouterState } from "@tanstack/react-router";
 import { getBuilding, getFeature, getLand, getLayers, getZone } from "./api";
 import { useAppShell } from "./appShell";
+import { notifyError, notifyInfo, notifySuccess } from "./notifications";
+import { confirmDialog } from "./ui/ConfirmDialog";
 import { activeScreenMeta } from "./routeMeta";
 import { useBusinessLinksQuery, useUpdateFeatureMutation } from "./queries/features";
 import { useDeleteLayerMutation, useDeleteResultSetMutation, useLayersQuery } from "./queries/layers";
@@ -52,7 +54,7 @@ export type ZoneMapFocusOptions = {
 // レイヤ一覧はサーバ状態 (useLayersQuery) を正とし、並び順・表示状態などの
 // クライアント状態のみをここで管理する。
 function useMapController() {
-  const { selectedProject, setNotice, setMapSupportOpen, mapSupportOpen } = useAppShell();
+  const { selectedProject, setMapSupportOpen, mapSupportOpen } = useAppShell();
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
 
   const mapApiRef = useRef<MapPaneApi | null>(null);
@@ -163,15 +165,19 @@ function useMapController() {
 
   const requestLayerDelete = useCallback(
     async (layer: Layer) => {
-      if (!window.confirm(`レイヤ「${layer.name}」を削除します。実体テーブルも削除されます。よろしいですか？`)) {
-        return;
-      }
+      const confirmed = await confirmDialog({
+        title: "レイヤの削除",
+        message: `レイヤ「${layer.name}」を削除します。実体テーブルも削除されます。よろしいですか？`,
+        confirmLabel: "削除",
+        danger: true
+      });
+      if (!confirmed) return;
       setDeletingLayerIds((current) => new Set([...current, layer.id]));
       try {
         await deleteLayerMutation.mutateAsync(layer.id);
-        setNotice("レイヤを削除しました");
+        notifySuccess("レイヤを削除しました");
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       } finally {
         setDeletingLayerIds((current) => {
           const next = new Set(current);
@@ -180,24 +186,24 @@ function useMapController() {
         });
       }
     },
-    [deleteLayerMutation, setNotice]
+    [deleteLayerMutation]
   );
 
   const requestResultSetDelete = useCallback(
     async (resultSet: Extract<LayerListItem, { type: "resultSet" }>) => {
-      if (
-        !window.confirm(
-          `条件検索結果「${resultSet.name}」を削除します。配下の${resultSet.layers.length.toLocaleString()}レイヤと実体テーブルも削除されます。よろしいですか？`
-        )
-      ) {
-        return;
-      }
+      const confirmed = await confirmDialog({
+        title: "条件検索結果の削除",
+        message: `条件検索結果「${resultSet.name}」を削除します。配下の${resultSet.layers.length.toLocaleString()}レイヤと実体テーブルも削除されます。よろしいですか？`,
+        confirmLabel: "削除",
+        danger: true
+      });
+      if (!confirmed) return;
       setDeletingResultSetIds((current) => new Set([...current, resultSet.id]));
       try {
         await deleteResultSetMutation.mutateAsync(resultSet.id);
-        setNotice("条件検索結果を削除しました");
+        notifySuccess("条件検索結果を削除しました");
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       } finally {
         setDeletingResultSetIds((current) => {
           const next = new Set(current);
@@ -206,7 +212,7 @@ function useMapController() {
         });
       }
     },
-    [deleteResultSetMutation, setNotice]
+    [deleteResultSetMutation]
   );
 
   const startLayerDrag = useCallback((event: DragEvent<HTMLDivElement>, layerId: string) => {
@@ -240,10 +246,10 @@ function useMapController() {
         setSelectedFeature(feature);
         setSelectedFeatureLayer(layer);
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       }
     },
-    [setNotice]
+    []
   );
 
   useEffect(() => {
@@ -290,11 +296,11 @@ function useMapController() {
       });
       setSelectedFeature(feature);
       mapApiRef.current?.reloadLayerSource(selectedFeatureLayer.id);
-      setNotice("地物を保存しました");
+      notifySuccess("地物を保存しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
-  }, [featureGeometryDraft, featurePropertyDraft, selectedFeature, selectedFeatureLayer, setNotice, updateFeatureMutation]);
+  }, [featureGeometryDraft, featurePropertyDraft, selectedFeature, selectedFeatureLayer, updateFeatureMutation]);
 
   // ---------------------------------------------------------------- 業務オブジェクトの地図ハイライト
 
@@ -366,7 +372,7 @@ function useMapController() {
   const openSourceFeature = useCallback(
     async (sourceLayerId?: string | null, sourceFeatureId?: string | null, options: ZoneMapFocusOptions = {}) => {
       if (!sourceLayerId || !sourceFeatureId) {
-        setNotice("GISリンクがありません");
+        notifyInfo("GISリンクがありません");
         return;
       }
       try {
@@ -397,10 +403,10 @@ function useMapController() {
           mapApiRef.current?.focusGeometry(feature.geometry);
         }, 80);
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       }
     },
-    [layerById, selectedProject, setMapSupportOpen, setNotice, showLayers]
+    [layerById, selectedProject, setMapSupportOpen, showLayers]
   );
 
   // 区域とその区域内の土地・建物をまとめて地図表示する
@@ -478,10 +484,10 @@ function useMapController() {
           mapApiRef.current?.focusGeometry(zoneFeature.geometry);
         }, 80);
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       }
     },
-    [layerById, selectedProject, setMapSupportOpen, setNotice, showLayers]
+    [layerById, selectedProject, setMapSupportOpen, showLayers]
   );
 
   // 検索結果 (FeatureSearchResult) の地物を地図上で開く
@@ -489,7 +495,7 @@ function useMapController() {
     async (result: FeatureSearchResult) => {
       const layer = layerById.get(result.layerId);
       if (!layer) {
-        setNotice("検索結果のレイヤを取得できませんでした");
+        notifyError("検索結果のレイヤを取得できませんでした");
         return;
       }
       try {
@@ -499,10 +505,10 @@ function useMapController() {
         setSelectedFeatureLayer(layer);
         mapApiRef.current?.focusGeometry(feature.geometry);
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       }
     },
-    [layerById, setNotice, showLayers]
+    [layerById, showLayers]
   );
 
   // 一覧検索フィルタへ「地図の表示範囲」「選択中の地物」を反映する共通処理
@@ -510,18 +516,18 @@ function useMapController() {
     (setter: (update: (current: BusinessObjectFilters) => BusinessObjectFilters) => void) => {
       const bbox = mapApiRef.current?.getBoundsBbox();
       if (!bbox) {
-        setNotice("地図がまだ準備できていません");
+        notifyInfo("地図がまだ準備できていません");
         return;
       }
       setter((current) => ({ ...current, bbox }));
     },
-    [setNotice]
+    []
   );
 
   const applySelectedFeatureFilter = useCallback(
     (setter: (update: (current: BusinessObjectFilters) => BusinessObjectFilters) => void) => {
       if (!selectedFeature || !selectedFeatureLayer) {
-        setNotice("先に地図上の地物を選択してください");
+        notifyInfo("先に地図上の地物を選択してください");
         return;
       }
       setter((current) => ({
@@ -530,7 +536,7 @@ function useMapController() {
         intersectsFeatureId: selectedFeature.featureId
       }));
     },
-    [selectedFeature, selectedFeatureLayer, setNotice]
+    [selectedFeature, selectedFeatureLayer]
   );
 
   return {

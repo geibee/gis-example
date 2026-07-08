@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { useAppShell } from "../appShell";
+import { notifyError, notifySuccess } from "../notifications";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { activeScreenObjectId } from "../routeMeta";
 import {
   useDeleteRelationshipMutation,
@@ -121,14 +123,14 @@ export function useBusinessObjectScreen<TItem extends { id: string }, TDraft>(op
 // 関係 (関係者 ↔ 土地/建物) の保存・削除。土地・建物・関係者の 3 画面で共用する。
 // キャッシュ無効化はミューテーション定義側 (queries/parties.ts) が行う。
 export function useRelationshipActions() {
-  const { selectedProject, setNotice } = useAppShell();
+  const { selectedProject } = useAppShell();
   const saveMutation = useSaveRelationshipMutation();
   const deleteMutation = useDeleteRelationshipMutation();
 
   const saveRelationship = useCallback(
     async (relationshipId: string | null, draft: RelationshipDraft) => {
       if (!draft.partyId || !draft.targetId || !draft.relationType.trim()) {
-        setNotice("関係者、対象、関係種別は必須です");
+        notifyError("関係者、対象、関係種別は必須です");
         return;
       }
       try {
@@ -143,25 +145,31 @@ export function useRelationshipActions() {
             note: nullableString(draft.note)
           }
         });
-        setNotice(relationshipId ? "関係を更新しました" : "関係を追加しました");
+        notifySuccess(relationshipId ? "関係を更新しました" : "関係を追加しました");
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       }
     },
-    [saveMutation, selectedProject, setNotice]
+    [saveMutation, selectedProject]
   );
 
   const removeRelationship = useCallback(
     async (relationshipId: string) => {
-      if (!window.confirm("この関係を削除しますか")) return;
+      const confirmed = await confirmDialog({
+        title: "関係の削除",
+        message: "この関係を削除しますか",
+        confirmLabel: "削除",
+        danger: true
+      });
+      if (!confirmed) return;
       try {
         await deleteMutation.mutateAsync(relationshipId);
-        setNotice("関係を削除しました");
+        notifySuccess("関係を削除しました");
       } catch (error) {
-        setNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       }
     },
-    [deleteMutation, setNotice]
+    [deleteMutation]
   );
 
   return { saveRelationship, removeRelationship };

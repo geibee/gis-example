@@ -3,6 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppShell } from "../appShell";
 import { useBusinessListHighlights, useMapState } from "../mapState";
+import { notifyError, notifyInfo, notifySuccess } from "../notifications";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { ZoneSearchPanel } from "../components/ZoneSearchPanel";
 import { ZoneWorkspace } from "../components/ZoneWorkspace";
 import { conditionSearchFeatures } from "../api";
@@ -53,7 +55,7 @@ import { unfilteredCriteria, useBusinessListState, useBusinessObjectScreen } fro
 // 区域画面: 一覧・詳細・区域レイヤ作成 (取込ジョブ) のサーバ状態はクエリフック、
 // GIS 条件検索や取込フォームなどの画面状態はこのファイルで完結する。
 export default function ZonesScreen() {
-  const { projects, selectedProject, setSelectedProject, setNotice } = useAppShell();
+  const { projects, selectedProject, setSelectedProject } = useAppShell();
   const map = useMapState();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -203,9 +205,9 @@ export default function ZonesScreen() {
       const results = await conditionSearchFeatures(buildConditionQuery());
       setZoneSearchResults(results);
       map.setManualMapHighlightResults(results);
-      if (!results.length) setNotice("検索結果はありません");
+      if (!results.length) notifyInfo("検索結果はありません");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     } finally {
       setLoadingZoneSearch(false);
     }
@@ -215,8 +217,8 @@ export default function ZonesScreen() {
   // 成果物 (結果レイヤ) のキャッシュ無効化はポーリングフック側が行う。
   const analysisPolling = useAnalysisJobPolling({
     onSucceeded: () => {},
-    onFailed: (job) => setNotice(job.errorMessage ?? "条件検索結果の保存に失敗しました"),
-    onTimeout: () => setNotice("分析ジョブの完了確認がタイムアウトしました。時間をおいてレイヤ一覧を確認してください")
+    onFailed: (job) => notifyError(job.errorMessage ?? "条件検索結果の保存に失敗しました"),
+    onTimeout: () => notifyInfo("分析ジョブの完了確認がタイムアウトしました。時間をおいてレイヤ一覧を確認してください")
   });
 
   const saveConditionSearchResult = async () => {
@@ -230,9 +232,9 @@ export default function ZonesScreen() {
         conditionQuery: query
       });
       analysisPolling.start(job.id);
-      setNotice("条件検索結果の保存を開始しました");
+      notifySuccess("条件検索結果の保存を開始しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
@@ -322,10 +324,10 @@ export default function ZonesScreen() {
       });
       setFilters((current) => ({ ...current, zoneLayerId: result.layer.id }));
       map.showLayers([result.layer.id]);
-      setNotice(`区域レイヤを作成しました（${result.zonesCreated.toLocaleString()}件作成）`);
+      notifySuccess(`区域レイヤを作成しました（${result.zonesCreated.toLocaleString()}件作成）`);
       return result;
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
       return null;
     }
   };
@@ -337,17 +339,17 @@ export default function ZonesScreen() {
         const result = await createZoneFromSourceLayer(job.layerId, pendingZoneMetadataRef.current);
         if (result) openCreatedZoneFromOperation(result);
       } else {
-        setNotice("区域データの取込結果を取得できませんでした");
+        notifyError("区域データの取込結果を取得できませんでした");
       }
       setCreatingZoneLayer(false);
     },
     onFailed: (job) => {
       setCreatingZoneLayer(false);
-      setNotice(job.errorMessage ?? "区域データの取込に失敗しました");
+      notifyError(job.errorMessage ?? "区域データの取込に失敗しました");
     },
     onTimeout: () => {
       setCreatingZoneLayer(false);
-      setNotice("取込ジョブの完了確認がタイムアウトしました。時間をおいてレイヤ一覧を確認してください");
+      notifyInfo("取込ジョブの完了確認がタイムアウトしました。時間をおいてレイヤ一覧を確認してください");
     },
     onError: () => setCreatingZoneLayer(false)
   });
@@ -366,7 +368,7 @@ export default function ZonesScreen() {
       importPolling.start(job.id);
     } catch (error) {
       setCreatingZoneLayer(false);
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
@@ -384,15 +386,15 @@ export default function ZonesScreen() {
   // ---------------------------------------------------------------- 区域の保存・削除
   const saveZone = async () => {
     if (!screen.draft.name.trim() || !screen.draft.status.trim()) {
-      setNotice("区域名、ステータスは必須です");
+      notifyError("区域名、ステータスは必須です");
       return;
     }
     if (screen.creating && !screen.draft.id.trim()) {
-      setNotice("IDは必須です");
+      notifyError("IDは必須です");
       return;
     }
     if (!(screen.draft.zoneLayerId ?? "").trim() || !(screen.draft.zoneFeatureId ?? "").trim()) {
-      setNotice("区域レイヤと地物IDは必須です");
+      notifyError("区域レイヤと地物IDは必須です");
       return;
     }
     try {
@@ -414,20 +416,27 @@ export default function ZonesScreen() {
           : null;
       if (!item) return;
       screen.afterSave(item);
-      setNotice(screen.creating ? "区域を作成しました" : "区域を保存しました");
+      notifySuccess(screen.creating ? "区域を作成しました" : "区域を保存しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
   const removeZone = async () => {
-    if (!screen.selected || !window.confirm(`${screen.selected.id} を削除しますか`)) return;
+    if (!screen.selected) return;
+    const confirmed = await confirmDialog({
+      title: "区域の削除",
+      message: `${screen.selected.id} を削除しますか`,
+      confirmLabel: "削除",
+      danger: true
+    });
+    if (!confirmed) return;
     try {
       await deleteMutation.mutateAsync(screen.selected.id);
       screen.afterDelete();
-      setNotice("区域を削除しました");
+      notifySuccess("区域を削除しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
@@ -435,7 +444,7 @@ export default function ZonesScreen() {
   const applySelectedFeatureToZoneDraft = () => {
     const { selectedFeature, selectedFeatureLayer } = map;
     if (!selectedFeature || !selectedFeatureLayer || !canUseSelectedFeatureAsZoneFeature(selectedFeature, selectedFeatureLayer)) {
-      setNotice("先に地図上の区域レイヤ地物を選択してください");
+      notifyInfo("先に地図上の区域レイヤ地物を選択してください");
       return;
     }
     setZoneDraftGisLink(selectedFeature.layerId, selectedFeature.featureId);

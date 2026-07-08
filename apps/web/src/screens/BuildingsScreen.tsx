@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAppShell } from "../appShell";
 import { useBusinessListHighlights, useMapState } from "../mapState";
+import { notifyError, notifySuccess } from "../notifications";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { BuildingWorkspace } from "../components/BuildingWorkspace";
 import {
   useBuildingQuery,
@@ -32,7 +34,7 @@ import {
 // 建物画面: 一覧・詳細のサーバ状態はクエリフック (queries/buildings.ts)、
 // 検索条件・編集ドラフトなどの画面状態はこのファイルで完結する。
 export default function BuildingsScreen() {
-  const { projects, selectedProject, setSelectedProject, setNotice } = useAppShell();
+  const { projects, selectedProject, setSelectedProject } = useAppShell();
   const map = useMapState();
   const navigate = useNavigate();
 
@@ -60,11 +62,11 @@ export default function BuildingsScreen() {
 
   const saveBuilding = async () => {
     if (!screen.draft.name.trim() || !screen.draft.status.trim()) {
-      setNotice("建物名、ステータスは必須です");
+      notifyError("建物名、ステータスは必須です");
       return;
     }
     if (screen.creating && !screen.draft.id.trim()) {
-      setNotice("IDは必須です");
+      notifyError("IDは必須です");
       return;
     }
     try {
@@ -93,20 +95,27 @@ export default function BuildingsScreen() {
           : null;
       if (!item) return;
       screen.afterSave(item);
-      setNotice(screen.creating ? "建物を作成しました" : "建物を保存しました");
+      notifySuccess(screen.creating ? "建物を作成しました" : "建物を保存しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
   const removeBuilding = async () => {
-    if (!screen.selected || !window.confirm(`${screen.selected.id} を削除しますか`)) return;
+    if (!screen.selected) return;
+    const confirmed = await confirmDialog({
+      title: "建物の削除",
+      message: `${screen.selected.id} を削除しますか`,
+      confirmLabel: "削除",
+      danger: true
+    });
+    if (!confirmed) return;
     try {
       await deleteMutation.mutateAsync(screen.selected.id);
       screen.afterDelete();
-      setNotice("建物を削除しました");
+      notifySuccess("建物を削除しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 

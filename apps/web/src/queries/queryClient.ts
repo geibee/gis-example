@@ -1,5 +1,5 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query";
-import { notify } from "../notifications";
+import { notifyError } from "../notifications";
 import { errorMessage } from "../utils";
 
 // アプリ共通の QueryClient。
@@ -10,7 +10,7 @@ import { errorMessage } from "../utils";
 export function createQueryClient(): QueryClient {
   return new QueryClient({
     queryCache: new QueryCache({
-      onError: (error) => notify(errorMessage(error))
+      onError: (error) => notifyError(errorMessage(error))
     }),
     defaultOptions: {
       queries: {

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { useAppShell } from "../appShell";
 import { useMapState } from "../mapState";
+import { notifyError } from "../notifications";
 
 // 地図ペイン (maplibre-gl を含む) はメインチャンクとは別チャンクとして遅延ロードする
 const MapPane = lazy(() => import("./MapPane"));
@@ -8,7 +9,7 @@ const MapPane = lazy(() => import("./MapPane"));
 // MapPane への配線を App から切り出したホスト。props はすべて AppShell / MapState
 // コンテキストから供給し、App 側のバケツリレーをなくす。
 export function MapPaneHost() {
-  const { mapSupportOpen, setMapSupportOpen, setNotice } = useAppShell();
+  const { mapSupportOpen, setMapSupportOpen } = useAppShell();
   const map = useMapState();
 
   return (
@@ -20,7 +21,7 @@ export function MapPaneHost() {
         mapHighlightResults={map.mapHighlightResults}
         layerById={map.layerById}
         onPickFeature={map.handleMapFeatureClick}
-        onNotice={setNotice}
+        onNotice={notifyError}
         open={mapSupportOpen}
         onToggle={() => setMapSupportOpen((open) => !open)}
         baseMapVisible={map.baseMapVisible}

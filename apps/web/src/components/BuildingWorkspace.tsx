@@ -10,6 +10,7 @@ import {
   rightTypeOptions
 } from "../constants";
 import { formatArea, gisLinkSummary, mergeChoiceOptions, relationshipSummary, relationshipTypeChoices } from "../utils";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { BusinessFilterPanel } from "./BusinessFilterPanel";
 import { ChoiceSelect } from "./ChoiceSelect";
 import { ObjectActions } from "./ObjectActions";
@@ -17,6 +18,30 @@ import { ObjectDetailHeader } from "./ObjectDetailHeader";
 import { ObjectSidebar } from "./ObjectSidebar";
 import { RelationshipEditor } from "./RelationshipEditor";
 import { SourceLinkPanel } from "./SourceLinkPanel";
+
+const buildingColumns: Array<DataTableColumn<Building>> = [
+  { key: "id", header: "ID", render: (building) => building.id },
+  {
+    key: "name",
+    header: "名称",
+    render: (building) => (
+      <>
+        <strong>{building.name}</strong>
+        <span>{building.houseNumber ?? building.buildingLocation ?? ""}</span>
+      </>
+    )
+  },
+  { key: "land", header: "土地", render: (building) => building.landLabel ?? "未設定" },
+  {
+    key: "useStructure",
+    header: "用途/構造",
+    render: (building) => [building.buildingUse, building.structure].filter(Boolean).join(" / ")
+  },
+  { key: "floors", header: "階数", render: (building) => building.floors ?? "" },
+  { key: "totalFloorArea", header: "延床", render: (building) => formatArea(building.totalFloorAreaSqm) },
+  { key: "relationships", header: "関係者", render: (building) => relationshipSummary(building.relationships) },
+  { key: "gis", header: "GIS", render: (building) => gisLinkSummary(building.sourceLayerId, building.sourceFeatureId) }
+];
 
 export function BuildingWorkspace({
   query,
@@ -138,40 +163,15 @@ export function BuildingWorkspace({
         projects={projects}
         onProjectChange={onProjectChange}
       >
-        <div className="business-table-scroll">
-          <table className="business-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>名称</th>
-                <th>土地</th>
-                <th>用途/構造</th>
-                <th>階数</th>
-                <th>延床</th>
-                <th>関係者</th>
-                <th>GIS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((building) => (
-                <tr key={building.id} onClick={() => onSelect(building.id)}>
-                  <td>{building.id}</td>
-                  <td>
-                    <strong>{building.name}</strong>
-                    <span>{building.houseNumber ?? building.buildingLocation ?? ""}</span>
-                  </td>
-                  <td>{building.landLabel ?? "未設定"}</td>
-                  <td>{[building.buildingUse, building.structure].filter(Boolean).join(" / ")}</td>
-                  <td>{building.floors ?? ""}</td>
-                  <td>{formatArea(building.totalFloorAreaSqm)}</td>
-                  <td>{relationshipSummary(building.relationships)}</td>
-                  <td>{gisLinkSummary(building.sourceLayerId, building.sourceFeatureId)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!items.length ? <p className="empty-state">建物はありません</p> : null}
+        <DataTable
+          columns={buildingColumns}
+          rows={items}
+          rowKey={(building) => building.id}
+          onRowClick={(building) => onSelect(building.id)}
+          selectedRowKey={selectedId}
+          emptyMessage="建物はありません"
+          pageSize={50}
+        />
       </ObjectSidebar>
       ) : null}
 

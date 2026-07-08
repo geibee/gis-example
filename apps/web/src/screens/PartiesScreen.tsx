@@ -2,7 +2,10 @@ import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAppShell } from "../appShell";
 import { useBusinessListHighlights } from "../mapState";
+import { notifyError, notifySuccess } from "../notifications";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { PartyWorkspace } from "../components/PartyWorkspace";
+import type { PartyFormValues } from "../components/PartyForm";
 import { useBuildingsQuery } from "../queries/buildings";
 import { useLandsQuery } from "../queries/lands";
 import {
@@ -24,7 +27,7 @@ import {
 // 関係者画面: 一覧・詳細のサーバ状態はクエリフック (queries/parties.ts)、
 // 検索条件・編集ドラフトなどの画面状態はこのファイルで完結する。
 export default function PartiesScreen() {
-  const { projects, selectedProject, setSelectedProject, setNotice } = useAppShell();
+  const { projects, selectedProject, setSelectedProject } = useAppShell();
   const navigate = useNavigate();
 
   const list = useBusinessListState();
@@ -51,24 +54,18 @@ export default function PartiesScreen() {
   const deleteMutation = useDeletePartyMutation();
   const { saveRelationship, removeRelationship } = useRelationshipActions();
 
-  const saveParty = async () => {
-    if (!screen.draft.name.trim() || !screen.draft.partyType.trim()) {
-      setNotice("名称、種別は必須です");
-      return;
-    }
-    if (screen.creating && !screen.draft.id.trim()) {
-      setNotice("IDは必須です");
-      return;
-    }
+  // フィールド単位の必須チェックは PartyForm (react-hook-form + zod) 側で行われるため、
+  // ここでは検証済みの値を API ペイロードへ変換して保存するだけでよい。
+  const saveParty = async (values: PartyFormValues) => {
     try {
       const payload = {
-        ...(screen.creating ? { id: screen.draft.id.trim(), projectId: selectedProject } : {}),
-        name: screen.draft.name,
-        partyType: screen.draft.partyType,
-        contact: nullableString(screen.draft.contact),
-        address: nullableString(screen.draft.address),
-        memo: nullableString(screen.draft.memo),
-        tags: parsePartyTags(screen.draft.tags)
+        ...(screen.creating ? { id: values.id.trim(), projectId: selectedProject } : {}),
+        name: values.name,
+        partyType: values.partyType,
+        contact: nullableString(values.contact),
+        address: nullableString(values.address),
+        memo: nullableString(values.memo),
+        tags: parsePartyTags(values.tags)
       };
       const item = screen.creating
         ? await createMutation.mutateAsync(payload)
@@ -77,20 +74,27 @@ export default function PartiesScreen() {
           : null;
       if (!item) return;
       screen.afterSave(item);
-      setNotice(screen.creating ? "関係者を作成しました" : "関係者を保存しました");
+      notifySuccess(screen.creating ? "関係者を作成しました" : "関係者を保存しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
   const removeParty = async () => {
-    if (!screen.selected || !window.confirm(`${screen.selected.id} を削除しますか`)) return;
+    if (!screen.selected) return;
+    const confirmed = await confirmDialog({
+      title: "関係者の削除",
+      message: `${screen.selected.id} を削除しますか`,
+      confirmLabel: "削除",
+      danger: true
+    });
+    if (!confirmed) return;
     try {
       await deleteMutation.mutateAsync(screen.selected.id);
       screen.afterDelete();
-      setNotice("関係者を削除しました");
+      notifySuccess("関係者を削除しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
@@ -114,8 +118,6 @@ export default function PartiesScreen() {
         buildings={buildings}
         selectedId={screen.selectedId}
         selected={screen.selected}
-        draft={screen.draft}
-        setDraft={screen.setDraft}
         creating={screen.creating}
         loading={partiesQuery.isFetching}
         saving={createMutation.isPending || updateMutation.isPending}
@@ -126,7 +128,7 @@ export default function PartiesScreen() {
         onCreate={screen.beginCreate}
         onCancelCreate={screen.cancelCreate}
         onBackToList={screen.backToList}
-        onSave={() => void saveParty()}
+        onSave={(values) => void saveParty(values)}
         onDelete={() => void removeParty()}
         onOpenLand={(id) => void navigate({ to: "/lands/$id", params: { id } })}
         onOpenBuilding={(id) => void navigate({ to: "/buildings/$id", params: { id } })}

@@ -10,6 +10,7 @@ import {
   rightTypeOptions
 } from "../constants";
 import { formatArea, gisLinkSummary, mergeChoiceOptions, relationshipSummary, relationshipTypeChoices } from "../utils";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { BusinessFilterPanel } from "./BusinessFilterPanel";
 import { ChoiceSelect } from "./ChoiceSelect";
 import { ObjectActions } from "./ObjectActions";
@@ -17,6 +18,25 @@ import { ObjectDetailHeader } from "./ObjectDetailHeader";
 import { ObjectSidebar } from "./ObjectSidebar";
 import { RelationshipEditor } from "./RelationshipEditor";
 import { SourceLinkPanel } from "./SourceLinkPanel";
+
+const landColumns: Array<DataTableColumn<Land>> = [
+  { key: "id", header: "ID", render: (land) => land.id },
+  {
+    key: "address",
+    header: "所在地 / 地番",
+    render: (land) => (
+      <>
+        <strong>{land.address}</strong>
+        <span>{land.lotNumber}</span>
+      </>
+    )
+  },
+  { key: "landUse", header: "用途", render: (land) => land.landUse ?? "" },
+  { key: "areaSqm", header: "地積", render: (land) => formatArea(land.areaSqm) },
+  { key: "status", header: "ステータス", render: (land) => land.status },
+  { key: "relationships", header: "関係者", render: (land) => relationshipSummary(land.relationships) },
+  { key: "gis", header: "GIS", render: (land) => gisLinkSummary(land.sourceLayerId, land.sourceFeatureId) }
+];
 
 export function LandWorkspace({
   query,
@@ -142,38 +162,15 @@ export function LandWorkspace({
         projects={projects}
         onProjectChange={onProjectChange}
       >
-        <div className="business-table-scroll">
-          <table className="business-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>所在地 / 地番</th>
-                <th>用途</th>
-                <th>地積</th>
-                <th>ステータス</th>
-                <th>関係者</th>
-                <th>GIS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((land) => (
-                <tr key={land.id} onClick={() => onSelect(land.id)}>
-                  <td>{land.id}</td>
-                  <td>
-                    <strong>{land.address}</strong>
-                    <span>{land.lotNumber}</span>
-                  </td>
-                  <td>{land.landUse ?? ""}</td>
-                  <td>{formatArea(land.areaSqm)}</td>
-                  <td>{land.status}</td>
-                  <td>{relationshipSummary(land.relationships)}</td>
-                  <td>{gisLinkSummary(land.sourceLayerId, land.sourceFeatureId)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!items.length ? <p className="empty-state">土地はありません</p> : null}
+        <DataTable
+          columns={landColumns}
+          rows={items}
+          rowKey={(land) => land.id}
+          onRowClick={(land) => onSelect(land.id)}
+          selectedRowKey={selectedId}
+          emptyMessage="土地はありません"
+          pageSize={50}
+        />
       </ObjectSidebar>
       ) : null}
 

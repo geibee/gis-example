@@ -15,6 +15,7 @@ import {
   zoneLayerOptions,
   zoneLayerSummary
 } from "../utils";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { ChoiceSelect } from "./ChoiceSelect";
 import { ObjectActions } from "./ObjectActions";
 import { ObjectDetailHeader } from "./ObjectDetailHeader";
@@ -22,6 +23,29 @@ import { ObjectSidebar } from "./ObjectSidebar";
 import { SourceLinkPanel } from "./SourceLinkPanel";
 import { ZoneFilterPanel } from "./ZoneFilterPanel";
 import { ZonePartySummary } from "./ZonePartySummary";
+
+const zoneColumns = (layers: Layer[]): Array<DataTableColumn<Zone>> => [
+  { key: "id", header: "ID", render: (zone) => zone.id },
+  {
+    key: "name",
+    header: "区域名",
+    render: (zone) => (
+      <>
+        <strong>{zone.name}</strong>
+        <span>{zone.memo ?? ""}</span>
+      </>
+    )
+  },
+  { key: "zoneType", header: "種別", render: (zone) => zone.zoneType ?? "" },
+  { key: "status", header: "ステータス", render: (zone) => zone.status },
+  { key: "landCount", header: "土地", render: (zone) => (zone.landCount ?? 0).toLocaleString() },
+  { key: "buildingCount", header: "建物", render: (zone) => (zone.buildingCount ?? 0).toLocaleString() },
+  {
+    key: "zoneLayer",
+    header: "区域レイヤ",
+    render: (zone) => zoneLayerSummary(layers, zoneLayerIdOf(zone), zoneFeatureIdOf(zone))
+  }
+];
 
 export function ZoneWorkspace({
   query,
@@ -238,38 +262,16 @@ export function ZoneWorkspace({
           projects={projects}
           onProjectChange={onProjectChange}
         >
-          <div className="business-table-scroll">
-            <table className="business-table zone-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>区域名</th>
-                  <th>種別</th>
-                  <th>ステータス</th>
-                  <th>土地</th>
-                  <th>建物</th>
-                  <th>区域レイヤ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((zone) => (
-                  <tr className={selectedId === zone.id ? "active" : ""} key={zone.id} onClick={() => onSelect(zone.id)}>
-                    <td>{zone.id}</td>
-                    <td>
-                      <strong>{zone.name}</strong>
-                      <span>{zone.memo ?? ""}</span>
-                    </td>
-                    <td>{zone.zoneType ?? ""}</td>
-                    <td>{zone.status}</td>
-                    <td>{(zone.landCount ?? 0).toLocaleString()}</td>
-                    <td>{(zone.buildingCount ?? 0).toLocaleString()}</td>
-                    <td>{zoneLayerSummary(layers, zoneLayerIdOf(zone), zoneFeatureIdOf(zone))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!items.length ? <p className="empty-state">区域はありません</p> : null}
+          <DataTable
+            columns={zoneColumns(layers)}
+            rows={items}
+            rowKey={(zone) => zone.id}
+            onRowClick={(zone) => onSelect(zone.id)}
+            selectedRowKey={selectedId}
+            emptyMessage="区域はありません"
+            pageSize={50}
+            tableClassName="business-table zone-table"
+          />
           <details className="advanced-gis-tools">
             <summary>
               <Layers size={15} />
