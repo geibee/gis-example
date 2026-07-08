@@ -56,7 +56,7 @@ fun Application.module(
     db: Database = Database.fromEnv(),
     oidcSettings: OidcSettings = OidcSettings.fromEnv()
 ) {
-    db.ensureBusinessSchema()
+    db.migrateSchema()
     val uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads")
     val apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/')
     val webOrigin = System.getenv("WEB_ORIGIN")
