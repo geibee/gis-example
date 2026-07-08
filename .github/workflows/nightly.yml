@@ -63,7 +63,7 @@ jobs:
 
       - name: スキャン成果物をアップロード (SARIF / SBOM)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-results
           path: ci-results/
@@ -94,7 +94,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -122,7 +122,7 @@ jobs:
         run: bash scripts/fuzz-api.sh | tee /tmp/fuzz-report.log
       - name: ファズログをアップロード
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-results
           path: |
@@ -140,7 +140,7 @@ jobs:
         run: bash scripts/smoke-e2e.sh
       - name: compose ログをアップロード (失敗時)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-compose-logs
           path: /tmp/smoke-compose.log
