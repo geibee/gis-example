@@ -1,0 +1,16 @@
+# 依存更新の自動 PR。cooldown は .npmrc の min-release-age と同じ思想で、
+# 公開直後のバージョンを提案しない (サプライチェーン侵害の発覚を待つ冷却期間)。
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
