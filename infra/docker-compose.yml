@@ -119,6 +119,16 @@ services:
       # dev は API を直接公開するため X-Forwarded-* を信頼しない (0 = プラグイン無効)。
       # 本番は信頼できるプロキシ段数 (例: CloudFront+ALB=2) を設定する
       TRUSTED_PROXY_COUNT: "0"
+      # ジョブ実行基盤 (issue #24)。既定は従来どおり polling + API 内蔵ランナー。
+      # SQS 経路を試す場合は infra/.env で JOB_QUEUE_MODE=sqs / ANALYSIS_RUNNER_MODE=external
+      # にして `docker compose --profile sqs up` で ElasticMQ と analysis-worker を同時に起動する。
+      # 本番は JOB_QUEUE_MODE=sqs + 実 SQS (エンドポイント上書きなし、認証はタスクロール)
+      JOB_QUEUE_MODE: ${JOB_QUEUE_MODE:-polling}
+      ANALYSIS_RUNNER_MODE: ${ANALYSIS_RUNNER_MODE:-in-process}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://elasticmq:9324}
+      SQS_ANALYSIS_QUEUE_URL: ${SQS_ANALYSIS_QUEUE_URL:-http://elasticmq:9324/000000000000/analysis-jobs}
+      SQS_IMPORT_QUEUE_URL: ${SQS_IMPORT_QUEUE_URL:-http://elasticmq:9324/000000000000/import-jobs}
+      SQS_REGION: ${S3_REGION:-us-east-1}
     ports:
       - "8080:8080"
     volumes:
@@ -138,6 +148,11 @@ services:
       PGUSER: ${POSTGRES_USER:-gis}
       PGPASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       POLL_INTERVAL_SECONDS: "2"
+      # ジョブ起動の駆動方式 (issue #24)。既定 polling は従来どおりの DB ポーリング。
+      # sqs は --profile sqs (ElasticMQ) とセットで opt-in する
+      JOB_QUEUE_MODE: ${JOB_QUEUE_MODE:-polling}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://elasticmq:9324}
+      SQS_IMPORT_QUEUE_URL: ${SQS_IMPORT_QUEUE_URL:-http://elasticmq:9324/000000000000/import-jobs}
       # upload_path が s3:// のジョブを読むための S3 設定 (api 側と対で切り替える)
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
       AWS_REGION: ${S3_REGION:-us-east-1}
@@ -148,6 +163,46 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # SQS 経路の開発用キュー (SQS 互換の ElasticMQ)。既定では起動しない:
+  #   infra/.env に JOB_QUEUE_MODE=sqs / ANALYSIS_RUNNER_MODE=external を設定した上で
+  #   docker compose -f infra/docker-compose.yml --profile sqs up --build
+  # 本番は実 SQS を使うため、このサービスは本番構成に含めない
+  elasticmq:
+    profiles: ["sqs"]
+    restart: unless-stopped
+    image: softwaremill/elasticmq-native:1.6.16
+    # ローカル開発用にループバックのみ公開 (キューの中身は認可を持たない)
+    ports:
+      - "127.0.0.1:9324:9324"
+    volumes:
+      - ./elasticmq/elasticmq.conf:/opt/elasticmq.conf:ro
+
+  # 分析ジョブ実行ワーカー (issue #24)。api と同イメージで command のみ
+  # bin/analysis-worker に差し替える (本番 ECS でも同じ分離構成)。
+  # --profile sqs のときは api 側を ANALYSIS_RUNNER_MODE=external にして重複起動を避ける
+  analysis-worker:
+    profiles: ["sqs"]
+    restart: unless-stopped
+    build:
+      context: ../apps/api
+    command: ["/app/bin/analysis-worker"]
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-gis}
+      DATABASE_USER: ${POSTGRES_USER:-gis}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      JOB_QUEUE_MODE: ${JOB_QUEUE_MODE:-sqs}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://elasticmq:9324}
+      SQS_ANALYSIS_QUEUE_URL: ${SQS_ANALYSIS_QUEUE_URL:-http://elasticmq:9324/000000000000/analysis-jobs}
+      SQS_REGION: ${S3_REGION:-us-east-1}
+      # ElasticMQ は資格情報を検証しないが AWS SDK の既定チェーンが解決可能な値を要求する
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-dev}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-dev-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
 
   # S3 経路の開発用オブジェクトストレージ (S3 互換)。既定では起動しない:
   #   UPLOAD_STORAGE=s3 を infra/.env に設定した上で
