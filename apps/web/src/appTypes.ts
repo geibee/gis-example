@@ -1,4 +1,41 @@
-import type { Building, BusinessLinks, BusinessObjectFilters, Land, Layer, Party, Zone } from "./types";
+import type { Building, BusinessLinks, FeatureSearchResult, Land, Layer, Party, Zone } from "./contracts";
+
+// 業務オブジェクト一覧の横断フィルタ (UI 状態)。API へは各エンドポイントが
+// 契約 (openapi.yaml) で宣言するクエリパラメータの部分集合として送信される。
+export type BusinessObjectFilters = {
+  status?: string;
+  zoneType?: string;
+  landUse?: string;
+  buildingUse?: string;
+  partyType?: string;
+  relationType?: string;
+  linkedOnly?: boolean;
+  zoneLayerId?: string;
+  sourceLayerId?: string;
+  bbox?: string;
+  intersectsLayerId?: string;
+  intersectsFeatureId?: string;
+  distanceMeters?: string;
+  targetType?: "land" | "building" | "";
+  landId?: string;
+};
+
+// 条件検索フォームの編集中状態 (送信時に ConditionQueryCondition へ変換される)
+export type AttributeConditionDraft = {
+  id: string;
+  layerId: string;
+  field: string;
+  operator: string;
+  value: string;
+};
+
+export type SpatialConditionDraft = {
+  id: string;
+  comparisonTarget: "layer" | "business";
+  layerId: string;
+  operator: string;
+  distanceMeters: string;
+};
 
 export type LayerViewState = {
   baseMapVisible: boolean;
@@ -13,9 +50,14 @@ export type LayerListItem =
 export type BusinessTab = "zone" | "lands" | "buildings" | "parties" | "admin";
 export type ZoneBusinessSourceType = "all" | "land" | "building";
 
-export type RouteSelection = {
-  tab: BusinessTab;
-  id: string | null;
+// 地図チャンク (components/MapPane.tsx) が公開する命令的 API。
+// App (メインチャンク) は maplibre を import せず、この API 経由で地図を操作する。
+export type MapPaneApi = {
+  resize: () => void;
+  focusGeometry: (geometry: unknown) => void;
+  focusFeatureResults: (results: FeatureSearchResult[]) => void;
+  getBoundsBbox: () => string | null;
+  reloadLayerSource: (layerId: string) => void;
 };
 
 export type ZoneLayerCreateMetadata = {
