@@ -12,7 +12,7 @@ import {
   usePartyQuery,
   useUpdatePartyMutation
 } from "../queries/parties";
-import type { Party } from "../types";
+import type { Party } from "../contracts";
 import { emptyPartyDraft, errorMessage, newPartyDraft, nullableString, parsePartyTags, toPartyDraft } from "../utils";
 import {
   unfilteredCriteria,

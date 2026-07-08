@@ -10,7 +10,7 @@ import {
   syncConditionSearchHighlight,
   syncMapLayerOrder
 } from "../mapUtils";
-import type { FeatureSearchResult, Layer } from "../types";
+import type { FeatureSearchResult, Layer } from "../contracts";
 import type { MapPaneApi } from "../appTypes";
 import { MapSupportPane } from "./MapSupportPane";
 

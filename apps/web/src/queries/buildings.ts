@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createBuilding, deleteBuilding, getBuilding, getBuildings, updateBuilding } from "../api";
-import type { Building } from "../types";
+import type { Building, BuildingWriteRequest } from "../contracts";
 import type { BusinessListSearchCriteria } from "../appTypes";
 import { keys } from "./keys";
 
@@ -31,7 +31,7 @@ function invalidateBuildingRelated(queryClient: ReturnType<typeof useQueryClient
 export function useCreateBuildingMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: unknown) => createBuilding(body),
+    mutationFn: (body: BuildingWriteRequest) => createBuilding(body),
     onSuccess: (item: Building) => {
       queryClient.setQueryData(keys.buildings.detail(item.id), item);
       invalidateBuildingRelated(queryClient);
@@ -42,7 +42,7 @@ export function useCreateBuildingMutation() {
 export function useUpdateBuildingMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; body: unknown }) => updateBuilding(input.id, input.body),
+    mutationFn: (input: { id: string; body: BuildingWriteRequest }) => updateBuilding(input.id, input.body),
     onSuccess: (item: Building) => {
       queryClient.setQueryData(keys.buildings.detail(item.id), item);
       invalidateBuildingRelated(queryClient);

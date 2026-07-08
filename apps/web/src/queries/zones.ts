@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createZone, createZoneLayerFromImport, deleteZone, getZone, getZones, updateZone } from "../api";
-import type { Zone, ZoneLayerOperation } from "../types";
+import type { Zone, ZoneLayerOperation, ZoneWriteRequest } from "../contracts";
 import type { BusinessListSearchCriteria } from "../appTypes";
 import { keys } from "./keys";
 
@@ -25,7 +25,7 @@ export function useZoneQuery(id: string | null) {
 export function useCreateZoneMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: unknown) => createZone(body),
+    mutationFn: (body: ZoneWriteRequest) => createZone(body),
     onSuccess: (item: Zone) => {
       queryClient.setQueryData(keys.zones.detail(item.id), item);
       void queryClient.invalidateQueries({ queryKey: keys.zones.lists() });
@@ -36,7 +36,7 @@ export function useCreateZoneMutation() {
 export function useUpdateZoneMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; body: unknown }) => updateZone(input.id, input.body),
+    mutationFn: (input: { id: string; body: ZoneWriteRequest }) => updateZone(input.id, input.body),
     onSuccess: (item: Zone) => {
       queryClient.setQueryData(keys.zones.detail(item.id), item);
       void queryClient.invalidateQueries({ queryKey: keys.zones.lists() });

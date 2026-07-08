@@ -6,8 +6,7 @@ import {
   useDeleteRelationshipMutation,
   useSaveRelationshipMutation
 } from "../queries/parties";
-import type { BusinessObjectFilters } from "../types";
-import type { BusinessListSearchCriteria, RelationshipDraft } from "../appTypes";
+import type { BusinessListSearchCriteria, BusinessObjectFilters, RelationshipDraft } from "../appTypes";
 import { emptyBusinessListSearchCriteria, errorMessage, nullableString, toBusinessListSearchCriteria } from "../utils";
 
 // 参照用 (選択肢・関係先候補など) に使う「絞り込みなし一覧」の共有条件。

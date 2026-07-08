@@ -20,15 +20,18 @@ import {
   useZonesQuery
 } from "../queries/zones";
 import type {
-  AttributeConditionDraft,
   ConditionQuery,
   ConditionQueryCondition,
   FeatureSearchResult,
-  SpatialConditionDraft,
   Zone,
   ZoneLayerOperation
-} from "../types";
-import type { ZoneBusinessSourceType, ZoneLayerCreateMetadata } from "../appTypes";
+} from "../contracts";
+import type {
+  AttributeConditionDraft,
+  SpatialConditionDraft,
+  ZoneBusinessSourceType,
+  ZoneLayerCreateMetadata
+} from "../appTypes";
 import {
   canCreateZoneLayerFromSource,
   canUseSelectedFeatureAsZoneFeature,

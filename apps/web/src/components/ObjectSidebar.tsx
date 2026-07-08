@@ -1,5 +1,5 @@
 import { Loader2, Plus, RefreshCcw, Search } from "lucide-react";
-import type { Project } from "../types";
+import type { Project } from "../contracts";
 
 export function ObjectSidebar({
   title,

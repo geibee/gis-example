@@ -2,10 +2,8 @@
 // mapUtils.ts に分離している (メインチャンクへの maplibre 混入防止)。
 import { getBuilding, getLand } from "./api";
 import type {
-  AttributeConditionDraft,
   Building,
   BusinessLinks,
-  BusinessObjectFilters,
   ConditionQuery,
   ConditionQueryCondition,
   Feature,
@@ -15,10 +13,12 @@ import type {
   Party,
   PartyRelationship,
   Zone
-} from "./types";
+} from "./contracts";
 import type {
+  AttributeConditionDraft,
   BuildingDraft,
   BusinessListSearchCriteria,
+  BusinessObjectFilters,
   BusinessMapTarget,
   BusinessMapTargetContext,
   LandDraft,

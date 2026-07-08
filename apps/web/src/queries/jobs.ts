@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { createAnalysisJob, createImportJob, getAnalysisJob, getImportJob } from "../api";
-import type { AnalysisJob, ImportJob } from "../types";
+import type { AnalysisJob, AnalysisJobRequest, ImportJob } from "../contracts";
 import { jobPollIntervalMs, jobPollTimeoutMs } from "../constants";
 import { keys } from "./keys";
 
@@ -107,5 +107,5 @@ export function useCreateImportJobMutation() {
 }
 
 export function useCreateAnalysisJobMutation() {
-  return useMutation({ mutationFn: (body: unknown) => createAnalysisJob(body) });
+  return useMutation({ mutationFn: (body: AnalysisJobRequest) => createAnalysisJob(body) });
 }

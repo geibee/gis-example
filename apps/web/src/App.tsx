@@ -7,7 +7,7 @@ import { MapStateProvider } from "./mapState";
 import { MapPaneHost } from "./components/MapPaneHost";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
 import type { BusinessTab } from "./appTypes";
-import type { Me } from "./types";
+import type { Me } from "./contracts";
 
 // ルートレイアウト。認証・レイアウト・ルーター配置のみを担い、
 // サーバ状態は TanStack Query (src/queries/)、画面固有の状態は各 src/screens/、

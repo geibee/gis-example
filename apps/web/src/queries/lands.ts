@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createLand, deleteLand, getLand, getLands, updateLand } from "../api";
-import type { Land } from "../types";
+import type { Land, LandWriteRequest } from "../contracts";
 import type { BusinessListSearchCriteria } from "../appTypes";
 import { keys } from "./keys";
 
@@ -31,7 +31,7 @@ function invalidateLandRelated(queryClient: ReturnType<typeof useQueryClient>) {
 export function useCreateLandMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: unknown) => createLand(body),
+    mutationFn: (body: LandWriteRequest) => createLand(body),
     onSuccess: (item: Land) => {
       queryClient.setQueryData(keys.lands.detail(item.id), item);
       invalidateLandRelated(queryClient);
@@ -42,7 +42,7 @@ export function useCreateLandMutation() {
 export function useUpdateLandMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; body: unknown }) => updateLand(input.id, input.body),
+    mutationFn: (input: { id: string; body: LandWriteRequest }) => updateLand(input.id, input.body),
     onSuccess: (item: Land) => {
       queryClient.setQueryData(keys.lands.detail(item.id), item);
       invalidateLandRelated(queryClient);

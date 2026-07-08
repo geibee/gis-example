@@ -15,8 +15,8 @@ import { useAppShell } from "./appShell";
 import { activeScreenMeta } from "./routeMeta";
 import { useBusinessLinksQuery, useUpdateFeatureMutation } from "./queries/features";
 import { useDeleteLayerMutation, useDeleteResultSetMutation, useLayersQuery } from "./queries/layers";
-import type { Building, BusinessObjectFilters, Feature, FeatureSearchResult, Land, Layer, Party, Zone } from "./types";
-import type { BusinessTab, LayerListItem, MapPaneApi } from "./appTypes";
+import type { Building, Feature, FeatureSearchResult, Land, Layer, Party, Zone } from "./contracts";
+import type { BusinessObjectFilters, BusinessTab, LayerListItem, MapPaneApi } from "./appTypes";
 import { businessMapHighlightLimit, emptyBusinessLinks } from "./constants";
 import {
   buildBusinessMapTargets,

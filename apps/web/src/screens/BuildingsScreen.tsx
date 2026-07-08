@@ -12,7 +12,7 @@ import {
 } from "../queries/buildings";
 import { useLandsQuery } from "../queries/lands";
 import { usePartiesQuery } from "../queries/parties";
-import type { Building } from "../types";
+import type { Building } from "../contracts";
 import {
   emptyBuildingDraft,
   errorMessage,

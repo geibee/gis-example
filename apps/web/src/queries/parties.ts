@@ -9,7 +9,7 @@ import {
   updateParty,
   updatePartyRelationship
 } from "../api";
-import type { Party } from "../types";
+import type { Party, PartyWriteRequest } from "../contracts";
 import type { BusinessListSearchCriteria } from "../appTypes";
 import { keys } from "./keys";
 
@@ -33,7 +33,7 @@ export function usePartyQuery(id: string | null) {
 export function useCreatePartyMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: unknown) => createParty(body),
+    mutationFn: (body: PartyWriteRequest) => createParty(body),
     onSuccess: (item: Party) => {
       queryClient.setQueryData(keys.parties.detail(item.id), item);
       void queryClient.invalidateQueries({ queryKey: keys.parties.lists() });
@@ -44,7 +44,7 @@ export function useCreatePartyMutation() {
 export function useUpdatePartyMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; body: unknown }) => updateParty(input.id, input.body),
+    mutationFn: (input: { id: string; body: PartyWriteRequest }) => updateParty(input.id, input.body),
     onSuccess: (item: Party) => {
       queryClient.setQueryData(keys.parties.detail(item.id), item);
       void queryClient.invalidateQueries({ queryKey: keys.parties.lists() });

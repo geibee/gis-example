@@ -10,7 +10,7 @@ import {
 } from "react";
 import { subscribeNotices } from "./notifications";
 import { useMeQuery, useProjectsQuery } from "./queries/session";
-import type { Me, Project } from "./types";
+import type { Me, Project } from "./contracts";
 
 // 画面横断の軽量な状態 (認証ユーザー・プロジェクト選択・通知・地図ペイン開閉) のみを持つ。
 // サーバ状態のキャッシュは TanStack Query、画面固有の状態は各 src/screens/ が持つ。

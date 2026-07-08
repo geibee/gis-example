@@ -2,7 +2,7 @@
 // メインチャンクに maplibre を含めないため、純粋ヘルパー (utils.ts) から分離している。
 // このモジュールは地図チャンク (components/MapPane.tsx) からのみ import すること。
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
-import type { FeatureSearchResult, Layer } from "./types";
+import type { FeatureSearchResult, Layer } from "./contracts";
 import { extendBounds, geoJsonGeometryBounds, type GeometryBounds } from "./utils";
 
 export function addMapLayers(map: MapLibreMap, layer: Layer, color: string): string[] {

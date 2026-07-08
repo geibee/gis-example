@@ -12,7 +12,7 @@ import {
   useUpdateLandMutation
 } from "../queries/lands";
 import { usePartiesQuery } from "../queries/parties";
-import type { Land } from "../types";
+import type { Land } from "../contracts";
 import {
   emptyLandDraft,
   errorMessage,
