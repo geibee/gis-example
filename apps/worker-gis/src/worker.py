@@ -8,10 +8,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import boto3
@@ -78,23 +80,183 @@ def configure_logging() -> None:
 
 def main() -> None:
     configure_logging()
+    if job_queue_mode() == "sqs":
+        sqs_main()
+    else:
+        polling_main()
+
+
+def job_queue_mode() -> str:
+    # 不正値で黙って polling へ落ちると「api は SQS へ enqueue するのに consumer は DB を見ない」
+    # 片肺構成になり得るため起動を失敗させる (LOG_FORMAT と同じ fail fast)
+    mode = os.getenv("JOB_QUEUE_MODE", "polling")
+    if mode not in {"polling", "sqs"}:
+        raise RuntimeError(f"JOB_QUEUE_MODE は polling | sqs のいずれかを指定してください: {mode}")
+    return mode
+
+
+def polling_main() -> None:
+    # 従来動作 (dev / 単一ホスト構成の既定): app.import_jobs を DB ポーリングする
     poll_interval = float(os.getenv("POLL_INTERVAL_SECONDS", "2"))
-    stale_seconds = float(os.getenv("IMPORT_JOB_STALE_SECONDS", "1800"))
-    logger.info("GIS worker started")
+    logger.info("GIS worker started (polling mode)")
     while True:
         did_work = False
         try:
             with connect() as conn:
-                requeue_stale_import_jobs(conn, stale_seconds)
+                sweep_import_jobs_if_due(conn, sqs=None, queue_url=None)
                 import_job = claim_import_job(conn)
                 if import_job is not None:
                     did_work = True
-                    run_import_job(conn, import_job)
+                    run_import_job_with_heartbeat(conn, import_job)
         except Exception:
             logger.exception("Import job polling loop failed")
 
         if not did_work:
             time.sleep(poll_interval)
+
+
+def sqs_main() -> None:
+    # SQS 起動通知の consumer (JOB_QUEUE_MODE=sqs)。ジョブの正本は DB のジョブ行であり、
+    # メッセージは「pending 行ができた」の通知に限定する。実行保証の設計は docs/jobs-architecture.md
+    queue_url = os.getenv("SQS_IMPORT_QUEUE_URL")
+    if not queue_url:
+        raise RuntimeError("JOB_QUEUE_MODE=sqs では SQS_IMPORT_QUEUE_URL が必須です")
+    poll_interval = float(os.getenv("POLL_INTERVAL_SECONDS", "2"))
+    sqs = sqs_client()
+    logger.info("GIS worker started (sqs mode, queue=%s)", queue_url)
+    while True:
+        try:
+            with connect() as conn:
+                sweep_import_jobs_if_due(conn, sqs=sqs, queue_url=queue_url)
+                poll_sqs_once(conn, sqs, queue_url)
+        except Exception:
+            logger.exception("Import job SQS loop failed")
+            time.sleep(poll_interval)
+
+
+def poll_sqs_once(conn: psycopg.Connection[DictRow], sqs: Any, queue_url: str) -> int:
+    """1 回の receive → claim → 実行。統合テストが決定的に駆動できるよう独立させている。
+
+    戻り値は処理を試みたメッセージ数 (claim 失敗の破棄を含む)
+    """
+    wait_seconds = int(os.getenv("SQS_RECEIVE_WAIT_SECONDS", "10"))
+    response = sqs.receive_message(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=1,
+        WaitTimeSeconds=wait_seconds,
+        AttributeNames=["ApproximateReceiveCount"],
+    )
+    messages = response.get("Messages", [])
+    for message in messages:
+        handle_import_message(conn, sqs, queue_url, message)
+    return len(messages)
+
+
+def handle_import_message(conn: psycopg.Connection[DictRow], sqs: Any, queue_url: str, message: dict[str, Any]) -> None:
+    receipt_handle = message["ReceiptHandle"]
+    job_id = decode_job_message(message.get("Body", ""))
+    if job_id is None:
+        # 解釈できない毒メッセージ。ジョブ行と対応しないため削除して終わり
+        logger.warning("Dropping malformed import queue message: %.200s", message.get("Body", ""))
+        delete_message(sqs, queue_url, receipt_handle)
+        return
+    job = claim_import_job_by_id(conn, job_id)
+    if job is None:
+        # at-least-once の重複配信 or 実行済み。DB のジョブ台帳が正であり、claim できない
+        # メッセージは削除するだけで無害 (二重実行は起きない — issue #24 の第 2 層)
+        logger.info("Import job %s is not claimable (duplicate delivery?) — dropping message", job_id)
+        delete_message(sqs, queue_url, receipt_handle)
+        return
+    hold_seconds = float(os.getenv("IMPORT_TEST_CLAIM_HOLD_SECONDS", "0"))
+    if hold_seconds > 0:
+        # テスト専用フック: 実行中クラッシュ (kill 回復) の統合テストが claim 後の実行を保留するために使う
+        time.sleep(hold_seconds)
+
+    def extend_visibility() -> None:
+        # ハートビートと対で visibility timeout を延長し、処理中の再配信を抑える。
+        # 延長に失敗しても再配信 → claim 失敗で無害 (claim が二重実行を防ぐ)
+        try:
+            sqs.change_message_visibility(
+                QueueUrl=queue_url,
+                ReceiptHandle=receipt_handle,
+                VisibilityTimeout=int(os.getenv("IMPORT_VISIBILITY_EXTENSION_SECONDS", "120")),
+            )
+        except Exception:
+            logger.warning("Failed to extend message visibility for import job %s", job_id, exc_info=True)
+
+    run_import_job_with_heartbeat(conn, job, on_heartbeat=extend_visibility)
+    # succeeded でも failed でもジョブは終端状態に収束済み。メッセージの役目は終わり
+    delete_message(sqs, queue_url, receipt_handle)
+
+
+def delete_message(sqs: Any, queue_url: str, receipt_handle: str) -> None:
+    try:
+        sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+    except Exception:
+        # 削除失敗は再配信 → claim 失敗 → 削除リトライで収束する
+        logger.warning("Failed to delete import queue message", exc_info=True)
+
+
+def decode_job_message(body: str) -> str | None:
+    """メッセージ本文 (api 側 JobQueue.kt の encodeJobQueueMessage と対) から jobId を取り出す"""
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    job_id = payload.get("jobId")
+    if not isinstance(job_id, str) or not job_id.strip():
+        return None
+    return job_id
+
+
+def sqs_client() -> Any:
+    # 認証は boto3 の既定チェーン (本番: ECS タスクロール / dev: AWS_ACCESS_KEY_ID 等)。
+    # SQS_ENDPOINT_URL は ElasticMQ 等の dev 用 (本番では設定しない)。
+    # region は AWS_REGION も明示的に読む (botocore の既定チェーンは AWS_DEFAULT_REGION
+    # しか見ないが、ECS が自動注入するのは AWS_REGION — docs/environment-variables.md)
+    endpoint = os.getenv("SQS_ENDPOINT_URL") or None
+    region = os.getenv("SQS_REGION") or os.getenv("AWS_REGION") or None
+    return boto3.client("sqs", endpoint_url=endpoint, region_name=region)
+
+
+_next_sweep_at = 0.0
+
+
+def sweep_import_jobs_if_due(conn: psycopg.Connection[DictRow], sqs: Any, queue_url: str | None) -> None:
+    # ポーリングごとでは無駄が多いので一定間隔でだけ回収スイープを回す
+    global _next_sweep_at
+    now = time.monotonic()
+    if now < _next_sweep_at:
+        return
+    _next_sweep_at = now + float(os.getenv("SWEEP_INTERVAL_SECONDS", "60"))
+    sweep_import_jobs(conn, sqs, queue_url)
+
+
+def sweep_import_jobs(conn: psycopg.Connection[DictRow], sqs: Any, queue_url: str | None) -> None:
+    """running / pending の滞留を回収し、全ジョブを有限時間で終端状態へ収束させるスイープ。
+
+    - ハートビート途絶の running 行: 試行上限未満は pending へ戻し、上限以上は failed 化 (第 3・5 層)
+    - pending のまま滞留した行 (sqs モードのみ): 起動通知を再 enqueue する補完スキャン (第 1 層)。
+      enqueue の取りこぼし・DLQ 落ち後の再 pending 化を回収する。重複通知は claim が無害化する
+    """
+    stale_seconds = float(os.getenv("IMPORT_JOB_STALE_SECONDS", "1800"))
+    max_attempts = int(os.getenv("IMPORT_JOB_MAX_ATTEMPTS", "5"))
+    requeued, failed = sweep_stale_import_jobs(conn, stale_seconds, max_attempts)
+    if requeued or failed:
+        logger.warning("Swept stale import jobs: requeued=%d failed=%d", requeued, failed)
+    if sqs is None or not queue_url:
+        return
+    reenqueue_seconds = float(os.getenv("IMPORT_JOB_REENQUEUE_SECONDS", "300"))
+    job_ids = list_stale_pending_import_job_ids(conn, reenqueue_seconds, limit=100)
+    for job_id in job_ids:
+        try:
+            sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps({"jobId": job_id}))
+        except Exception:
+            logger.warning("Failed to re-enqueue stale pending import job %s", job_id, exc_info=True)
+    if job_ids:
+        logger.warning("Re-enqueued %d stale pending import job(s)", len(job_ids))
 
 
 def require_pgpassword() -> str:
@@ -116,33 +278,79 @@ def connect() -> psycopg.Connection[DictRow]:
     )
 
 
-def requeue_stale_import_jobs(conn: psycopg.Connection[DictRow], max_age_seconds: float) -> int:
-    # ワーカーがジョブ実行中に落ちると running のまま残るため、リース期限超過分を pending へ戻す。
-    # 時刻閾値による判定なので、閾値を超える正常実行があり得る規模のデータを扱う場合は
-    # IMPORT_JOB_STALE_SECONDS を十分大きくすること (既定 1800 秒)
+# claim (UPDATE ... RETURNING) が返すジョブ列。id 指定 claim と共通
+_CLAIM_RETURNING = "RETURNING id::text, project_id::text, filename, format, source_srid, upload_path, layer_role"
+
+
+def sweep_stale_import_jobs(
+    conn: psycopg.Connection[DictRow], heartbeat_timeout_seconds: float, max_attempts: int
+) -> tuple[int, int]:
+    """ハートビート途絶の running 行を回収する。戻り値は (pending へ戻した数, failed 化した数)。
+
+    ワーカーがジョブ実行中に落ちると running のまま残るため、heartbeat_at (実行中に定期更新。
+    heartbeat_at 列導入前の既存行は started_at) が閾値を超えた行を対象に:
+    - 試行回数 (attempt_count) が上限未満: pending へ戻す (再実行)
+    - 上限以上: failed 化 (毒ジョブを有限回で収束させる)
+    実行中はハートビートが更新され続けるため、閾値を超える長時間の正常実行を誤回収しない
+    """
+    stale_predicate = """
+        status = 'running'
+          AND COALESCE(heartbeat_at, started_at) < now() - make_interval(secs => %s)
+    """
     with conn.transaction():
-        cursor = conn.execute(
-            """
+        failed = conn.execute(
+            f"""
             UPDATE app.import_jobs
-            SET status = 'pending', started_at = NULL,
-                error_message = concat('実行中のまま ', %s::text, ' 秒を超えたため再キュー')
-            WHERE status = 'running'
-              AND started_at < now() - make_interval(secs => %s)
+            SET status = 'failed', finished_at = now(),
+                error_message =
+                    concat('ハートビート途絶 (試行 ', attempt_count::text, ' 回) が上限に達したため打ち切り')
+            WHERE {stale_predicate}
+              AND attempt_count >= %s
             """,
-            (max_age_seconds, max_age_seconds),
-        )
-        requeued = cursor.rowcount
-    if requeued > 0:
-        logger.warning("Requeued %d stale import job(s)", requeued)
-    return requeued
+            (heartbeat_timeout_seconds, max_attempts),
+        ).rowcount
+        requeued = conn.execute(
+            f"""
+            UPDATE app.import_jobs
+            SET status = 'pending', started_at = NULL, heartbeat_at = NULL,
+                error_message = concat('ハートビートが ', %s::text, ' 秒途絶したため再キュー')
+            WHERE {stale_predicate}
+            """,
+            (heartbeat_timeout_seconds, heartbeat_timeout_seconds),
+        ).rowcount
+    return requeued, failed
+
+
+def list_stale_pending_import_job_ids(
+    conn: psycopg.Connection[DictRow], min_age_seconds: float, limit: int
+) -> list[str]:
+    # 読み取りも明示トランザクションで閉じる。psycopg は素の execute で暗黙トランザクションを
+    # 開いたままにするため、放置すると後続の conn.transaction() が SAVEPOINT になり
+    # claim のコミットが接続クローズまで外部から見えなくなる (ハートビート・他ワーカーが破綻する)
+    with conn.transaction():
+        rows = conn.execute(
+            """
+            SELECT id::text AS id
+            FROM app.import_jobs
+            WHERE status = 'pending'
+              AND created_at < now() - make_interval(secs => %s)
+            ORDER BY created_at
+            LIMIT %s
+            """,
+            (min_age_seconds, limit),
+        ).fetchall()
+    return [row["id"] for row in rows]
 
 
 def claim_import_job(conn: psycopg.Connection[DictRow]) -> dict[str, Any] | None:
+    # claim は独立トランザクションで確定する。実行開始と同時にハートビートを開始し、
+    # attempt_count (収束保証の試行カウンタ) を進める
     with conn.transaction():
         row = conn.execute(
-            """
+            f"""
             UPDATE app.import_jobs
-            SET status = 'running', started_at = now(), error_message = NULL
+            SET status = 'running', started_at = now(), heartbeat_at = now(),
+                attempt_count = attempt_count + 1, error_message = NULL
             WHERE id = (
                 SELECT id
                 FROM app.import_jobs
@@ -151,10 +359,89 @@ def claim_import_job(conn: psycopg.Connection[DictRow]) -> dict[str, Any] | None
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
-            RETURNING id::text, project_id::text, filename, format, source_srid, upload_path, layer_role
+            {_CLAIM_RETURNING}
             """
         ).fetchone()
     return row
+
+
+def claim_import_job_by_id(conn: psycopg.Connection[DictRow], job_id: str) -> dict[str, Any] | None:
+    # SQS 起動通知が指す特定ジョブの claim。重複配信されたメッセージはここで claim に失敗する
+    # (= 実行済み or 実行中) ため二重実行は起きない (効果としての exactly-once を DB で担保)
+    with conn.transaction():
+        row = conn.execute(
+            f"""
+            UPDATE app.import_jobs
+            SET status = 'running', started_at = now(), heartbeat_at = now(),
+                attempt_count = attempt_count + 1, error_message = NULL
+            WHERE id = (
+                SELECT id
+                FROM app.import_jobs
+                WHERE id = %s::uuid AND status = 'pending'
+                FOR UPDATE SKIP LOCKED
+            )
+            {_CLAIM_RETURNING}
+            """,
+            (job_id,),
+        ).fetchone()
+    return row
+
+
+def heartbeat_import_job(conn: psycopg.Connection[DictRow], job_id: str) -> None:
+    with conn.transaction():
+        conn.execute(
+            "UPDATE app.import_jobs SET heartbeat_at = now() WHERE id = %s::uuid AND status = 'running'",
+            (job_id,),
+        )
+
+
+class JobHeartbeat:
+    """実行中ジョブの生存通知スレッド。
+
+    メイン接続はジョブ実行トランザクションが使うため、ハートビートは打つたびに専用接続を
+    開いて heartbeat_at を更新する (psycopg の接続はスレッド間で共有できない)。
+    on_beat は SQS consumer が ChangeMessageVisibility の延長を重ねるためのフック
+    """
+
+    def __init__(self, job_id: str, interval_seconds: float, on_beat: Any = None) -> None:
+        self._job_id = job_id
+        self._interval = interval_seconds
+        self._on_beat = on_beat
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="import-job-heartbeat", daemon=True)
+
+    def __enter__(self) -> JobHeartbeat:
+        self._thread.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._stop.set()
+        self._thread.join(timeout=self._interval + 5)
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                with connect() as conn:
+                    heartbeat_import_job(conn, self._job_id)
+                if self._on_beat is not None:
+                    self._on_beat()
+            except Exception:
+                logger.warning("Failed to heartbeat import job %s", self._job_id, exc_info=True)
+
+
+def run_import_job_with_heartbeat(
+    conn: psycopg.Connection[DictRow], job: dict[str, Any], on_heartbeat: Any = None
+) -> None:
+    # ハートビートが途絶した running 行はスイープ (sweep_stale_import_jobs) が回収するため、
+    # 「実行中クラッシュ = 有限時間で再実行 or failed」が保証される (issue #24 の第 3 層)
+    interval = float(os.getenv("IMPORT_JOB_HEARTBEAT_SECONDS", "15"))
+    with JobHeartbeat(job["id"], interval, on_beat=on_heartbeat):
+        run_import_job(conn, job)
 
 
 def run_import_job(conn: psycopg.Connection[DictRow], job: dict[str, Any]) -> None:

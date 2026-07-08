@@ -1,3 +1,7 @@
-psycopg[binary]==3.2.3
-# アップロードの S3 取得 (upload_path が s3:// のとき一時ファイルへダウンロードする)
-boto3==1.43.42
+# 開発 / CI 用の依存一覧 (実行時依存 + テスト専用依存)。
+# 本番イメージは requirements-runtime.txt のみをインストールする (Dockerfile 参照)
+-r requirements-runtime.txt
+
+# SQS 経路の統合テスト用インプロセス SQS エミュレータ (tests/integration/test_sqs_queue.py)。
+# CI の worker-integration ジョブは PostGIS しか持たないため、SQS はテストプロセス内で立てる
+moto[sqs,server]==5.2.2
