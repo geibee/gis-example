@@ -59,6 +59,8 @@ fun Application.module(
     val deps = AppDependencies(
         db = db,
         uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads"),
+        // ブラウザから見た API の公開 URL (TileJSON の絶対 URL 生成に使う)。
+        // localhost 既定は dev 専用。本番では CloudFront 配下の HTTPS URL を必ず設定する
         apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/'),
         maxUploadBytes = (System.getenv("UPLOAD_MAX_BYTES") ?: DEFAULT_MAX_UPLOAD_BYTES.toString()).toLong()
     )
@@ -76,6 +78,9 @@ fun Application.module(
         db.close()
     }
 
+    // CloudFront/ALB 背後で scheme/client IP を X-Forwarded-* から復元する。
+    // 既定 0 (無効) = dev の直接公開向け。信頼境界の詳細は ForwardedHeaders.kt と docs/reverse-proxy.md
+    installForwardedHeadersSupport((System.getenv("TRUSTED_PROXY_COUNT") ?: "0").toInt())
     install(CallLogging)
     install(ContentNegotiation) {
         json(
@@ -87,7 +92,8 @@ fun Application.module(
         )
     }
     install(CORS) {
-        // WEB_ORIGIN 未設定時に anyHost に開放しない (fail-open 防止)。ローカル開発既定のみ許可する
+        // WEB_ORIGIN 未設定時に anyHost に開放しない (fail-open 防止)。
+        // localhost 既定は dev 専用。本番では web の公開オリジン (https://...) を必ず設定する
         val origin = webOrigin?.takeIf { it.isNotBlank() } ?: "http://localhost:5173"
         allowHost(origin.removePrefix("http://").removePrefix("https://"), schemes = listOf("http", "https"))
         allowMethod(HttpMethod.Get)
