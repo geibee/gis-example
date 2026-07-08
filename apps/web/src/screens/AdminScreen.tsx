@@ -1,14 +1,14 @@
-import { useAppState } from "../appState";
+import { useAppShell } from "../appShell";
 import { AdminWorkspace } from "../components/AdminWorkspace";
 
 // 管理画面: system admin 専用。到達可否はルートの staticData (requiredSystemRole) を
 // 見るルートガード (App 側) が一元的に enforce する。
 export default function AdminScreen() {
-  const app = useAppState();
+  const { me, projects, setNotice } = useAppShell();
   return (
     <section className="tab-pane admin-tab active">
-      {app.me?.systemRole === "admin" ? (
-        <AdminWorkspace projects={app.projects} meUserId={app.me.userId} onNotice={app.setNotice} />
+      {me?.systemRole === "admin" ? (
+        <AdminWorkspace projects={projects} meUserId={me.userId} onNotice={setNotice} />
       ) : (
         <p className="admin-hint">この画面は system admin 専用です。</p>
       )}
