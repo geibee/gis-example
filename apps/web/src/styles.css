@@ -1881,3 +1881,25 @@ input[type="file"] {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* テーブルフッタ (ui/DataTable.tsx): 件数表示 + ページャ */
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+  color: #637381;
+  font-size: 12px;
+}
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-pagination .subtle-button {
+  min-height: 26px;
+  padding: 2px 8px;
+}

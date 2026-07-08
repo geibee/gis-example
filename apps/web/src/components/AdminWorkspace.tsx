@@ -3,6 +3,7 @@ import { RefreshCw, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import type { Project, ProjectMember, UserAccount } from "../contracts";
 import { deleteProjectMember, getProjectMembers, getUsers, putProjectMember, updateUser } from "../api";
 import { notifyError } from "../notifications";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { errorMessage } from "../utils";
 
 // system admin 専用の管理画面: ユーザーの有効化・ロール変更と、
@@ -109,6 +110,82 @@ export function AdminWorkspace({
   const memberUserIds = new Set(members.map((member) => member.userId));
   const addableUsers = users.filter((user) => user.isActive && !memberUserIds.has(user.id));
 
+  const userColumns: Array<DataTableColumn<UserAccount>> = [
+    {
+      key: "name",
+      header: "名前",
+      render: (user) => (
+        <>
+          {userLabel(user)}
+          {user.id === meUserId ? <span className="admin-self-mark">(自分)</span> : null}
+        </>
+      )
+    },
+    { key: "email", header: "メール", render: (user) => user.email ?? "-" },
+    { key: "systemRole", header: "システムロール", render: (user) => (user.systemRole === "admin" ? "admin" : "user") },
+    { key: "state", header: "状態", render: (user) => (user.isActive ? "有効" : "無効") },
+    {
+      key: "actions",
+      header: "操作",
+      render: (user) => {
+        const isSelf = user.id === meUserId;
+        return (
+          <span className="admin-actions">
+            <button
+              className="subtle-button"
+              type="button"
+              disabled={busy || isSelf}
+              onClick={() =>
+                void patchUser(user.id, { systemRole: user.systemRole === "admin" ? "user" : "admin" })
+              }
+            >
+              {user.systemRole === "admin" ? "admin を解除" : "admin にする"}
+            </button>
+            <button
+              className="subtle-button"
+              type="button"
+              disabled={busy || isSelf}
+              onClick={() => void patchUser(user.id, { isActive: !user.isActive })}
+            >
+              {user.isActive ? "無効化" : "有効化"}
+            </button>
+          </span>
+        );
+      }
+    }
+  ];
+
+  const memberColumns: Array<DataTableColumn<ProjectMember>> = [
+    { key: "name", header: "名前", render: (member) => userLabel(member) },
+    { key: "email", header: "メール", render: (member) => member.email ?? "-" },
+    {
+      key: "role",
+      header: "ロール",
+      render: (member) => (
+        <select
+          value={member.role}
+          disabled={busy}
+          onChange={(event) => void changeMemberRole(member.userId, event.target.value as "editor" | "viewer")}
+        >
+          <option value="editor">editor</option>
+          <option value="viewer">viewer</option>
+        </select>
+      )
+    },
+    {
+      key: "actions",
+      header: "操作",
+      render: (member) => (
+        <span className="admin-actions">
+          <button className="subtle-button" type="button" disabled={busy} onClick={() => void removeMember(member.userId)}>
+            <Trash2 size={14} />
+            削除
+          </button>
+        </span>
+      )
+    }
+  ];
+
   return (
     <div className="admin-workspace">
       <section className="panel-section">
@@ -125,58 +202,15 @@ export function AdminWorkspace({
         <p className="admin-hint">
           ユーザーは初回ログイン時に自動登録される。無効化すると次のリクエストからアクセスできなくなる。自分自身は変更できない。
         </p>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>名前</th>
-              <th>メール</th>
-              <th>システムロール</th>
-              <th>状態</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => {
-              const isSelf = user.id === meUserId;
-              return (
-                <tr key={user.id} className={user.isActive ? "" : "admin-row-inactive"}>
-                  <td>
-                    {userLabel(user)}
-                    {isSelf ? <span className="admin-self-mark">(自分)</span> : null}
-                  </td>
-                  <td>{user.email ?? "-"}</td>
-                  <td>{user.systemRole === "admin" ? "admin" : "user"}</td>
-                  <td>{user.isActive ? "有効" : "無効"}</td>
-                  <td className="admin-actions">
-                    <button
-                      className="subtle-button"
-                      type="button"
-                      disabled={busy || isSelf}
-                      onClick={() =>
-                        void patchUser(user.id, { systemRole: user.systemRole === "admin" ? "user" : "admin" })
-                      }
-                    >
-                      {user.systemRole === "admin" ? "admin を解除" : "admin にする"}
-                    </button>
-                    <button
-                      className="subtle-button"
-                      type="button"
-                      disabled={busy || isSelf}
-                      onClick={() => void patchUser(user.id, { isActive: !user.isActive })}
-                    >
-                      {user.isActive ? "無効化" : "有効化"}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {!users.length && !loadingUsers ? (
-              <tr>
-                <td colSpan={5}>ユーザーがいません</td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <DataTable
+          columns={userColumns}
+          rows={users}
+          rowKey={(user) => user.id}
+          rowClassName={(user) => (user.isActive ? undefined : "admin-row-inactive")}
+          emptyMessage={loadingUsers ? "読み込み中です" : "ユーザーがいません"}
+          tableClassName="admin-table"
+          scroll={false}
+        />
       </section>
 
       <section className="panel-section">
@@ -194,50 +228,14 @@ export function AdminWorkspace({
           </select>
         </div>
         <p className="admin-hint">editor は取込・分析・編集が可能、viewer は閲覧のみ。system admin はメンバー登録不要で全プロジェクトを操作できる。</p>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>名前</th>
-              <th>メール</th>
-              <th>ロール</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((member) => (
-              <tr key={member.userId}>
-                <td>{userLabel(member)}</td>
-                <td>{member.email ?? "-"}</td>
-                <td>
-                  <select
-                    value={member.role}
-                    disabled={busy}
-                    onChange={(event) => void changeMemberRole(member.userId, event.target.value as "editor" | "viewer")}
-                  >
-                    <option value="editor">editor</option>
-                    <option value="viewer">viewer</option>
-                  </select>
-                </td>
-                <td className="admin-actions">
-                  <button
-                    className="subtle-button"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void removeMember(member.userId)}
-                  >
-                    <Trash2 size={14} />
-                    削除
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {!members.length && !loadingMembers ? (
-              <tr>
-                <td colSpan={4}>メンバーがいません</td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        <DataTable
+          columns={memberColumns}
+          rows={members}
+          rowKey={(member) => member.userId}
+          emptyMessage={loadingMembers ? "読み込み中です" : "メンバーがいません"}
+          tableClassName="admin-table"
+          scroll={false}
+        />
         <div className="admin-add-member">
           <select value={addUserId} onChange={(event) => setAddUserId(event.target.value)}>
             <option value="">ユーザーを選択…</option>
