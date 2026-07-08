@@ -28,6 +28,22 @@
 - ステータスの使い分け: 非メンバーへの個別リソースは 404 (存在を隠す)、メンバーのロール不足と projectId 明示操作の拒否は 403
 - 監査ログ (`AuditLog.kt`) は mutate 成功と 401/403 を記録する。PEP が action / projectId を call attributes へ残す前提を崩さない
 
+## api のファイル構成 (機能追加の規約)
+
+`apps/api` は DI フレームワークを使わず、`Application.kt` の `module` が依存を組み立てて
+`AppDependencies` 1 つに束ね、各ルートモジュールへ引数で渡す (軽量 DI)。
+
+| 層 | 置き場所 | 規約 |
+|---|---|---|
+| ルート | `routes/<機能>Routes.kt` | `fun Route.<機能>Routes(deps: AppDependencies)` 拡張関数。openapi.yaml の tag と対応させる。HTTP 入出力の検証と PEP 呼び出しのみを書き、SQL を書かない |
+| クエリ | `<機能>Queries.kt` | `Database` の拡張関数。トランザクションは `withTransaction { }` を使い、`autoCommit` を手動管理しない |
+| モデル | `Models.kt` (DTO) / `Database.kt` (一覧クエリ条件) | リクエスト・レスポンスは `@Serializable` DTO |
+
+- 新規リソースの CRUD 追加は「`routes/XxxRoutes.kt` + `XxxQueries.kt` の新規作成 + `Application.kt` への登録 1 行」で完結させる。既存ルートファイルへ追記しない
+- ルート横断のリクエスト検証ヘルパは `routes/RouteSupport.kt`、SQL 組み立て・JSON 読み取りヘルパは `SqlSupport.kt` に置く
+- `Application.kt` にはプラグイン設定・依存組み立て・ルート登録以外を書かない。`/health` 以外の登録は `authenticate(OIDC_AUTH_NAME)` ブロックの内側に置く
+- 新しい依存 (設定値・外部クライアント等) は `AppDependencies` へフィールドを追加し、`module` で組み立てる
+
 ## GIS 規約
 
 - 格納 SRID は **3857**、公開する bbox は **4326** (`bbox_4326`)
