@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
-import traceback
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +17,56 @@ import boto3
 import psycopg
 from psycopg.rows import DictRow, dict_row
 
+logger = logging.getLogger("worker-gis")
+
+# logging.LogRecord の組込み属性名。これ以外 (extra= で渡した job_id 等) を JSON フィールドとして出力する
+_BUILTIN_LOG_ATTRS = frozenset(vars(logging.makeLogRecord({})).keys()) | {"taskName", "message", "asctime"}
+
+
+class JsonLinesFormatter(logging.Formatter):
+    """CloudWatch Logs Insights でフィールド検索するための JSON lines (api の LOG_FORMAT=json と対で保つ)。
+
+    @timestamp / level / logger_name / message に加え、extra= で渡された属性 (job_id 等) と
+    例外の stack_trace を出力する。フィールド名は api (logstash-logback-encoder) に揃える。
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "@timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "logger_name": record.name,
+            "message": record.getMessage(),
+        }
+        for key, value in record.__dict__.items():
+            if key not in _BUILTIN_LOG_ATTRS and not key.startswith("_"):
+                payload[key] = value
+        if record.exc_info:
+            payload["stack_trace"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def configure_logging() -> None:
+    # LOG_FORMAT=json で JSON lines、既定 text は dev 向けの人間可読 (docs/observability.md)。
+    # 不正値は黙って text に落とさず起動を失敗させる (api の validateLogFormatEnv と同じ fail fast)
+    log_format = os.getenv("LOG_FORMAT", "text")
+    if log_format not in {"text", "json"}:
+        raise RuntimeError(f"LOG_FORMAT は text | json のいずれかを指定してください: {log_format}")
+    handler = logging.StreamHandler(sys.stdout)
+    if log_format == "json":
+        handler.setFormatter(JsonLinesFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(name)s - %(message)s"))
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 def main() -> None:
+    configure_logging()
     poll_interval = float(os.getenv("POLL_INTERVAL_SECONDS", "2"))
     stale_seconds = float(os.getenv("IMPORT_JOB_STALE_SECONDS", "1800"))
-    print("GIS worker started", flush=True)
+    logger.info("GIS worker started")
     while True:
         did_work = False
         try:
@@ -30,7 +77,7 @@ def main() -> None:
                     did_work = True
                     run_import_job(conn, import_job)
         except Exception:
-            traceback.print_exc()
+            logger.exception("Import job polling loop failed")
 
         if not did_work:
             time.sleep(poll_interval)
@@ -72,7 +119,7 @@ def requeue_stale_import_jobs(conn: psycopg.Connection[DictRow], max_age_seconds
         )
         requeued = cursor.rowcount
     if requeued > 0:
-        print(f"Requeued {requeued} stale import job(s)", flush=True)
+        logger.warning("Requeued %d stale import job(s)", requeued)
     return requeued
 
 
@@ -128,7 +175,12 @@ def run_import_job(conn: psycopg.Connection[DictRow], job: dict[str, Any]) -> No
                 """,
                 (layer_id, job["id"]),
             )
-        print(f"Import job {job['id']} succeeded as layer {layer_id}", flush=True)
+        logger.info(
+            "Import job %s succeeded as layer %s",
+            job["id"],
+            layer_id,
+            extra={"job_id": job["id"], "layer_id": layer_id, "project_id": job["project_id"]},
+        )
     except Exception as exc:
         mark_import_failed(conn, job["id"], exc)
     finally:
@@ -343,7 +395,7 @@ def mark_import_failed(conn: psycopg.Connection[DictRow], job_id: str, exc: Exce
             """,
             (message, job_id),
         )
-    print(f"Import job {job_id} failed: {message}", flush=True)
+    logger.warning("Import job %s failed: %s", job_id, message, extra={"job_id": job_id})
 
 
 def is_s3_uri(reference: str) -> bool:
