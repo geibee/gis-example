@@ -5,6 +5,8 @@ import { useAuth } from "react-oidc-context";
 import { AppShellProvider, useAppShell } from "./appShell";
 import { MapStateProvider } from "./mapState";
 import { MapPaneHost } from "./components/MapPaneHost";
+import { ConfirmDialogHost } from "./ui/ConfirmDialog";
+import { Toaster } from "./ui/Toaster";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
@@ -25,7 +27,7 @@ export default function App() {
 function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const { me, projects, selectedProject, notice, setNotice, mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const { me, projects, selectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
 
   // URL (マッチ中ルートの staticData) を唯一の正としてタブ強調・タイトルを導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
@@ -94,14 +96,8 @@ function AppLayout() {
         <MapPaneHost />
       </main>
 
-      {notice ? (
-        <div className="notice business-notice">
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)}>
-            閉じる
-          </button>
-        </div>
-      ) : null}
+      <Toaster />
+      <ConfirmDialogHost />
     </div>
   );
 }

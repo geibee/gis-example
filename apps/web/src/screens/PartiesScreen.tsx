@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAppShell } from "../appShell";
 import { useBusinessListHighlights } from "../mapState";
+import { notifyError, notifySuccess } from "../notifications";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { PartyWorkspace } from "../components/PartyWorkspace";
 import { useBuildingsQuery } from "../queries/buildings";
 import { useLandsQuery } from "../queries/lands";
@@ -24,7 +26,7 @@ import {
 // 関係者画面: 一覧・詳細のサーバ状態はクエリフック (queries/parties.ts)、
 // 検索条件・編集ドラフトなどの画面状態はこのファイルで完結する。
 export default function PartiesScreen() {
-  const { projects, selectedProject, setSelectedProject, setNotice } = useAppShell();
+  const { projects, selectedProject, setSelectedProject } = useAppShell();
   const navigate = useNavigate();
 
   const list = useBusinessListState();
@@ -53,11 +55,11 @@ export default function PartiesScreen() {
 
   const saveParty = async () => {
     if (!screen.draft.name.trim() || !screen.draft.partyType.trim()) {
-      setNotice("名称、種別は必須です");
+      notifyError("名称、種別は必須です");
       return;
     }
     if (screen.creating && !screen.draft.id.trim()) {
-      setNotice("IDは必須です");
+      notifyError("IDは必須です");
       return;
     }
     try {
@@ -77,20 +79,27 @@ export default function PartiesScreen() {
           : null;
       if (!item) return;
       screen.afterSave(item);
-      setNotice(screen.creating ? "関係者を作成しました" : "関係者を保存しました");
+      notifySuccess(screen.creating ? "関係者を作成しました" : "関係者を保存しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 
   const removeParty = async () => {
-    if (!screen.selected || !window.confirm(`${screen.selected.id} を削除しますか`)) return;
+    if (!screen.selected) return;
+    const confirmed = await confirmDialog({
+      title: "関係者の削除",
+      message: `${screen.selected.id} を削除しますか`,
+      confirmLabel: "削除",
+      danger: true
+    });
+    if (!confirmed) return;
     try {
       await deleteMutation.mutateAsync(screen.selected.id);
       screen.afterDelete();
-      setNotice("関係者を削除しました");
+      notifySuccess("関係者を削除しました");
     } catch (error) {
-      setNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     }
   };
 

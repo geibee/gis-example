@@ -2,18 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import type { Project, ProjectMember, UserAccount } from "../contracts";
 import { deleteProjectMember, getProjectMembers, getUsers, putProjectMember, updateUser } from "../api";
+import { notifyError } from "../notifications";
 import { errorMessage } from "../utils";
 
 // system admin 専用の管理画面: ユーザーの有効化・ロール変更と、
 // プロジェクトメンバー (editor/viewer) の付与・剥奪を行う
 export function AdminWorkspace({
   projects,
-  meUserId,
-  onNotice
+  meUserId
 }: {
   projects: Project[];
   meUserId: string;
-  onNotice: (message: string) => void;
 }) {
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -29,11 +28,11 @@ export function AdminWorkspace({
     try {
       setUsers(await getUsers());
     } catch (error) {
-      onNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     } finally {
       setLoadingUsers(false);
     }
-  }, [onNotice]);
+  }, []);
 
   const loadMembers = useCallback(
     async (projectId: string) => {
@@ -45,12 +44,12 @@ export function AdminWorkspace({
       try {
         setMembers(await getProjectMembers(projectId));
       } catch (error) {
-        onNotice(errorMessage(error));
+        notifyError(errorMessage(error));
       } finally {
         setLoadingMembers(false);
       }
     },
-    [onNotice]
+    []
   );
 
   useEffect(() => {
@@ -72,7 +71,7 @@ export function AdminWorkspace({
     try {
       await action();
     } catch (error) {
-      onNotice(errorMessage(error));
+      notifyError(errorMessage(error));
     } finally {
       setBusy(false);
     }

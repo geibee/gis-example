@@ -6,6 +6,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
+import { clearToasts } from "../notifications";
 import { authStub, makeAuthStub } from "./authStub";
 import { server } from "./server";
 
@@ -32,6 +33,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   authStub.current = makeAuthStub();
+  clearToasts();
   cleanup();
 });
 
