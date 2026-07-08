@@ -55,14 +55,17 @@ export function useDeleteZoneMutation() {
   });
 }
 
-// 取込レイヤからの区域レイヤ一括作成: レイヤ一覧と区域一覧の両方が成果物
+// 取込レイヤからの区域レイヤ一括作成: レイヤ一覧と区域一覧の両方が成果物。
+// 呼び出し側が作成レイヤをフィルタ等へ反映できるよう、mutateAsync は
+// 再取得完了 (invalidate の解決) まで待ってから解決する。
 export function useCreateZoneLayerMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: Parameters<typeof createZoneLayerFromImport>[0]) => createZoneLayerFromImport(body),
-    onSuccess: (_result: ZoneLayerOperation) => {
-      void queryClient.invalidateQueries({ queryKey: keys.layers.all });
-      void queryClient.invalidateQueries({ queryKey: keys.zones.lists() });
-    }
+    onSuccess: (_result: ZoneLayerOperation) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.layers.all }),
+        queryClient.invalidateQueries({ queryKey: keys.zones.lists() })
+      ])
   });
 }

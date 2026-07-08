@@ -10,6 +10,7 @@ export function useLayersQuery(projectId: string) {
   });
 }
 
+// 削除中スピナーが再取得完了まで維持されるよう、mutateAsync は invalidate の解決を待つ
 export function useDeleteLayerMutation() {
   const queryClient = useQueryClient();
   return useMutation({
