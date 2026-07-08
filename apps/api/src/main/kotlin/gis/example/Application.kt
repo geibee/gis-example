@@ -26,7 +26,6 @@ import io.ktor.server.application.install
 import io.ktor.server.auth.authenticate
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
-import io.ktor.server.plugins.callloging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -43,6 +42,8 @@ private val applicationLogger = LoggerFactory.getLogger("gis.example.Application
 private const val DEFAULT_MAX_UPLOAD_BYTES = 200L * 1024 * 1024
 
 fun main() {
+    // LOG_FORMAT の不正値は「appender が解決できず無ログで走り続ける」事故になるため先に検証する
+    validateLogFormatEnv()
     val port = (System.getenv("PORT") ?: "8080").toInt()
     embeddedServer(Netty, host = "0.0.0.0", port = port) {
         module()
@@ -85,7 +86,8 @@ fun Application.module(
     // CloudFront/ALB 背後で scheme/client IP を X-Forwarded-* から復元する。
     // 既定 0 (無効) = dev の直接公開向け。信頼境界の詳細は ForwardedHeaders.kt と docs/reverse-proxy.md
     installForwardedHeadersSupport((System.getenv("TRUSTED_PROXY_COUNT") ?: "0").toInt())
-    install(CallLogging)
+    // callId (requestId) の採番・MDC 伝播と構造化アクセスログ (Observability.kt)
+    installObservability()
     install(ContentNegotiation) {
         json(
             Json {
@@ -125,7 +127,10 @@ fun Application.module(
     }
 
     val rootRoute = routing {
-        healthRoutes()
+        healthRoutes(
+            db = db,
+            readinessTimeoutMillis = (System.getenv("HEALTH_READINESS_TIMEOUT_MS") ?: "2000").toLong()
+        )
 
         // /health 以外の全ルートは認証必須 (fail-closed)。
         // 認可は各ルートの RouteAuthz 宣言 (authorizedRoutes DSL) で強制される

@@ -1,10 +1,14 @@
 # worker の純粋関数に対する Level 1 (決定的) テスト。
 # DB / GDAL 不要で実行できるものだけをここに置く
+import json
+import logging
 from pathlib import Path
 
 import pytest
 
 from src.worker import (
+    JsonLinesFormatter,
+    configure_logging,
     fetch_upload,
     is_s3_uri,
     make_table_name,
@@ -111,3 +115,45 @@ class TestNormalizeLayerRole:
     def test_rejects_unknown_role(self) -> None:
         with pytest.raises(ValueError):
             normalize_layer_role("admin")
+
+
+class TestJsonLinesLogging:
+    def _record(self, **extra: str) -> logging.LogRecord:
+        record = logging.LogRecord(
+            name="worker-gis",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="Import job %s succeeded",
+            args=("job-1",),
+            exc_info=None,
+        )
+        for key, value in extra.items():
+            setattr(record, key, value)
+        return record
+
+    def test_emits_structured_fields_and_extras(self) -> None:
+        line = JsonLinesFormatter().format(self._record(job_id="job-1"))
+        payload = json.loads(line)
+        assert payload["level"] == "INFO"
+        assert payload["logger_name"] == "worker-gis"
+        assert payload["message"] == "Import job job-1 succeeded"
+        assert payload["job_id"] == "job-1"
+        assert payload["@timestamp"].endswith("+00:00")
+
+    def test_includes_stack_trace_on_exception(self) -> None:
+        try:
+            raise RuntimeError("simulated failure")
+        except RuntimeError:
+            import sys
+
+            record = self._record()
+            record.exc_info = sys.exc_info()
+        payload = json.loads(JsonLinesFormatter().format(record))
+        assert "simulated failure" in payload["stack_trace"]
+
+    def test_rejects_unknown_log_format(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 不正値で黙って text に落とすと本番で構造化クエリが静かに壊れるため fail fast
+        monkeypatch.setenv("LOG_FORMAT", "yaml")
+        with pytest.raises(RuntimeError):
+            configure_logging()

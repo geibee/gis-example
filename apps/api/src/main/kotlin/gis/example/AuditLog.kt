@@ -6,6 +6,7 @@ import io.ktor.server.application.ApplicationPlugin
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.hooks.ResponseSent
 import io.ktor.server.auth.principal
+import io.ktor.server.plugins.callid.callId
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 
@@ -20,7 +21,7 @@ fun auditLogPlugin(db: Database): ApplicationPlugin<Unit> =
         on(ResponseSent) { call ->
             val status = call.response.status()?.value ?: return@on
             val path = call.request.path()
-            if (path == "/health") return@on
+            if (path.startsWith("/health")) return@on
             val method = call.request.httpMethod.value
             val denied = status == 401 || status == 403
             val mutationSucceeded = method in mutationMethods && status < 400
@@ -36,7 +37,9 @@ fun auditLogPlugin(db: Database): ApplicationPlugin<Unit> =
                     projectId = call.attributes.getOrNull(AuditedProjectId),
                     httpMethod = method,
                     path = path,
-                    statusCode = status
+                    statusCode = status,
+                    // CloudWatch Logs 上のアプリログ (MDC callId) と突合するためのリクエスト ID
+                    callId = call.callId
                 )
             }.onFailure { exc ->
                 databaseLogger.warn("監査ログの書込みに失敗しました: {} {}", method, path, exc)
@@ -52,15 +55,16 @@ internal fun Database.insertAuditLog(
     projectId: String?,
     httpMethod: String,
     path: String,
-    statusCode: Int
+    statusCode: Int,
+    callId: String?
 ) {
     dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
             INSERT INTO app.audit_logs (
-                user_id, subject, action, decision, project_id, http_method, path, status_code
+                user_id, subject, action, decision, project_id, http_method, path, status_code, call_id
             )
-            VALUES (?::uuid, ?, ?, ?, ?::uuid, ?, ?, ?)
+            VALUES (?::uuid, ?, ?, ?, ?::uuid, ?, ?, ?, ?)
             """.trimIndent()
         ).use { stmt ->
             stmt.setString(1, userId)
@@ -71,6 +75,7 @@ internal fun Database.insertAuditLog(
             stmt.setString(6, httpMethod)
             stmt.setString(7, path)
             stmt.setInt(8, statusCode)
+            stmt.setString(9, callId)
             stmt.executeUpdate()
         }
     }

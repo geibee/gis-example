@@ -25,6 +25,7 @@ import io.ktor.server.application.call
 import io.ktor.server.application.createRouteScopedPlugin
 import io.ktor.server.application.hooks.ResponseBodyReadyForSend
 import io.ktor.server.auth.principal
+import io.ktor.server.plugins.callid.callId
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
@@ -234,7 +235,8 @@ fun authzGuardPlugin(db: Database?): RouteScopedPlugin<Unit> =
                         projectId = null,
                         httpMethod = method,
                         path = path,
-                        statusCode = HttpStatusCode.InternalServerError.value
+                        statusCode = HttpStatusCode.InternalServerError.value,
+                        callId = call.callId
                     )
                 }.onFailure { exc ->
                     authzLogger.warn("認可ガードの監査ログ書込みに失敗しました: {} {}", method, path, exc)

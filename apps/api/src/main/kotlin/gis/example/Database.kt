@@ -125,6 +125,17 @@ class Database(internal val dataSource: HikariDataSource) : AutoCloseable {
         dataSource.close()
     }
 
+    // readiness (/health/ready) 用の疎通確認。プールから接続を取得して SELECT 1 を実行する。
+    // 失敗は例外で伝える (接続取得は最悪 DATABASE_CONNECTION_TIMEOUT_MS までブロックし得るため、
+    // 呼び出し側で短いタイムアウトを掛けること — routes/SystemRoutes.kt)
+    fun ping() {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT 1").use { stmt ->
+                stmt.executeQuery().use { rs -> rs.next() }
+            }
+        }
+    }
+
     fun listProjects(): List<ProjectDto> = dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
