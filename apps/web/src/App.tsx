@@ -86,6 +86,12 @@ import {
 } from "./constants";
 import {
   addMapLayers,
+  focusFeatureResults,
+  focusGeometry,
+  syncConditionSearchHighlight,
+  syncMapLayerOrder
+} from "./mapUtils";
+import {
   buildBusinessMapTargets,
   canCreateZoneLayerFromSource,
   canUseSelectedFeatureAsZoneFeature,
@@ -98,8 +104,6 @@ import {
   emptyPartyDraft,
   emptyZoneDraft,
   errorMessage,
-  focusFeatureResults,
-  focusGeometry,
   formatEditorValue,
   groupLayerListItems,
   isZoneLayer,
@@ -119,8 +123,6 @@ import {
   readLayerViewState,
   readZoneDistance,
   restoreVisibleLayerIds,
-  syncConditionSearchHighlight,
-  syncMapLayerOrder,
   tabPath,
   toAttributePayload,
   toBuildingDraft,
