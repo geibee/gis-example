@@ -260,10 +260,8 @@ fun Database.updateLand(id: String, request: JsonObject): LandDto = try {
 }
 
 fun Database.deleteLand(id: String) {
-    dataSource.connection.use { connection ->
-        val previousAutoCommit = connection.autoCommit
-        connection.autoCommit = false
-        try {
+    try {
+        withTransaction { connection ->
             connection.prepareStatement("UPDATE app.buildings SET land_id = NULL, updated_at = now() WHERE land_id = ?").use { stmt ->
                 stmt.setString(1, id)
                 stmt.executeUpdate()
@@ -279,16 +277,9 @@ fun Database.deleteLand(id: String) {
             if (deleted == 0) {
                 throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Land not found")
             }
-            connection.commit()
-        } catch (exc: ApiException) {
-            connection.rollback()
-            throw exc
-        } catch (exc: SQLException) {
-            connection.rollback()
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Land delete failed: ${exc.message ?: "invalid land delete"}")
-        } finally {
-            connection.autoCommit = previousAutoCommit
         }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Land delete failed: ${exc.message ?: "invalid land delete"}")
     }
 }
 
@@ -509,10 +500,8 @@ fun Database.updateBuilding(id: String, request: JsonObject): BuildingDto = try 
 }
 
 fun Database.deleteBuilding(id: String) {
-    dataSource.connection.use { connection ->
-        val previousAutoCommit = connection.autoCommit
-        connection.autoCommit = false
-        try {
+    try {
+        withTransaction { connection ->
             connection.prepareStatement("DELETE FROM app.party_relationships WHERE target_type = 'building' AND target_id = ?").use { stmt ->
                 stmt.setString(1, id)
                 stmt.executeUpdate()
@@ -524,16 +513,9 @@ fun Database.deleteBuilding(id: String) {
             if (deleted == 0) {
                 throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Building not found")
             }
-            connection.commit()
-        } catch (exc: ApiException) {
-            connection.rollback()
-            throw exc
-        } catch (exc: SQLException) {
-            connection.rollback()
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Building delete failed: ${exc.message ?: "invalid building delete"}")
-        } finally {
-            connection.autoCommit = previousAutoCommit
         }
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Building delete failed: ${exc.message ?: "invalid building delete"}")
     }
 }
 
