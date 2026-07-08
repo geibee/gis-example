@@ -6,12 +6,15 @@ import gis.example.Action
 import gis.example.AnalysisJobRequest
 import gis.example.ApiException
 import gis.example.ProjectResourceType
+import gis.example.RouteAuthz.CheckedInHandler
+import gis.example.RouteAuthz.ResourceFromPath
+import gis.example.authorizedResourceId
+import gis.example.authorizedRoutes
 import gis.example.createAnalysisJob
 import gis.example.createImportJob
 import gis.example.getAnalysisJob
 import gis.example.getImportJob
 import gis.example.requireProjectPermission
-import gis.example.requireResourcePermission
 import gis.example.validateAnalysisRequest
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
@@ -21,8 +24,6 @@ import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
-import io.ktor.server.routing.get
-import io.ktor.server.routing.post
 import io.ktor.utils.io.core.readAvailable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,86 +34,92 @@ import java.util.UUID
 fun Route.jobRoutes(deps: AppDependencies) {
     val db = deps.db
 
-    post("/api/import-jobs") {
-        Files.createDirectories(deps.uploadDir)
-        var projectId: String? = null
-        var format: String? = null
-        var sourceSrid: Int? = null
-        var layerRole: String? = null
-        var filename: String? = null
-        var uploadPath: String? = null
+    authorizedRoutes(db) {
+        post(
+            "/api/import-jobs",
+            CheckedInHandler(Action.IMPORT_EXECUTE, "multipart を保存しないと projectId を解決できず、拒否時は保存済みファイルの削除が必要")
+        ) {
+            Files.createDirectories(deps.uploadDir)
+            var projectId: String? = null
+            var format: String? = null
+            var sourceSrid: Int? = null
+            var layerRole: String? = null
+            var filename: String? = null
+            var uploadPath: String? = null
 
-        val multipart = call.receiveMultipart()
-        multipart.forEachPart { part ->
-            when (part) {
-                is PartData.FormItem -> {
-                    when (part.name) {
-                        "projectId" -> projectId = optionalUuid(part.value, "projectId")
-                        "format" -> format = part.value.takeIf { it.isNotBlank() }?.lowercase()
-                        "sourceSrid" -> sourceSrid = part.value.takeIf { it.isNotBlank() }?.toIntOrNull()
-                        "layerRole" -> layerRole = part.value.takeIf { it.isNotBlank() }?.lowercase()
+            val multipart = call.receiveMultipart()
+            multipart.forEachPart { part ->
+                when (part) {
+                    is PartData.FormItem -> {
+                        when (part.name) {
+                            "projectId" -> projectId = optionalUuid(part.value, "projectId")
+                            "format" -> format = part.value.takeIf { it.isNotBlank() }?.lowercase()
+                            "sourceSrid" -> sourceSrid = part.value.takeIf { it.isNotBlank() }?.toIntOrNull()
+                            "layerRole" -> layerRole = part.value.takeIf { it.isNotBlank() }?.lowercase()
+                        }
                     }
-                }
-                is PartData.FileItem -> {
-                    val original = sanitizeFileName(part.originalFileName ?: "upload.dat")
-                    filename = original
-                    val target = deps.uploadDir.resolve("${UUID.randomUUID()}-$original")
-                    withContext(Dispatchers.IO) {
-                        writeUploadWithLimit(part, target, deps.maxUploadBytes)
+                    is PartData.FileItem -> {
+                        val original = sanitizeFileName(part.originalFileName ?: "upload.dat")
+                        filename = original
+                        val target = deps.uploadDir.resolve("${UUID.randomUUID()}-$original")
+                        withContext(Dispatchers.IO) {
+                            writeUploadWithLimit(part, target, deps.maxUploadBytes)
+                        }
+                        uploadPath = target.toString()
                     }
-                    uploadPath = target.toString()
+                    else -> Unit
                 }
-                else -> Unit
+                part.dispose()
             }
-            part.dispose()
+
+            val actualFilename = filename ?: throw ApiException(HttpStatusCode.BadRequest, "File is required")
+            val actualUploadPath = uploadPath ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
+            val resolvedProjectId = projectId ?: db.defaultProjectId()
+            try {
+                call.requireProjectPermission(Action.IMPORT_EXECUTE, resolvedProjectId)
+            } catch (exc: Exception) {
+                withContext(Dispatchers.IO) { Files.deleteIfExists(Path.of(actualUploadPath)) }
+                throw exc
+            }
+            val actualFormat = format ?: inferFormat(actualFilename)
+            validateImportFormat(actualFormat)
+
+            val job = db.createImportJob(
+                projectId = resolvedProjectId,
+                filename = actualFilename,
+                format = actualFormat,
+                sourceSrid = sourceSrid,
+                uploadPath = actualUploadPath,
+                layerRole = layerRole ?: "generic"
+            )
+            call.respond(HttpStatusCode.Created, job)
         }
 
-        val actualFilename = filename ?: throw ApiException(HttpStatusCode.BadRequest, "File is required")
-        val actualUploadPath = uploadPath ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
-        val resolvedProjectId = projectId ?: db.defaultProjectId()
-        try {
-            call.requireProjectPermission(Action.IMPORT_EXECUTE, resolvedProjectId)
-        } catch (exc: Exception) {
-            withContext(Dispatchers.IO) { Files.deleteIfExists(Path.of(actualUploadPath)) }
-            throw exc
+        get(
+            "/api/import-jobs/{id}",
+            ResourceFromPath(Action.JOB_READ, ProjectResourceType.IMPORT_JOB, uuidLabel = "Job id")
+        ) {
+            val id = call.authorizedResourceId()
+            call.respond(db.getImportJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Import job not found"))
         }
-        val actualFormat = format ?: inferFormat(actualFilename)
-        validateImportFormat(actualFormat)
 
-        val job = db.createImportJob(
-            projectId = resolvedProjectId,
-            filename = actualFilename,
-            format = actualFormat,
-            sourceSrid = sourceSrid,
-            uploadPath = actualUploadPath,
-            layerRole = layerRole ?: "generic"
-        )
-        call.respond(HttpStatusCode.Created, job)
-    }
+        post(
+            "/api/analysis-jobs",
+            CheckedInHandler(Action.ANALYSIS_EXECUTE, "projectId 省略時に既定プロジェクトへフォールバックするためボディ解釈と認可判定が分離できない")
+        ) {
+            val request = call.receive<AnalysisJobRequest>()
+            call.requireProjectPermission(Action.ANALYSIS_EXECUTE, request.projectId ?: db.defaultProjectId())
+            validateAnalysisRequest(db, request)
+            call.respond(HttpStatusCode.Created, db.createAnalysisJob(request))
+        }
 
-    get("/api/import-jobs/{id}") {
-        val id = requireUuid(
-            call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
-            "Job id"
-        )
-        call.requireResourcePermission(db, Action.JOB_READ, ProjectResourceType.IMPORT_JOB, id)
-        call.respond(db.getImportJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Import job not found"))
-    }
-
-    post("/api/analysis-jobs") {
-        val request = call.receive<AnalysisJobRequest>()
-        call.requireProjectPermission(Action.ANALYSIS_EXECUTE, request.projectId ?: db.defaultProjectId())
-        validateAnalysisRequest(db, request)
-        call.respond(HttpStatusCode.Created, db.createAnalysisJob(request))
-    }
-
-    get("/api/analysis-jobs/{id}") {
-        val id = requireUuid(
-            call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
-            "Job id"
-        )
-        call.requireResourcePermission(db, Action.JOB_READ, ProjectResourceType.ANALYSIS_JOB, id)
-        call.respond(db.getAnalysisJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Analysis job not found"))
+        get(
+            "/api/analysis-jobs/{id}",
+            ResourceFromPath(Action.JOB_READ, ProjectResourceType.ANALYSIS_JOB, uuidLabel = "Job id")
+        ) {
+            val id = call.authorizedResourceId()
+            call.respond(db.getAnalysisJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Analysis job not found"))
+        }
     }
 }
 

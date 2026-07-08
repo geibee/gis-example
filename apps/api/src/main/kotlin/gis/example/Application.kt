@@ -114,13 +114,16 @@ fun Application.module(
         }
     }
 
-    routing {
+    val rootRoute = routing {
         healthRoutes()
 
-        // /health 以外の全ルートは認証必須 (fail-closed)。認可は各ルート内で判定する
+        // /health 以外の全ルートは認証必須 (fail-closed)。
+        // 認可は各ルートの RouteAuthz 宣言 (authorizedRoutes DSL) で強制される
         authenticate(OIDC_AUTH_NAME) {
+            // 実行時の安全網: 認可判定マーカーのない 2xx 応答を 500 に置き換える
+            install(authzGuardPlugin(db))
             projectRoutes(deps)
-            meRoutes()
+            meRoutes(deps)
             adminRoutes(deps)
             layerRoutes(deps)
             featureRoutes(deps)
@@ -132,4 +135,6 @@ fun Application.module(
             tileRoutes(deps)
         }
     }
+    // 起動時の安全網: 認可宣言のないルートが 1 つでもあれば起動に失敗する
+    validateAuthorizedRoutes(rootRoute)
 }

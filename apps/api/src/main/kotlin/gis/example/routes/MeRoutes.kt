@@ -3,15 +3,16 @@ package gis.example.routes
 
 import gis.example.MeDto
 import gis.example.MembershipDto
+import gis.example.RouteAuthz.AuthenticatedOnly
 import gis.example.SystemRole
 import gis.example.appPrincipal
+import gis.example.authorizedRoutes
 import io.ktor.server.application.call
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
-import io.ktor.server.routing.get
 
-fun Route.meRoutes() {
-    get("/api/me") {
+fun Route.meRoutes(deps: AppDependencies) = authorizedRoutes(deps.db) {
+    get("/api/me", AuthenticatedOnly("自分自身の情報を返すだけで対象リソースを持たない")) {
         val principal = call.appPrincipal()
         call.respond(
             MeDto(
