@@ -175,6 +175,26 @@ class Database(internal val dataSource: HikariDataSource) : AutoCloseable {
     }
 }
 
+// 1 コネクション 1 トランザクションの共通ヘルパ。autoCommit の退避・復元、
+// 成功時 commit・例外時 rollback を一元化する (手動 autoCommit 管理を各所に書かない)。
+// block が投げた例外はそのまま伝播するので、SQLException の HTTP エラーへの
+// 変換は呼び出し側が withTransaction の外で行う
+internal fun <T> Database.withTransaction(block: (java.sql.Connection) -> T): T =
+    dataSource.connection.use { connection ->
+        val previousAutoCommit = connection.autoCommit
+        connection.autoCommit = false
+        try {
+            val result = block(connection)
+            connection.commit()
+            result
+        } catch (exc: Exception) {
+            connection.rollback()
+            throw exc
+        } finally {
+            connection.autoCommit = previousAutoCommit
+        }
+    }
+
 fun quoteIdent(value: String): String {
     require(value.isNotBlank()) { "Identifier must not be blank" }
     return "\"" + value.replace("\"", "\"\"") + "\""

@@ -1,5 +1,6 @@
 import { Layers, Map as MapIcon, Search, X } from "lucide-react";
-import type { BusinessObjectFilters, Feature, Layer } from "../types";
+import type { Feature, Layer } from "../contracts";
+import type { BusinessObjectFilters } from "../appTypes";
 import { businessStatusOptions, partyTypeOptions, relationTypeOptions } from "../constants";
 import { ChoiceSelect } from "./ChoiceSelect";
 

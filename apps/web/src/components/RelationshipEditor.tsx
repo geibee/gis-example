@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Pencil, Save, Trash2, X } from "lucide-react";
-import type { Building, Land, Party, PartyRelationship } from "../types";
+import type { Building, Land, Party, PartyRelationship } from "../contracts";
 import type { RelationshipDraft } from "../appTypes";
 import { relationTypeOptions } from "../constants";
 import { mergeChoiceOptions } from "../utils";

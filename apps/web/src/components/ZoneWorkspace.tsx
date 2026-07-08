@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Building2, Layers, Loader2, Map as MapIcon, Upload, X } from "lucide-react";
 import { searchFeatures } from "../api";
-import type { BusinessObjectFilters, Feature, FeatureSearchResult, Layer, Project, Zone } from "../types";
-import type { ZoneDraft } from "../appTypes";
+import type { Feature, FeatureSearchResult, Layer, Project, Zone } from "../contracts";
+import type { BusinessObjectFilters, ZoneDraft } from "../appTypes";
 import { zoneStatusOptions, zoneTypeOptions } from "../constants";
 import {
   canUseSelectedFeatureAsZoneFeature,

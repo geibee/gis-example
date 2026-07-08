@@ -11,7 +11,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import type { BusinessLinks, Feature, Layer } from "../types";
+import type { BusinessLinks, Feature, Layer } from "../contracts";
 import type { LayerListItem } from "../appTypes";
 import { formatValue } from "../utils";
 import { BusinessLinksPanel } from "./BusinessLinksPanel";

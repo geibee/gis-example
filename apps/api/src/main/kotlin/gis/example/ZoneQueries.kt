@@ -314,10 +314,8 @@ fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest): Zon
 
     val layerName = request.name?.trim()?.takeIf { it.isNotEmpty() } ?: "${sourceLayer.name} 区域"
     val tableName = generatedTableName("zone_buffer")
-    return dataSource.connection.use { connection ->
-        val previousAutoCommit = connection.autoCommit
-        connection.autoCommit = false
-        try {
+    return try {
+        val (layerId, counts) = withTransaction { connection ->
             // ST_MemUnion + ST_Buffer は大規模レイヤで長時間かかるため、生成系専用の上限に差し替える
             setLocalStatementTimeout(connection, heavyStatementTimeoutMillis)
             createSourceZoneBufferTable(
@@ -348,40 +346,33 @@ fun Database.createZoneLayerFromImport(request: ZoneLayerFromImportRequest): Zon
             )
             val layer = getLayerInConnection(connection, layerId)
                 ?: throw ApiException(io.ktor.http.HttpStatusCode.InternalServerError, "Created layer disappeared")
-            val counts = syncZonesForLayer(
+            layerId to syncZonesForLayer(
                 connection = connection,
                 layer = layer,
                 zoneType = request.zoneType,
                 status = request.status,
                 nameField = "name"
             )
-            connection.commit()
-            val createdLayer = getLayer(layerId) ?: error("Created layer disappeared")
-            ZoneLayerOperationDto(
-                layer = createdLayer,
-                zonesCreated = counts.created,
-                zonesUpdated = counts.updated,
-                zones = listZones(
-                    ZoneListQuery(
-                        projectId = projectId,
-                        q = null,
-                        status = null,
-                        zoneType = null,
-                        linkedOnly = false,
-                        zoneLayerId = layerId,
-                        sourceLayerId = null
-                    )
-                ).items
-            )
-        } catch (exc: ApiException) {
-            connection.rollback()
-            throw exc
-        } catch (exc: SQLException) {
-            connection.rollback()
-            throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone layer generation failed: ${exc.message ?: "invalid zone layer generation"}")
-        } finally {
-            connection.autoCommit = previousAutoCommit
         }
+        val createdLayer = getLayer(layerId) ?: error("Created layer disappeared")
+        ZoneLayerOperationDto(
+            layer = createdLayer,
+            zonesCreated = counts.created,
+            zonesUpdated = counts.updated,
+            zones = listZones(
+                ZoneListQuery(
+                    projectId = projectId,
+                    q = null,
+                    status = null,
+                    zoneType = null,
+                    linkedOnly = false,
+                    zoneLayerId = layerId,
+                    sourceLayerId = null
+                )
+            ).items
+        )
+    } catch (exc: SQLException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Zone layer generation failed: ${exc.message ?: "invalid zone layer generation"}")
     }
 }
 

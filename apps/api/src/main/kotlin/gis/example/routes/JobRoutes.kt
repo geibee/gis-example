@@ -1,0 +1,165 @@
+// 取込・分析ジョブ系ルート (openapi.yaml tag: jobs)。
+// 取込はアップロードを uploadDir へ保存してジョブ登録のみ行い、変換は worker-gis が担う
+package gis.example.routes
+
+import gis.example.Action
+import gis.example.AnalysisJobRequest
+import gis.example.ApiException
+import gis.example.ProjectResourceType
+import gis.example.createAnalysisJob
+import gis.example.createImportJob
+import gis.example.getAnalysisJob
+import gis.example.getImportJob
+import gis.example.requireProjectPermission
+import gis.example.requireResourcePermission
+import gis.example.validateAnalysisRequest
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.PartData
+import io.ktor.http.content.forEachPart
+import io.ktor.server.application.call
+import io.ktor.server.request.receive
+import io.ktor.server.request.receiveMultipart
+import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
+import io.ktor.server.routing.get
+import io.ktor.server.routing.post
+import io.ktor.utils.io.core.readAvailable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.UUID
+
+fun Route.jobRoutes(deps: AppDependencies) {
+    val db = deps.db
+
+    post("/api/import-jobs") {
+        Files.createDirectories(deps.uploadDir)
+        var projectId: String? = null
+        var format: String? = null
+        var sourceSrid: Int? = null
+        var layerRole: String? = null
+        var filename: String? = null
+        var uploadPath: String? = null
+
+        val multipart = call.receiveMultipart()
+        multipart.forEachPart { part ->
+            when (part) {
+                is PartData.FormItem -> {
+                    when (part.name) {
+                        "projectId" -> projectId = optionalUuid(part.value, "projectId")
+                        "format" -> format = part.value.takeIf { it.isNotBlank() }?.lowercase()
+                        "sourceSrid" -> sourceSrid = part.value.takeIf { it.isNotBlank() }?.toIntOrNull()
+                        "layerRole" -> layerRole = part.value.takeIf { it.isNotBlank() }?.lowercase()
+                    }
+                }
+                is PartData.FileItem -> {
+                    val original = sanitizeFileName(part.originalFileName ?: "upload.dat")
+                    filename = original
+                    val target = deps.uploadDir.resolve("${UUID.randomUUID()}-$original")
+                    withContext(Dispatchers.IO) {
+                        writeUploadWithLimit(part, target, deps.maxUploadBytes)
+                    }
+                    uploadPath = target.toString()
+                }
+                else -> Unit
+            }
+            part.dispose()
+        }
+
+        val actualFilename = filename ?: throw ApiException(HttpStatusCode.BadRequest, "File is required")
+        val actualUploadPath = uploadPath ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
+        val resolvedProjectId = projectId ?: db.defaultProjectId()
+        try {
+            call.requireProjectPermission(Action.IMPORT_EXECUTE, resolvedProjectId)
+        } catch (exc: Exception) {
+            withContext(Dispatchers.IO) { Files.deleteIfExists(Path.of(actualUploadPath)) }
+            throw exc
+        }
+        val actualFormat = format ?: inferFormat(actualFilename)
+        validateImportFormat(actualFormat)
+
+        val job = db.createImportJob(
+            projectId = resolvedProjectId,
+            filename = actualFilename,
+            format = actualFormat,
+            sourceSrid = sourceSrid,
+            uploadPath = actualUploadPath,
+            layerRole = layerRole ?: "generic"
+        )
+        call.respond(HttpStatusCode.Created, job)
+    }
+
+    get("/api/import-jobs/{id}") {
+        val id = requireUuid(
+            call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
+            "Job id"
+        )
+        call.requireResourcePermission(db, Action.JOB_READ, ProjectResourceType.IMPORT_JOB, id)
+        call.respond(db.getImportJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Import job not found"))
+    }
+
+    post("/api/analysis-jobs") {
+        val request = call.receive<AnalysisJobRequest>()
+        call.requireProjectPermission(Action.ANALYSIS_EXECUTE, request.projectId ?: db.defaultProjectId())
+        validateAnalysisRequest(db, request)
+        call.respond(HttpStatusCode.Created, db.createAnalysisJob(request))
+    }
+
+    get("/api/analysis-jobs/{id}") {
+        val id = requireUuid(
+            call.parameters["id"] ?: throw ApiException(HttpStatusCode.BadRequest, "Job id is required"),
+            "Job id"
+        )
+        call.requireResourcePermission(db, Action.JOB_READ, ProjectResourceType.ANALYSIS_JOB, id)
+        call.respond(db.getAnalysisJob(id) ?: throw ApiException(HttpStatusCode.NotFound, "Analysis job not found"))
+    }
+}
+
+// アップロードをストリーミングで書き出し、上限超過時は部分ファイルを消して 413 を返す
+// (全量をメモリへ読まない)
+private fun writeUploadWithLimit(part: PartData.FileItem, target: Path, maxBytes: Long) {
+    try {
+        val input = part.provider()
+        Files.newOutputStream(target).use { output ->
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val read = input.readAvailable(buffer, 0, buffer.size)
+                if (read <= 0) break
+                total += read
+                if (total > maxBytes) {
+                    throw ApiException(HttpStatusCode.PayloadTooLarge, "Upload exceeds limit of $maxBytes bytes")
+                }
+                output.write(buffer, 0, read)
+            }
+        }
+    } catch (exc: Exception) {
+        Files.deleteIfExists(target)
+        throw exc
+    }
+}
+
+private fun sanitizeFileName(value: String): String {
+    val cleaned = value.substringAfterLast('/').substringAfterLast('\\')
+        .replace(Regex("[^A-Za-z0-9._-]"), "_")
+    return cleaned.ifBlank { "upload.dat" }
+}
+
+private fun inferFormat(filename: String): String {
+    val lower = filename.lowercase()
+    return when {
+        lower.endsWith(".zip") -> "shapefile"
+        lower.endsWith(".geojson") || lower.endsWith(".json") -> "geojson"
+        lower.endsWith(".gml") -> "gml"
+        lower.endsWith(".kml") -> "kml"
+        lower.endsWith(".gpx") -> "gpx"
+        else -> throw ApiException(HttpStatusCode.BadRequest, "Cannot infer import format")
+    }
+}
+
+private fun validateImportFormat(format: String) {
+    if (format !in setOf("shapefile", "geojson", "gml", "kml", "gpx")) {
+        throw ApiException(HttpStatusCode.BadRequest, "Unsupported import format: $format")
+    }
+}

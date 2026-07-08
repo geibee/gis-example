@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, ShieldCheck, Trash2, UserPlus } from "lucide-react";
-import type { Project, ProjectMember, UserAccount } from "../types";
+import type { Project, ProjectMember, UserAccount } from "../contracts";
 import { deleteProjectMember, getProjectMembers, getUsers, putProjectMember, updateUser } from "../api";
 import { errorMessage } from "../utils";
 

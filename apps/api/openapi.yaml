@@ -1222,7 +1222,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
-      required: [userId, subject, systemRole, memberships]
+      # email / displayName は常に出力される (未設定時は null)
+      required: [userId, subject, email, displayName, systemRole, memberships]
 
     User:
       type: object
@@ -1234,7 +1235,7 @@ components:
         systemRole: { type: string, enum: [admin, user] }
         isActive: { type: boolean }
         createdAt: { type: string }
-      required: [id, subject, systemRole, isActive, createdAt]
+      required: [id, subject, email, displayName, systemRole, isActive, createdAt]
 
     UserPatchRequest:
       type: object
@@ -1250,7 +1251,7 @@ components:
         role: { type: string, enum: [editor, viewer] }
         email: { type: [string, "null"] }
         displayName: { type: [string, "null"] }
-      required: [userId, projectId, role]
+      required: [userId, projectId, role, email, displayName]
 
     MemberPutRequest:
       type: object
@@ -1282,6 +1283,8 @@ components:
         bbox4326:
           type: [array, "null"]
           items: { type: number }
+          minItems: 4
+          maxItems: 4
           description: "[west, south, east, north] (EPSG:4326)"
         rowCount: { type: integer }
         isResult: { type: boolean }
@@ -1295,9 +1298,11 @@ components:
           items:
             $ref: "#/components/schemas/LayerAttribute"
         createdAt: { type: string }
+      # attributes は常に出力される (空配列あり)
       required:
         [id, projectId, name, schemaName, tableName, geometryColumn, geometryType,
-         displaySrid, featureIdColumn, rowCount, isResult, layerRole, tileSourceId, createdAt]
+         displaySrid, featureIdColumn, rowCount, isResult, layerRole, tileSourceId,
+         attributes, createdAt]
 
     Feature:
       type: object
@@ -1356,7 +1361,8 @@ components:
           $ref: "#/components/schemas/BusinessLinks"
         matchedBusinessLinks:
           $ref: "#/components/schemas/BusinessLinks"
-      required: [layerId, layerName, featureId, properties]
+      # businessLinks / matchedBusinessLinks は常に出力される (空リンクあり)
+      required: [layerId, layerName, featureId, properties, businessLinks, matchedBusinessLinks]
 
     BusinessSpatialSearchRequest:
       type: object
@@ -1479,7 +1485,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PartyRelationship"
-      required: [id, projectId, lotNumber, address, status]
+      # buildings / relationships は常に出力される (空配列あり)
+      required: [id, projectId, lotNumber, address, status, buildings, relationships]
 
     LandWriteRequest:
       type: object
@@ -1526,7 +1533,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PartyRelationship"
-      required: [id, projectId, name, status]
+      required: [id, projectId, name, status, relationships]
 
     BuildingWriteRequest:
       type: object
@@ -1568,7 +1575,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PartyRelationship"
-      required: [id, projectId, name, partyType]
+      required: [id, projectId, name, partyType, tags, relationships]
 
     PartyWriteRequest:
       type: object
@@ -1609,8 +1616,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/BusinessEntityLink"
+      # landCount / buildingCount / lands / buildings は常に出力される
       required:
-        [id, projectId, name, status, zoneLayerId, zoneFeatureId, sourceLayerId, sourceFeatureId]
+        [id, projectId, name, status, zoneLayerId, zoneFeatureId, sourceLayerId, sourceFeatureId,
+         landCount, buildingCount, lands, buildings]
 
     ZoneWriteRequest:
       type: object
@@ -1650,7 +1659,7 @@ components:
           type: array
           items: { type: string }
         coverageRatio: { type: number }
-      required: [id, name, partyType, zoneInvolvement, projectInvolvement, coverageRatio]
+      required: [id, name, partyType, tags, zoneInvolvement, projectInvolvement, relationTypes, coverageRatio]
 
     ZonePartySummary:
       type: object
@@ -1670,7 +1679,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ZonePartySummaryEntry"
-      required: [zoneId, containedCount, partyCount]
+      required: [zoneId, containedCount, partyCount, typeBreakdown, tagBreakdown, parties]
 
     ZoneLayerFromImportRequest:
       type: object
@@ -1694,7 +1703,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Zone"
-      required: [layer, zonesCreated, zonesUpdated]
+      required: [layer, zonesCreated, zonesUpdated, zones]
 
     ImportJob:
       type: object
