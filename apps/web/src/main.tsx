@@ -1,9 +1,9 @@
 import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { AuthProvider, useAuth } from "react-oidc-context";
-import "maplibre-gl/dist/maplibre-gl.css";
-import App from "./App";
+import { RouterProvider } from "@tanstack/react-router";
 import { oidcConfig, setAccessToken, setUnauthorizedHandler } from "./auth";
+import { router } from "./router";
 import "./styles.css";
 
 // 認証が確立するまで App を描画しない。未認証なら IdP のログイン画面へ誘導する
@@ -45,7 +45,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AuthProvider {...oidcConfig}>
       <AuthGate>
-        <App />
+        <RouterProvider router={router} />
       </AuthGate>
     </AuthProvider>
   </React.StrictMode>

@@ -1,4 +1,4 @@
-import type { Building, BusinessLinks, BusinessObjectFilters, Land, Layer, Party, Zone } from "./types";
+import type { Building, BusinessLinks, BusinessObjectFilters, FeatureSearchResult, Land, Layer, Party, Zone } from "./types";
 
 export type LayerViewState = {
   baseMapVisible: boolean;
@@ -13,9 +13,14 @@ export type LayerListItem =
 export type BusinessTab = "zone" | "lands" | "buildings" | "parties" | "admin";
 export type ZoneBusinessSourceType = "all" | "land" | "building";
 
-export type RouteSelection = {
-  tab: BusinessTab;
-  id: string | null;
+// 地図チャンク (components/MapPane.tsx) が公開する命令的 API。
+// App (メインチャンク) は maplibre を import せず、この API 経由で地図を操作する。
+export type MapPaneApi = {
+  resize: () => void;
+  focusGeometry: (geometry: unknown) => void;
+  focusFeatureResults: (results: FeatureSearchResult[]) => void;
+  getBoundsBbox: () => string | null;
+  reloadLayerSource: (layerId: string) => void;
 };
 
 export type ZoneLayerCreateMetadata = {

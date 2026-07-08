@@ -21,12 +21,10 @@ import type {
   BusinessListSearchCriteria,
   BusinessMapTarget,
   BusinessMapTargetContext,
-  BusinessTab,
   LandDraft,
   LayerListItem,
   LayerViewState,
   PartyDraft,
-  RouteSelection,
   ZoneDraft,
   ZoneLayerCreateMetadata
 } from "./appTypes";
@@ -628,26 +626,6 @@ export function extendBounds(bounds: GeometryBounds, lng: number, lat: number) {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-export function parseRoute(pathname: string): RouteSelection {
-  const [segment, rawId] = pathname.split("/").filter(Boolean);
-  const id = rawId ? decodeURIComponent(rawId) : null;
-  if (segment === "zones") return { tab: "zone", id };
-  if (segment === "lands") return { tab: "lands", id };
-  if (segment === "buildings") return { tab: "buildings", id };
-  if (segment === "parties") return { tab: "parties", id };
-  if (segment === "admin") return { tab: "admin", id: null };
-  return { tab: "zone", id: null };
-}
-
-export function tabPath(tab: BusinessTab): string {
-  if (tab === "zone") return "/zones";
-  if (tab === "lands") return "/lands";
-  if (tab === "buildings") return "/buildings";
-  if (tab === "parties") return "/parties";
-  if (tab === "admin") return "/admin";
-  return "/zones";
 }
 
 export function emptyZoneDraft(): ZoneDraft {

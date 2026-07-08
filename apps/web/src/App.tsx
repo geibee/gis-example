@@ -1,9 +1,9 @@
-import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { type MapLayerMouseEvent, type Map as MapLibreMap } from "maplibre-gl";
+import { type DragEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Building2, EyeOff, FileText, LogOut, Map as MapIcon, ShieldCheck, Users } from "lucide-react";
 import { useAuth } from "react-oidc-context";
-import { getAccessToken } from "./auth";
-import { AdminWorkspace } from "./components/AdminWorkspace";
+import { AppStateContext } from "./appState";
+import { activeScreenMeta, activeScreenObjectId, tabBasePath, tabDetailPath } from "./routeMeta";
 import {
   conditionSearchFeatures,
   createAnalysisJob,
@@ -67,30 +67,19 @@ import type {
   BusinessTab,
   LandDraft,
   LayerListItem,
+  MapPaneApi,
   PartyDraft,
   RelationshipDraft,
-  RouteSelection,
   ZoneBusinessSourceType,
   ZoneDraft,
   ZoneLayerCreateMetadata
 } from "./appTypes";
 import {
-  baseStyle,
   businessMapHighlightLimit,
-  defaultMapZoom,
   emptyBusinessLinks,
-  imperialPalaceCenter,
   jobPollIntervalMs,
-  jobPollTimeoutMs,
-  layerColors
+  jobPollTimeoutMs
 } from "./constants";
-import {
-  addMapLayers,
-  focusFeatureResults,
-  focusGeometry,
-  syncConditionSearchHighlight,
-  syncMapLayerOrder
-} from "./mapUtils";
 import {
   buildBusinessMapTargets,
   canCreateZoneLayerFromSource,
@@ -119,11 +108,9 @@ import {
   orderLayers,
   parseEditedProperty,
   parsePartyTags,
-  parseRoute,
   readLayerViewState,
   readZoneDistance,
   restoreVisibleLayerIds,
-  tabPath,
   toAttributePayload,
   toBuildingDraft,
   toBusinessListSearchCriteria,
@@ -135,27 +122,138 @@ import {
   writeLayerViewState,
   zoneMetadataFromDraft
 } from "./utils";
-import { BuildingWorkspace } from "./components/BuildingWorkspace";
-import { LandWorkspace } from "./components/LandWorkspace";
-import { MapSupportPane } from "./components/MapSupportPane";
-import { PartyWorkspace } from "./components/PartyWorkspace";
-import { ZoneSearchPanel } from "./components/ZoneSearchPanel";
-import { ZoneWorkspace } from "./components/ZoneWorkspace";
+// 地図ペイン (maplibre-gl を含む) はメインチャンクとは別チャンクとして遅延ロードする
+const MapPane = lazy(() => import("./components/MapPane"));
 
+// ルートレイアウト。認証と全業務 state を保持し (状態解体は issue #9)、
+// ヘッダー・地図ペインを描画して <Outlet /> に各画面 (src/screens/) を差し込む。
 export default function App() {
   const auth = useAuth();
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<MapLibreMap | null>(null);
-  const styleLayersByLayerId = useRef<Record<string, string[]>>({});
-  const appLayerByStyleLayer = useRef<Record<string, string>>({});
-  const initializedLayerBounds = useRef(false);
-  const seenLayerIds = useRef<Set<string>>(new Set());
+  const app = useAppController();
+
+  return (
+    <div className="business-app">
+      <header className="top-shell">
+        <div className="product-mark">
+          <FileText size={20} />
+          <div>
+            <strong>不動産業務管理</strong>
+            <span>{app.projects.find((project) => project.id === app.selectedProject)?.name ?? "Project"}</span>
+          </div>
+        </div>
+        <nav className="top-tabs" aria-label="業務タブ">
+          <button className={app.activeTab === "zone" ? "active" : ""} type="button" onClick={() => app.navigateTab("zone")}>
+            <MapIcon size={17} />
+            区域
+          </button>
+          <button className={app.activeTab === "lands" ? "active" : ""} type="button" onClick={() => app.navigateTab("lands")}>
+            <MapIcon size={17} />
+            土地
+          </button>
+          <button className={app.activeTab === "buildings" ? "active" : ""} type="button" onClick={() => app.navigateTab("buildings")}>
+            <Building2 size={17} />
+            建物
+          </button>
+          <button className={app.activeTab === "parties" ? "active" : ""} type="button" onClick={() => app.navigateTab("parties")}>
+            <Users size={17} />
+            関係者
+          </button>
+          {app.me?.systemRole === "admin" ? (
+            <button className={app.activeTab === "admin" ? "active" : ""} type="button" onClick={() => app.navigateTab("admin")}>
+              <ShieldCheck size={17} />
+              管理
+            </button>
+          ) : null}
+        </nav>
+        <button className="subtle-button top-map-toggle" type="button" onClick={() => app.setMapSupportOpen((open) => !open)}>
+          {app.mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
+          {app.mapSupportOpen ? "地図を隠す" : "地図を表示"}
+        </button>
+        <button
+          className="subtle-button"
+          type="button"
+          title={auth.user?.profile.preferred_username ?? auth.user?.profile.email ?? undefined}
+          onClick={() => void auth.signoutRedirect()}
+        >
+          <LogOut size={16} />
+          ログアウト
+        </button>
+      </header>
+
+      <main className={`business-workspace${app.mapSupportOpen ? " map-open" : " map-closed"}`}>
+        <div className="workspace-tabs">
+          <AppStateContext.Provider value={app}>
+            <Outlet />
+          </AppStateContext.Provider>
+        </div>
+
+        <Suspense fallback={<aside className={`map-support-pane${app.mapSupportOpen ? "" : " closed"}`} />}>
+          <MapPane
+            apiRef={app.mapApiRef}
+            onReadyChange={app.setMapReady}
+            layers={app.layers}
+            mapHighlightResults={app.mapHighlightResults}
+            layerById={app.layerById}
+            onPickFeature={app.handleMapFeatureClick}
+            onNotice={app.setNotice}
+            open={app.mapSupportOpen}
+            onToggle={() => app.setMapSupportOpen((open) => !open)}
+            baseMapVisible={app.baseMapVisible}
+            setBaseMapVisible={app.setBaseMapVisible}
+            layerListItems={app.layerListItems}
+            visibleLayerIds={app.visibleLayerIds}
+            loadingLayers={app.loadingLayers}
+            deletingLayerIds={app.deletingLayerIds}
+            deletingResultSetIds={app.deletingResultSetIds}
+            draggingLayerId={app.draggingLayerId}
+            onRefreshLayers={() => void app.refreshLayers()}
+            onToggleLayer={app.toggleLayer}
+            onToggleLayerGroup={app.toggleLayerGroup}
+            onRequestLayerDelete={(layer) => void app.requestLayerDelete(layer)}
+            onRequestResultSetDelete={(resultSet) => void app.requestResultSetDelete(resultSet)}
+            onDragLayerStart={app.startLayerDrag}
+            onDragLayerOver={app.dragLayerOver}
+            onDropLayer={app.dropLayer}
+            onDragLayerEnd={() => app.setDraggingLayerId(null)}
+            selectedFeature={app.selectedFeature}
+            selectedFeatureLayer={app.selectedFeatureLayer}
+            businessLinks={app.businessLinks}
+            loadingBusinessLinks={app.loadingBusinessLinks}
+            featureEditOpen={app.featureEditOpen}
+            setFeatureEditOpen={app.setFeatureEditOpen}
+            featurePropertyDraft={app.featurePropertyDraft}
+            setFeaturePropertyDraft={app.setFeaturePropertyDraft}
+            featureGeometryDraft={app.featureGeometryDraft}
+            setFeatureGeometryDraft={app.setFeatureGeometryDraft}
+            savingFeature={app.savingFeature}
+            onSaveFeature={() => void app.saveSelectedFeature()}
+          />
+        </Suspense>
+      </main>
+
+      {app.notice ? (
+        <div className="notice business-notice">
+          <span>{app.notice}</span>
+          <button type="button" onClick={() => app.setNotice(null)}>
+            閉じる
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// App が保持する state と handler 群。AppStateContext 経由で各画面 (薄いラッパ) へ渡す。
+function useAppController() {
+  const navigate = useNavigate();
+  // URL (マッチ中ルートの staticData / $id param) を唯一の正として画面状態を導出する
+  const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
+  const routeObjectId = useRouterState({ select: (state) => activeScreenObjectId(state.matches) });
+  const mapApiRef = useRef<MapPaneApi | null>(null);
   const loadedLayerProjectId = useRef<string | null>(null);
   const layersRef = useRef<Layer[]>([]);
   const activePollTimersRef = useRef<Set<number>>(new Set());
 
-  const [activeTab, setActiveTab] = useState<BusinessTab>(() => parseRoute(window.location.pathname).tab);
-  const [routeSelection, setRouteSelection] = useState<RouteSelection>(() => parseRoute(window.location.pathname));
   const [mapReady, setMapReady] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [me, setMe] = useState<Me | null>(null);
@@ -179,10 +277,7 @@ export default function App() {
   const [zoneSearchCriteria, setZoneSearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
   const [zoneFiltersOpen, setZoneFiltersOpen] = useState(true);
   const [zones, setZones] = useState<Zone[]>([]);
-  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(() => {
-    const route = parseRoute(window.location.pathname);
-    return route.tab === "zone" ? route.id : null;
-  });
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(() => (activeTab === "zone" ? routeObjectId : null));
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
   const [zoneDraft, setZoneDraft] = useState<ZoneDraft>(emptyZoneDraft());
   const [creatingZone, setCreatingZone] = useState(false);
@@ -230,10 +325,7 @@ export default function App() {
   const [landSearchCriteria, setLandSearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
   const [landFiltersOpen, setLandFiltersOpen] = useState(true);
   const [lands, setLands] = useState<Land[]>([]);
-  const [selectedLandId, setSelectedLandId] = useState<string | null>(() => {
-    const route = parseRoute(window.location.pathname);
-    return route.tab === "lands" ? route.id : null;
-  });
+  const [selectedLandId, setSelectedLandId] = useState<string | null>(() => (activeTab === "lands" ? routeObjectId : null));
   const [selectedLand, setSelectedLand] = useState<Land | null>(null);
   const [landDraft, setLandDraft] = useState<LandDraft>(emptyLandDraft());
   const [creatingLand, setCreatingLand] = useState(false);
@@ -246,10 +338,7 @@ export default function App() {
   const [buildingSearchCriteria, setBuildingSearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
   const [buildingFiltersOpen, setBuildingFiltersOpen] = useState(true);
   const [buildings, setBuildings] = useState<Building[]>([]);
-  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(() => {
-    const route = parseRoute(window.location.pathname);
-    return route.tab === "buildings" ? route.id : null;
-  });
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(() => (activeTab === "buildings" ? routeObjectId : null));
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [buildingDraft, setBuildingDraft] = useState<BuildingDraft>(emptyBuildingDraft());
   const [creatingBuilding, setCreatingBuilding] = useState(false);
@@ -262,10 +351,7 @@ export default function App() {
   const [partySearchCriteria, setPartySearchCriteria] = useState<BusinessListSearchCriteria>(emptyBusinessListSearchCriteria);
   const [partyFiltersOpen, setPartyFiltersOpen] = useState(true);
   const [parties, setParties] = useState<Party[]>([]);
-  const [selectedPartyId, setSelectedPartyId] = useState<string | null>(() => {
-    const route = parseRoute(window.location.pathname);
-    return route.tab === "parties" ? route.id : null;
-  });
+  const [selectedPartyId, setSelectedPartyId] = useState<string | null>(() => (activeTab === "parties" ? routeObjectId : null));
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
   const [partyDraft, setPartyDraft] = useState<PartyDraft>(emptyPartyDraft());
   const [creatingParty, setCreatingParty] = useState(false);
@@ -297,11 +383,7 @@ export default function App() {
   }, [layerById, layers]);
 
   const navigateTab = useCallback((tab: BusinessTab) => {
-    const path = tabPath(tab);
-    window.history.pushState(null, "", path);
-    const nextRoute = parseRoute(path);
-    setActiveTab(nextRoute.tab);
-    setRouteSelection(nextRoute);
+    void navigate({ to: tabBasePath[tab] });
     if (tab === "zone") {
       setCreatingZone(false);
       setSelectedZoneId(null);
@@ -322,111 +404,90 @@ export default function App() {
       setSelectedPartyId(null);
       setSelectedParty(null);
     }
-  }, []);
+  }, [navigate]);
 
   const selectZone = useCallback((id: string) => {
-    const path = `/zones/${encodeURIComponent(id)}`;
-    window.history.pushState(null, "", path);
-    setActiveTab("zone");
+    void navigate({ to: tabDetailPath.zone, params: { id } });
     setCreatingZone(false);
     setListMapHighlightResults([]);
     setManualMapHighlightResults(null);
-    setRouteSelection({ tab: "zone", id });
     setSelectedZone(null);
     setSelectedZoneId(id);
-  }, []);
+  }, [navigate]);
 
   const selectLand = useCallback((id: string) => {
-    const path = `/lands/${encodeURIComponent(id)}`;
-    window.history.pushState(null, "", path);
-    setActiveTab("lands");
+    void navigate({ to: tabDetailPath.lands, params: { id } });
     setCreatingLand(false);
     setListMapHighlightResults([]);
     setManualMapHighlightResults(null);
-    setRouteSelection({ tab: "lands", id });
     setSelectedLand(null);
     setSelectedLandId(id);
-  }, []);
+  }, [navigate]);
 
   const selectBuilding = useCallback((id: string) => {
-    const path = `/buildings/${encodeURIComponent(id)}`;
-    window.history.pushState(null, "", path);
-    setActiveTab("buildings");
+    void navigate({ to: tabDetailPath.buildings, params: { id } });
     setCreatingBuilding(false);
     setListMapHighlightResults([]);
     setManualMapHighlightResults(null);
-    setRouteSelection({ tab: "buildings", id });
     setSelectedBuilding(null);
     setSelectedBuildingId(id);
-  }, []);
+  }, [navigate]);
 
   const selectParty = useCallback((id: string) => {
-    const path = `/parties/${encodeURIComponent(id)}`;
-    window.history.pushState(null, "", path);
-    setActiveTab("parties");
+    void navigate({ to: tabDetailPath.parties, params: { id } });
     setCreatingParty(false);
     setListMapHighlightResults([]);
     setManualMapHighlightResults(null);
-    setRouteSelection({ tab: "parties", id });
     setSelectedParty(null);
     setSelectedPartyId(id);
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     layersRef.current = layers;
   }, [layers]);
 
+  // URL (ルート param) → 選択オブジェクトの同期。ブラウザバック/ディープリンクもここで反映される
   useEffect(() => {
-    const handlePopState = () => {
-      const nextRoute = parseRoute(window.location.pathname);
-      setActiveTab(nextRoute.tab);
-      setRouteSelection(nextRoute);
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
-
-  useEffect(() => {
-    if (routeSelection.tab === "zone") {
-      if (routeSelection.id) {
+    if (activeTab === "zone") {
+      if (routeObjectId) {
         setCreatingZone(false);
-        setSelectedZoneId(routeSelection.id);
+        setSelectedZoneId(routeObjectId);
       } else if (!creatingZone) {
         setSelectedZoneId(null);
         setSelectedZone(null);
       }
     }
-    if (routeSelection.tab === "lands") {
-      if (routeSelection.id) {
+    if (activeTab === "lands") {
+      if (routeObjectId) {
         setCreatingLand(false);
-        setSelectedLandId(routeSelection.id);
+        setSelectedLandId(routeObjectId);
       } else if (!creatingLand) {
         setSelectedLandId(null);
         setSelectedLand(null);
       }
     }
-    if (routeSelection.tab === "buildings") {
-      if (routeSelection.id) {
+    if (activeTab === "buildings") {
+      if (routeObjectId) {
         setCreatingBuilding(false);
-        setSelectedBuildingId(routeSelection.id);
+        setSelectedBuildingId(routeObjectId);
       } else if (!creatingBuilding) {
         setSelectedBuildingId(null);
         setSelectedBuilding(null);
       }
     }
-    if (routeSelection.tab === "parties") {
-      if (routeSelection.id) {
+    if (activeTab === "parties") {
+      if (routeObjectId) {
         setCreatingParty(false);
-        setSelectedPartyId(routeSelection.id);
+        setSelectedPartyId(routeObjectId);
       } else if (!creatingParty) {
         setSelectedPartyId(null);
         setSelectedParty(null);
       }
     }
-  }, [creatingBuilding, creatingLand, creatingParty, creatingZone, routeSelection]);
+  }, [activeTab, creatingBuilding, creatingLand, creatingParty, creatingZone, routeObjectId]);
 
   useEffect(() => {
-    window.setTimeout(() => mapRef.current?.resize(), 0);
+    window.setTimeout(() => mapApiRef.current?.resize(), 0);
   }, [activeTab, mapSupportOpen]);
 
   const refreshLayers = useCallback(async () => {
@@ -626,96 +687,6 @@ export default function App() {
   }, [creatingParty, selectedPartyId]);
 
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: baseStyle as maplibregl.StyleSpecification,
-      center: imperialPalaceCenter,
-      zoom: defaultMapZoom,
-      attributionControl: { compact: true },
-      // tilejson とタイル (/api/tiles) は MapLibre が直接取得するため、
-      // ここでアクセストークンを付与する (API の認証必須化に対応)
-      transformRequest: (url) => {
-        if (url.includes("/api/")) {
-          const token = getAccessToken();
-          if (token) {
-            return { url, headers: { Authorization: `Bearer ${token}` } };
-          }
-        }
-        return { url };
-      }
-    });
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-    map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
-    map.on("load", () => setMapReady(true));
-    mapRef.current = map;
-    return () => {
-      map.remove();
-      mapRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!mapReady || !map) return;
-
-    if (map.getLayer("osm")) {
-      map.setLayoutProperty("osm", "visibility", baseMapVisible ? "visible" : "none");
-    }
-  }, [baseMapVisible, mapReady]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!mapReady || !map) return;
-
-    const activeLayerIds = new Set(layers.map((layer) => layer.id));
-    for (const [layerId, styleLayerIds] of Object.entries(styleLayersByLayerId.current)) {
-      if (activeLayerIds.has(layerId)) continue;
-      for (const styleLayerId of styleLayerIds) {
-        if (map.getLayer(styleLayerId)) {
-          map.removeLayer(styleLayerId);
-        }
-        delete appLayerByStyleLayer.current[styleLayerId];
-      }
-      if (map.getSource(layerId)) {
-        map.removeSource(layerId);
-      }
-      delete styleLayersByLayerId.current[layerId];
-      seenLayerIds.current.delete(layerId);
-    }
-
-    layers.forEach((layer, index) => {
-      if (!map.getSource(layer.id)) {
-        map.addSource(layer.id, {
-          type: "vector",
-          url: `/api/tilejson/${layer.id}`
-        });
-      }
-      if (!styleLayersByLayerId.current[layer.id]) {
-        const styleLayerIds = addMapLayers(map, layer, layerColors[index % layerColors.length]);
-        styleLayersByLayerId.current[layer.id] = styleLayerIds;
-        for (const styleLayerId of styleLayerIds) {
-          appLayerByStyleLayer.current[styleLayerId] = layer.id;
-        }
-      }
-      const visibility = visibleLayerIds.has(layer.id) ? "visible" : "none";
-      for (const styleLayerId of styleLayersByLayerId.current[layer.id] ?? []) {
-        if (map.getLayer(styleLayerId)) {
-          map.setLayoutProperty(styleLayerId, "visibility", visibility);
-        }
-      }
-    });
-    syncMapLayerOrder(map, layers, styleLayersByLayerId.current);
-    syncConditionSearchHighlight(map, mapHighlightResults);
-  }, [layers, mapHighlightResults, mapReady, visibleLayerIds]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!mapReady || !map) return;
-    syncConditionSearchHighlight(map, mapHighlightResults);
-  }, [mapHighlightResults, mapReady]);
-
-  useEffect(() => {
     setManualMapHighlightResults(null);
   }, [
     activeTab,
@@ -789,8 +760,8 @@ export default function App() {
       setVisibleLayerIds((current) => new Set([...current, ...results.map((result) => result.layerId)]));
       if (mapReady) {
         window.setTimeout(() => {
-          mapRef.current?.resize();
-          focusFeatureResults(mapRef.current, results);
+          mapApiRef.current?.resize();
+          mapApiRef.current?.focusFeatureResults(results);
         }, 80);
       }
     };
@@ -817,73 +788,16 @@ export default function App() {
     zones
   ]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!mapReady || !map) return;
-
-    const visibleLayersWithBounds = layers.filter((layer) => visibleLayerIds.has(layer.id) && layer.bbox4326);
-    if (!visibleLayersWithBounds.length) return;
-
-    if (!initializedLayerBounds.current) {
-      for (const layer of layers) {
-        seenLayerIds.current.add(layer.id);
-      }
-      initializedLayerBounds.current = true;
-      return;
+  // 地図クリックで拾った地物の詳細取得 (地図側の処理は MapPane に委譲)
+  const handleMapFeatureClick = useCallback(async (layer: Layer, featureId: string) => {
+    try {
+      const feature = await getFeature(layer.id, featureId);
+      setSelectedFeature(feature);
+      setSelectedFeatureLayer(layer);
+    } catch (error) {
+      setNotice(errorMessage(error));
     }
-
-    const layerToFit = visibleLayersWithBounds.find((layer) => !seenLayerIds.current.has(layer.id));
-
-    if (layerToFit?.bbox4326) {
-      map.fitBounds(
-        [
-          [layerToFit.bbox4326[0], layerToFit.bbox4326[1]],
-          [layerToFit.bbox4326[2], layerToFit.bbox4326[3]]
-        ],
-        { padding: 48, duration: 600, maxZoom: 16 }
-      );
-    }
-
-    for (const layer of layers) {
-      seenLayerIds.current.add(layer.id);
-    }
-  }, [layers, mapReady, visibleLayerIds]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!mapReady || !map) return;
-
-    const handleClick = async (event: MapLayerMouseEvent) => {
-      const queryLayerIds = Object.values(styleLayersByLayerId.current)
-        .flat()
-        .filter((id) => map.getLayer(id));
-      if (!queryLayerIds.length) return;
-
-      const features = map.queryRenderedFeatures(event.point, { layers: queryLayerIds });
-      const rendered = features[0];
-      if (!rendered) return;
-
-      const layerId = appLayerByStyleLayer.current[rendered.layer.id];
-      const layer = layerById.get(layerId);
-      const featureId = rendered.properties?.[layer?.featureIdColumn ?? "fid"] ?? rendered.id;
-      if (!layer || featureId === undefined || featureId === null || featureId === "") {
-        setNotice("選択地物のIDを取得できませんでした");
-        return;
-      }
-      try {
-        const feature = await getFeature(layer.id, String(featureId));
-        setSelectedFeature(feature);
-        setSelectedFeatureLayer(layer);
-      } catch (error) {
-        setNotice(errorMessage(error));
-      }
-    };
-
-    map.on("click", handleClick);
-    return () => {
-      map.off("click", handleClick);
-    };
-  }, [layerById, mapReady]);
+  }, []);
 
   useEffect(() => {
     if (!selectedFeature || !selectedFeatureLayer) {
@@ -916,8 +830,7 @@ export default function App() {
   }, [selectedFeature, selectedFeatureLayer]);
 
   const reloadLayerSource = (layerId: string) => {
-    const source = mapRef.current?.getSource(layerId) as { reload?: () => void } | undefined;
-    source?.reload?.();
+    mapApiRef.current?.reloadLayerSource(layerId);
   };
 
   const submitZoneUpload = async () => {
@@ -1034,10 +947,8 @@ export default function App() {
   const openCreatedZoneFromOperation = (result: ZoneLayerOperation) => {
     const createdZone = result.zones[0];
     if (!createdZone) return;
-    setActiveTab("zone");
     setCreatingZone(false);
-    window.history.pushState(null, "", `/zones/${encodeURIComponent(createdZone.id)}`);
-    setRouteSelection({ tab: "zone", id: createdZone.id });
+    void navigate({ to: tabDetailPath.zone, params: { id: createdZone.id } });
     setSelectedZoneId(createdZone.id);
     setSelectedZone(createdZone);
     setZoneDraft(toZoneDraft(createdZone));
@@ -1203,7 +1114,7 @@ export default function App() {
       const feature = await getFeature(result.layerId, result.featureId);
       setSelectedFeature(feature);
       setSelectedFeatureLayer(layer);
-      focusGeometry(mapRef.current, feature.geometry);
+      mapApiRef.current?.focusGeometry(feature.geometry);
     } catch (error) {
       setNotice(errorMessage(error));
     }
@@ -1417,8 +1328,7 @@ export default function App() {
     setSelectedZoneId(null);
     setSelectedZone(null);
     setZoneDraft(newZoneDraft());
-    window.history.pushState(null, "", "/zones");
-    setRouteSelection({ tab: "zone", id: null });
+    void navigate({ to: tabBasePath.zone });
   };
 
   const beginCreateLand = () => {
@@ -1426,8 +1336,7 @@ export default function App() {
     setSelectedLandId(null);
     setSelectedLand(null);
     setLandDraft(newLandDraft());
-    window.history.pushState(null, "", "/lands");
-    setRouteSelection({ tab: "lands", id: null });
+    void navigate({ to: tabBasePath.lands });
   };
 
   const beginCreateBuilding = () => {
@@ -1435,8 +1344,7 @@ export default function App() {
     setSelectedBuildingId(null);
     setSelectedBuilding(null);
     setBuildingDraft(newBuildingDraft());
-    window.history.pushState(null, "", "/buildings");
-    setRouteSelection({ tab: "buildings", id: null });
+    void navigate({ to: tabBasePath.buildings });
   };
 
   const beginCreateParty = () => {
@@ -1444,8 +1352,7 @@ export default function App() {
     setSelectedPartyId(null);
     setSelectedParty(null);
     setPartyDraft(newPartyDraft());
-    window.history.pushState(null, "", "/parties");
-    setRouteSelection({ tab: "parties", id: null });
+    void navigate({ to: tabBasePath.parties });
   };
 
   const cancelCreateZone = () => {
@@ -1453,8 +1360,7 @@ export default function App() {
     setSelectedZoneId(null);
     setSelectedZone(null);
     setZoneDraft(emptyZoneDraft());
-    window.history.pushState(null, "", "/zones");
-    setRouteSelection({ tab: "zone", id: null });
+    void navigate({ to: tabBasePath.zone });
   };
 
   const cancelCreateLand = () => {
@@ -1462,8 +1368,7 @@ export default function App() {
     setSelectedLandId(null);
     setSelectedLand(null);
     setLandDraft(emptyLandDraft());
-    window.history.pushState(null, "", "/lands");
-    setRouteSelection({ tab: "lands", id: null });
+    void navigate({ to: tabBasePath.lands });
   };
 
   const cancelCreateBuilding = () => {
@@ -1471,8 +1376,7 @@ export default function App() {
     setSelectedBuildingId(null);
     setSelectedBuilding(null);
     setBuildingDraft(emptyBuildingDraft());
-    window.history.pushState(null, "", "/buildings");
-    setRouteSelection({ tab: "buildings", id: null });
+    void navigate({ to: tabBasePath.buildings });
   };
 
   const cancelCreateParty = () => {
@@ -1480,8 +1384,7 @@ export default function App() {
     setSelectedPartyId(null);
     setSelectedParty(null);
     setPartyDraft(emptyPartyDraft());
-    window.history.pushState(null, "", "/parties");
-    setRouteSelection({ tab: "parties", id: null });
+    void navigate({ to: tabBasePath.parties });
   };
 
   const saveZone = async () => {
@@ -1513,8 +1416,7 @@ export default function App() {
       const item = creatingZone ? await createZone(payload) : selectedZone ? await updateZone(selectedZone.id, payload) : null;
       if (!item) return;
       if (creatingZone) {
-        window.history.pushState(null, "", `/zones/${encodeURIComponent(item.id)}`);
-        setRouteSelection({ tab: "zone", id: item.id });
+        void navigate({ to: tabDetailPath.zone, params: { id: item.id } });
       }
       setCreatingZone(false);
       setSelectedZoneId(item.id);
@@ -1529,6 +1431,19 @@ export default function App() {
     }
   };
 
+  // 地図上で選択中の区域レイヤ地物を、編集中の区域ドラフトの GIS リンクとして採用する
+  const applySelectedFeatureToZoneDraft = () => {
+    if (!selectedFeature || !selectedFeatureLayer || !canUseSelectedFeatureAsZoneFeature(selectedFeature, selectedFeatureLayer)) {
+      setNotice("先に地図上の区域レイヤ地物を選択してください");
+      return;
+    }
+    setZoneDraft((current) => ({
+      ...current,
+      zoneLayerId: selectedFeature.layerId,
+      zoneFeatureId: selectedFeature.featureId
+    }));
+  };
+
   const removeZone = async () => {
     if (!selectedZone || !window.confirm(`${selectedZone.id} を削除しますか`)) return;
     try {
@@ -1536,8 +1451,7 @@ export default function App() {
       await deleteZone(selectedZone.id);
       setSelectedZoneId(null);
       setSelectedZone(null);
-      window.history.pushState(null, "", "/zones");
-      setRouteSelection({ tab: "zone", id: null });
+      void navigate({ to: tabBasePath.zone });
       await refreshZones();
       setNotice("区域を削除しました");
     } catch (error) {
@@ -1576,8 +1490,7 @@ export default function App() {
       const item = creatingLand ? await createLand(payload) : selectedLand ? await updateLand(selectedLand.id, payload) : null;
       if (!item) return;
       if (creatingLand) {
-        window.history.pushState(null, "", `/lands/${encodeURIComponent(item.id)}`);
-        setRouteSelection({ tab: "lands", id: item.id });
+        void navigate({ to: tabDetailPath.lands, params: { id: item.id } });
       }
       setCreatingLand(false);
       setSelectedLandId(item.id);
@@ -1601,8 +1514,7 @@ export default function App() {
       await deleteLand(selectedLand.id);
       setSelectedLandId(null);
       setSelectedLand(null);
-      window.history.pushState(null, "", "/lands");
-      setRouteSelection({ tab: "lands", id: null });
+      void navigate({ to: tabBasePath.lands });
       await refreshLands();
       await refreshBuildings();
       await refreshZones();
@@ -1650,8 +1562,7 @@ export default function App() {
           : null;
       if (!item) return;
       if (creatingBuilding) {
-        window.history.pushState(null, "", `/buildings/${encodeURIComponent(item.id)}`);
-        setRouteSelection({ tab: "buildings", id: item.id });
+        void navigate({ to: tabDetailPath.buildings, params: { id: item.id } });
       }
       setCreatingBuilding(false);
       setSelectedBuildingId(item.id);
@@ -1675,8 +1586,7 @@ export default function App() {
       await deleteBuilding(selectedBuilding.id);
       setSelectedBuildingId(null);
       setSelectedBuilding(null);
-      window.history.pushState(null, "", "/buildings");
-      setRouteSelection({ tab: "buildings", id: null });
+      void navigate({ to: tabBasePath.buildings });
       await refreshBuildings();
       await refreshZones();
       if (selectedLandId) await getLand(selectedLandId).then(setSelectedLand);
@@ -1711,8 +1621,7 @@ export default function App() {
       const item = creatingParty ? await createParty(payload) : selectedParty ? await updateParty(selectedParty.id, payload) : null;
       if (!item) return;
       if (creatingParty) {
-        window.history.pushState(null, "", `/parties/${encodeURIComponent(item.id)}`);
-        setRouteSelection({ tab: "parties", id: item.id });
+        void navigate({ to: tabDetailPath.parties, params: { id: item.id } });
       }
       setCreatingParty(false);
       setSelectedPartyId(item.id);
@@ -1734,8 +1643,7 @@ export default function App() {
       await deleteParty(selectedParty.id);
       setSelectedPartyId(null);
       setSelectedParty(null);
-      window.history.pushState(null, "", "/parties");
-      setRouteSelection({ tab: "parties", id: null });
+      void navigate({ to: tabBasePath.parties });
       await refreshParties();
       setNotice("関係者を削除しました");
     } catch (error) {
@@ -1796,14 +1704,11 @@ export default function App() {
   };
 
   const useMapBoundsFilter = (setter: React.Dispatch<React.SetStateAction<BusinessObjectFilters>>) => {
-    const bounds = mapRef.current?.getBounds();
-    if (!bounds) {
+    const bbox = mapApiRef.current?.getBoundsBbox();
+    if (!bbox) {
       setNotice("地図がまだ準備できていません");
       return;
     }
-    const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
-      .map((value) => value.toFixed(6))
-      .join(",");
     setter((current) => ({ ...current, bbox }));
   };
 
@@ -1847,8 +1752,8 @@ export default function App() {
         ]);
       }
       window.setTimeout(() => {
-        mapRef.current?.resize();
-        focusGeometry(mapRef.current, feature.geometry);
+        mapApiRef.current?.resize();
+        mapApiRef.current?.focusGeometry(feature.geometry);
       }, 80);
     } catch (error) {
       setNotice(errorMessage(error));
@@ -1923,351 +1828,217 @@ export default function App() {
         ...linkedResults.filter((result): result is FeatureSearchResult => Boolean(result))
       ]);
       window.setTimeout(() => {
-        mapRef.current?.resize();
-        focusGeometry(mapRef.current, zoneFeature.geometry);
+        mapApiRef.current?.resize();
+        mapApiRef.current?.focusGeometry(zoneFeature.geometry);
       }, 80);
     } catch (error) {
       setNotice(errorMessage(error));
     }
   };
 
-  return (
-    <div className="business-app">
-      <header className="top-shell">
-        <div className="product-mark">
-          <FileText size={20} />
-          <div>
-            <strong>不動産業務管理</strong>
-            <span>{projects.find((project) => project.id === selectedProject)?.name ?? "Project"}</span>
-          </div>
-        </div>
-        <nav className="top-tabs" aria-label="業務タブ">
-          <button className={activeTab === "zone" ? "active" : ""} type="button" onClick={() => navigateTab("zone")}>
-            <MapIcon size={17} />
-            区域
-          </button>
-          <button className={activeTab === "lands" ? "active" : ""} type="button" onClick={() => navigateTab("lands")}>
-            <MapIcon size={17} />
-            土地
-          </button>
-          <button className={activeTab === "buildings" ? "active" : ""} type="button" onClick={() => navigateTab("buildings")}>
-            <Building2 size={17} />
-            建物
-          </button>
-          <button className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
-            <Users size={17} />
-            関係者
-          </button>
-          {me?.systemRole === "admin" ? (
-            <button className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
-              <ShieldCheck size={17} />
-              管理
-            </button>
-          ) : null}
-        </nav>
-        <button className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
-          {mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
-          {mapSupportOpen ? "地図を隠す" : "地図を表示"}
-        </button>
-        <button
-          className="subtle-button"
-          type="button"
-          title={auth.user?.profile.preferred_username ?? auth.user?.profile.email ?? undefined}
-          onClick={() => void auth.signoutRedirect()}
-        >
-          <LogOut size={16} />
-          ログアウト
-        </button>
-      </header>
-
-      <main className={`business-workspace${mapSupportOpen ? " map-open" : " map-closed"}`}>
-        <div className="workspace-tabs">
-        <section className={`tab-pane zone-tab${activeTab === "zone" ? " active" : ""}`} aria-hidden={activeTab !== "zone"}>
-          <ZoneWorkspace
-            query={zoneQuery}
-            setQuery={setZoneQuery}
-            filters={zoneFilters}
-            setFilters={setZoneFilters}
-            filtersOpen={zoneFiltersOpen}
-            setFiltersOpen={setZoneFiltersOpen}
-            items={zones}
-            selectedId={selectedZoneId}
-            selected={selectedZone}
-            draft={zoneDraft}
-            setDraft={setZoneDraft}
-            creating={creatingZone}
-            loading={loadingZones}
-            saving={savingZone}
-            deleting={deletingZone}
-            onRefresh={() => void refreshZones()}
-            onSearch={submitZoneListSearch}
-            onSelect={selectZone}
-            onCreate={beginCreateZone}
-            onCancelCreate={cancelCreateZone}
-            onBackToList={() => navigateTab("zone")}
-            onSave={() => void saveZone()}
-            onDelete={() => void removeZone()}
-            onOpenLand={selectLand}
-            onOpenBuilding={selectBuilding}
-            onOpenParty={selectParty}
-            onShowOnMap={(zone) => void openZoneOnMap(zone)}
-            onOpenSourceFeature={(layerId, featureId) => void openSourceFeature(layerId, featureId)}
-            onUseSelectedFeature={() => {
-              if (!selectedFeature || !selectedFeatureLayer || !canUseSelectedFeatureAsZoneFeature(selectedFeature, selectedFeatureLayer)) {
-                setNotice("先に地図上の区域レイヤ地物を選択してください");
-                return;
-              }
-              setZoneDraft((current) => ({
-                ...current,
-                zoneLayerId: selectedFeature.layerId,
-                zoneFeatureId: selectedFeature.featureId
-              }));
-            }}
-            layers={layers}
-            selectedFeature={selectedFeature}
-            selectedFeatureLayer={selectedFeatureLayer}
-            zoneSourceLayerId={zoneSourceLayerId}
-            setZoneSourceLayerId={setZoneSourceLayerId}
-            zoneSourceLayers={zoneSourceLayers}
-            zoneUploadFile={zoneUploadFile}
-            setZoneUploadFile={setZoneUploadFile}
-            zoneUploadFormat={zoneUploadFormat}
-            setZoneUploadFormat={setZoneUploadFormat}
-            zoneUploadSrid={zoneUploadSrid}
-            setZoneUploadSrid={setZoneUploadSrid}
-            creatingZoneLayer={creatingZoneLayer}
-            onSubmitZoneFromLayer={() => void submitZoneFromLayer()}
-            onSubmitZoneUpload={() => void submitZoneUpload()}
-            selectedProject={selectedProject}
-            projects={projects}
-            onProjectChange={setSelectedProject}
-            gisTools={
-              <ZoneSearchPanel
-                layers={layers}
-                layerById={layerById}
-                lands={lands}
-                buildings={buildings}
-                parties={parties}
-                resultName={analysisName}
-                setResultName={setAnalysisName}
-                query={zoneSearchQuery}
-                setQuery={setZoneSearchQuery}
-                builderOpen={conditionBuilderOpen}
-                setBuilderOpen={setConditionBuilderOpen}
-                attributeConditions={attributeConditions}
-                setAttributeConditions={setAttributeConditions}
-                spatialConditions={spatialConditions}
-                setSpatialConditions={setSpatialConditions}
-                onAddAttribute={addAttributeCondition}
-                onAddSpatial={addSpatialCondition}
-                linkedOnly={zoneSearchLinkedOnly}
-                setLinkedOnly={setZoneSearchLinkedOnly}
-                spatialLayerIds={zoneSpatialLayerIds}
-                setSpatialLayerIds={setZoneSpatialLayerIds}
-                businessSourceType={zoneBusinessSourceType}
-                setBusinessSourceType={setZoneBusinessSourceType}
-                businessQuery={zoneBusinessQuery}
-                setBusinessQuery={setZoneBusinessQuery}
-                businessStatus={zoneBusinessStatus}
-                setBusinessStatus={setZoneBusinessStatus}
-                landUse={zoneLandUse}
-                setLandUse={setZoneLandUse}
-                buildingUse={zoneBuildingUse}
-                setBuildingUse={setZoneBuildingUse}
-                partyQuery={zonePartyQuery}
-                setPartyQuery={setZonePartyQuery}
-                partyType={zonePartyType}
-                setPartyType={setZonePartyType}
-                relationType={zoneRelationType}
-                setRelationType={setZoneRelationType}
-                loading={loadingZoneSearch}
-                saving={savingConditionSearch}
-                results={zoneSearchResults}
-                selectedFeature={selectedFeature}
-                onSearch={() => void submitZoneSearch()}
-                onSave={() => void saveConditionSearchResult()}
-                onClear={clearZoneSearchConditions}
-                onSelect={(result) => void openZoneSearchResult(result)}
-              />
-            }
-          />
-        </section>
-
-        <section className={`tab-pane${activeTab === "lands" ? " active" : ""}`} aria-hidden={activeTab !== "lands"}>
-          <LandWorkspace
-            query={landQuery}
-            setQuery={setLandQuery}
-            filters={landFilters}
-            setFilters={setLandFilters}
-            filtersOpen={landFiltersOpen}
-            setFiltersOpen={setLandFiltersOpen}
-            items={lands}
-            selectedId={selectedLandId}
-            selected={selectedLand}
-            draft={landDraft}
-            setDraft={setLandDraft}
-            creating={creatingLand}
-            loading={loadingLands}
-            saving={savingLand}
-            deleting={deletingLand}
-            onRefresh={() => void refreshLands()}
-            onSearch={submitLandListSearch}
-            onSelect={selectLand}
-            onCreate={beginCreateLand}
-            onCancelCreate={cancelCreateLand}
-            onBackToList={() => navigateTab("lands")}
-            onSave={() => void saveLand()}
-            onDelete={() => void removeLand()}
-            onOpenBuilding={selectBuilding}
-            onOpenParty={selectParty}
-            onSaveRelationship={(relationshipId, relationshipDraft) => void saveRelationship(relationshipId, relationshipDraft)}
-            onDeleteRelationship={(relationshipId) => void removeRelationship(relationshipId)}
-            onUseMapBounds={() => useMapBoundsFilter(setLandFilters)}
-            onUseSelectedFeature={() => useSelectedFeatureFilter(setLandFilters)}
-            onOpenSourceFeature={(layerId, featureId) => void openSourceFeature(layerId, featureId)}
-            layers={layers}
-            parties={parties}
-            buildings={buildings}
-            selectedFeature={selectedFeature}
-            selectedFeatureLayer={selectedFeatureLayer}
-            selectedProject={selectedProject}
-            projects={projects}
-            onProjectChange={setSelectedProject}
-          />
-        </section>
-
-        <section className={`tab-pane${activeTab === "buildings" ? " active" : ""}`} aria-hidden={activeTab !== "buildings"}>
-          <BuildingWorkspace
-            query={buildingQuery}
-            setQuery={setBuildingQuery}
-            filters={buildingFilters}
-            setFilters={setBuildingFilters}
-            filtersOpen={buildingFiltersOpen}
-            setFiltersOpen={setBuildingFiltersOpen}
-            items={buildings}
-            lands={lands}
-            selectedId={selectedBuildingId}
-            selected={selectedBuilding}
-            draft={buildingDraft}
-            setDraft={setBuildingDraft}
-            creating={creatingBuilding}
-            loading={loadingBuildings}
-            saving={savingBuilding}
-            deleting={deletingBuilding}
-            onRefresh={() => void refreshBuildings()}
-            onSearch={submitBuildingListSearch}
-            onSelect={selectBuilding}
-            onCreate={beginCreateBuilding}
-            onCancelCreate={cancelCreateBuilding}
-            onBackToList={() => navigateTab("buildings")}
-            onSave={() => void saveBuilding()}
-            onDelete={() => void removeBuilding()}
-            onOpenLand={selectLand}
-            onOpenParty={selectParty}
-            onSaveRelationship={(relationshipId, relationshipDraft) => void saveRelationship(relationshipId, relationshipDraft)}
-            onDeleteRelationship={(relationshipId) => void removeRelationship(relationshipId)}
-            onUseMapBounds={() => useMapBoundsFilter(setBuildingFilters)}
-            onUseSelectedFeature={() => useSelectedFeatureFilter(setBuildingFilters)}
-            onOpenSourceFeature={(layerId, featureId) => void openSourceFeature(layerId, featureId)}
-            layers={layers}
-            parties={parties}
-            selectedFeature={selectedFeature}
-            selectedFeatureLayer={selectedFeatureLayer}
-            selectedProject={selectedProject}
-            projects={projects}
-            onProjectChange={setSelectedProject}
-          />
-        </section>
-
-        <section className={`tab-pane${activeTab === "parties" ? " active" : ""}`} aria-hidden={activeTab !== "parties"}>
-          <PartyWorkspace
-            query={partyQuery}
-            setQuery={setPartyQuery}
-            filters={partyFilters}
-            setFilters={setPartyFilters}
-            filtersOpen={partyFiltersOpen}
-            setFiltersOpen={setPartyFiltersOpen}
-            items={parties}
-            lands={lands}
-            buildings={buildings}
-            selectedId={selectedPartyId}
-            selected={selectedParty}
-            draft={partyDraft}
-            setDraft={setPartyDraft}
-            creating={creatingParty}
-            loading={loadingParties}
-            saving={savingParty}
-            deleting={deletingParty}
-            onRefresh={() => void refreshParties()}
-            onSearch={submitPartyListSearch}
-            onSelect={selectParty}
-            onCreate={beginCreateParty}
-            onCancelCreate={cancelCreateParty}
-            onBackToList={() => navigateTab("parties")}
-            onSave={() => void saveParty()}
-            onDelete={() => void removeParty()}
-            onOpenLand={selectLand}
-            onOpenBuilding={selectBuilding}
-            onSaveRelationship={(relationshipId, relationshipDraft) => void saveRelationship(relationshipId, relationshipDraft)}
-            onDeleteRelationship={(relationshipId) => void removeRelationship(relationshipId)}
-            selectedProject={selectedProject}
-            projects={projects}
-            onProjectChange={setSelectedProject}
-          />
-        </section>
-        <section className={`tab-pane admin-tab${activeTab === "admin" ? " active" : ""}`} aria-hidden={activeTab !== "admin"}>
-          {me?.systemRole === "admin" ? (
-            <AdminWorkspace projects={projects} meUserId={me.userId} onNotice={setNotice} />
-          ) : (
-            <p className="admin-hint">この画面は system admin 専用です。</p>
-          )}
-        </section>
-        </div>
-
-        <MapSupportPane
-          open={mapSupportOpen}
-          onToggle={() => setMapSupportOpen((open) => !open)}
-          mapContainerRef={mapContainerRef}
-          baseMapVisible={baseMapVisible}
-          setBaseMapVisible={setBaseMapVisible}
-          layerListItems={layerListItems}
-          visibleLayerIds={visibleLayerIds}
-          loadingLayers={loadingLayers}
-          deletingLayerIds={deletingLayerIds}
-          deletingResultSetIds={deletingResultSetIds}
-          draggingLayerId={draggingLayerId}
-          onRefreshLayers={() => void refreshLayers()}
-          onToggleLayer={toggleLayer}
-          onToggleLayerGroup={toggleLayerGroup}
-          onRequestLayerDelete={(layer) => void requestLayerDelete(layer)}
-          onRequestResultSetDelete={(resultSet) => void requestResultSetDelete(resultSet)}
-          onDragLayerStart={startLayerDrag}
-          onDragLayerOver={dragLayerOver}
-          onDropLayer={dropLayer}
-          onDragLayerEnd={() => setDraggingLayerId(null)}
-          selectedFeature={selectedFeature}
-          selectedFeatureLayer={selectedFeatureLayer}
-          businessLinks={businessLinks}
-          loadingBusinessLinks={loadingBusinessLinks}
-          featureEditOpen={featureEditOpen}
-          setFeatureEditOpen={setFeatureEditOpen}
-          featurePropertyDraft={featurePropertyDraft}
-          setFeaturePropertyDraft={setFeaturePropertyDraft}
-          featureGeometryDraft={featureGeometryDraft}
-          setFeatureGeometryDraft={setFeatureGeometryDraft}
-          savingFeature={savingFeature}
-          onSaveFeature={() => void saveSelectedFeature()}
-        />
-      </main>
-
-      {notice ? (
-        <div className="notice business-notice">
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)}>
-            閉じる
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
+  return {
+    // ルーティング由来の画面状態と遷移
+    activeTab,
+    navigateTab,
+    selectZone,
+    selectLand,
+    selectBuilding,
+    selectParty,
+    // 共有 state
+    me,
+    projects,
+    selectedProject,
+    setSelectedProject,
+    notice,
+    setNotice,
+    mapSupportOpen,
+    setMapSupportOpen,
+    layers,
+    layerById,
+    layerListItems,
+    zoneSourceLayers,
+    zones,
+    lands,
+    buildings,
+    parties,
+    selectedFeature,
+    selectedFeatureLayer,
+    // 地図ペイン (MapPane) 連携
+    mapApiRef,
+    setMapReady,
+    handleMapFeatureClick,
+    baseMapVisible,
+    setBaseMapVisible,
+    visibleLayerIds,
+    mapHighlightResults,
+    loadingLayers,
+    deletingLayerIds,
+    deletingResultSetIds,
+    draggingLayerId,
+    setDraggingLayerId,
+    refreshLayers,
+    toggleLayer,
+    toggleLayerGroup,
+    requestLayerDelete,
+    requestResultSetDelete,
+    startLayerDrag,
+    dragLayerOver,
+    dropLayer,
+    businessLinks,
+    loadingBusinessLinks,
+    featureEditOpen,
+    setFeatureEditOpen,
+    featurePropertyDraft,
+    setFeaturePropertyDraft,
+    featureGeometryDraft,
+    setFeatureGeometryDraft,
+    savingFeature,
+    saveSelectedFeature,
+    // 画面横断の共通操作
+    saveRelationship,
+    removeRelationship,
+    openSourceFeature,
+    useMapBoundsFilter,
+    useSelectedFeatureFilter,
+    // 区域
+    zoneQuery,
+    setZoneQuery,
+    zoneFilters,
+    setZoneFilters,
+    zoneFiltersOpen,
+    setZoneFiltersOpen,
+    selectedZoneId,
+    selectedZone,
+    zoneDraft,
+    setZoneDraft,
+    creatingZone,
+    loadingZones,
+    savingZone,
+    deletingZone,
+    refreshZones,
+    submitZoneListSearch,
+    beginCreateZone,
+    cancelCreateZone,
+    saveZone,
+    removeZone,
+    openZoneOnMap,
+    applySelectedFeatureToZoneDraft,
+    zoneSourceLayerId,
+    setZoneSourceLayerId,
+    zoneUploadFile,
+    setZoneUploadFile,
+    zoneUploadFormat,
+    setZoneUploadFormat,
+    zoneUploadSrid,
+    setZoneUploadSrid,
+    creatingZoneLayer,
+    submitZoneFromLayer,
+    submitZoneUpload,
+    // 区域 GIS 検索 (ZoneSearchPanel)
+    analysisName,
+    setAnalysisName,
+    zoneSearchQuery,
+    setZoneSearchQuery,
+    conditionBuilderOpen,
+    setConditionBuilderOpen,
+    attributeConditions,
+    setAttributeConditions,
+    spatialConditions,
+    setSpatialConditions,
+    addAttributeCondition,
+    addSpatialCondition,
+    zoneSearchLinkedOnly,
+    setZoneSearchLinkedOnly,
+    zoneSpatialLayerIds,
+    setZoneSpatialLayerIds,
+    zoneBusinessSourceType,
+    setZoneBusinessSourceType,
+    zoneBusinessQuery,
+    setZoneBusinessQuery,
+    zoneBusinessStatus,
+    setZoneBusinessStatus,
+    zoneLandUse,
+    setZoneLandUse,
+    zoneBuildingUse,
+    setZoneBuildingUse,
+    zonePartyQuery,
+    setZonePartyQuery,
+    zonePartyType,
+    setZonePartyType,
+    zoneRelationType,
+    setZoneRelationType,
+    loadingZoneSearch,
+    savingConditionSearch,
+    zoneSearchResults,
+    submitZoneSearch,
+    saveConditionSearchResult,
+    clearZoneSearchConditions,
+    openZoneSearchResult,
+    // 土地
+    landQuery,
+    setLandQuery,
+    landFilters,
+    setLandFilters,
+    landFiltersOpen,
+    setLandFiltersOpen,
+    selectedLandId,
+    selectedLand,
+    landDraft,
+    setLandDraft,
+    creatingLand,
+    loadingLands,
+    savingLand,
+    deletingLand,
+    refreshLands,
+    submitLandListSearch,
+    beginCreateLand,
+    cancelCreateLand,
+    saveLand,
+    removeLand,
+    // 建物
+    buildingQuery,
+    setBuildingQuery,
+    buildingFilters,
+    setBuildingFilters,
+    buildingFiltersOpen,
+    setBuildingFiltersOpen,
+    selectedBuildingId,
+    selectedBuilding,
+    buildingDraft,
+    setBuildingDraft,
+    creatingBuilding,
+    loadingBuildings,
+    savingBuilding,
+    deletingBuilding,
+    refreshBuildings,
+    submitBuildingListSearch,
+    beginCreateBuilding,
+    cancelCreateBuilding,
+    saveBuilding,
+    removeBuilding,
+    // 関係者
+    partyQuery,
+    setPartyQuery,
+    partyFilters,
+    setPartyFilters,
+    partyFiltersOpen,
+    setPartyFiltersOpen,
+    selectedPartyId,
+    selectedParty,
+    partyDraft,
+    setPartyDraft,
+    creatingParty,
+    loadingParties,
+    savingParty,
+    deletingParty,
+    refreshParties,
+    submitPartyListSearch,
+    beginCreateParty,
+    cancelCreateParty,
+    saveParty,
+    removeParty
+  };
 }
+
+// 各画面が AppStateContext 経由で参照する型 (appState.tsx からは型のみ import される)
+export type AppState = ReturnType<typeof useAppController>;
