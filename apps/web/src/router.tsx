@@ -5,7 +5,8 @@ import {
   createRouter,
   lazyRouteComponent,
   Navigate,
-  redirect
+  redirect,
+  type RouterHistory
 } from "@tanstack/react-router";
 import App from "./App";
 import { tabBasePath, type ScreenMeta } from "./routeMeta";
@@ -71,11 +72,18 @@ const screenRoutes = screenDefinitions.map((definition) => {
   return listRoute.addChildren([detailRoute]);
 });
 
-export const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, ...screenRoutes]),
-  // 未知パスは既定画面 (/zones) へ寄せる
-  defaultNotFoundComponent: () => <Navigate to="/zones" replace />
-});
+// テストではメモリ履歴を注入した独立インスタンスを作れるようファクトリとして公開する
+// (本番はモジュール単位のシングルトン router をそのまま使う)
+export function createAppRouter(history?: RouterHistory) {
+  return createRouter({
+    routeTree: rootRoute.addChildren([indexRoute, ...screenRoutes]),
+    // 未知パスは既定画面 (/zones) へ寄せる
+    defaultNotFoundComponent: () => <Navigate to="/zones" replace />,
+    history
+  });
+}
+
+export const router = createAppRouter();
 
 declare module "@tanstack/react-router" {
   interface Register {
