@@ -38,7 +38,7 @@ fun Route.jobRoutes(deps: AppDependencies) {
     authorizedRoutes(db) {
         post(
             "/api/import-jobs",
-            CheckedInHandler(Action.IMPORT_EXECUTE, "multipart を保存しないと projectId を解決できず、拒否時は保存済みファイルの削除が必要")
+            CheckedInHandler(Action.IMPORT_EXECUTE, "multipart を全て読まないと projectId を解決できないため、認可判定はステージング後にハンドラ内で行う")
         ) {
             Files.createDirectories(deps.uploadDir)
             var projectId: String? = null
@@ -46,61 +46,67 @@ fun Route.jobRoutes(deps: AppDependencies) {
             var sourceSrid: Int? = null
             var layerRole: String? = null
             var filename: String? = null
-            var uploadReference: String? = null
+            var stagingPath: Path? = null
 
-            val multipart = call.receiveMultipart()
-            multipart.forEachPart { part ->
-                when (part) {
-                    is PartData.FormItem -> {
-                        when (part.name) {
-                            "projectId" -> projectId = optionalUuid(part.value, "projectId")
-                            "format" -> format = part.value.takeIf { it.isNotBlank() }?.lowercase()
-                            "sourceSrid" -> sourceSrid = part.value.takeIf { it.isNotBlank() }?.toIntOrNull()
-                            "layerRole" -> layerRole = part.value.takeIf { it.isNotBlank() }?.lowercase()
-                        }
-                    }
-                    is PartData.FileItem -> {
-                        val original = sanitizeFileName(part.originalFileName ?: "upload.dat")
-                        filename = original
-                        // いったんローカルへステージングしてサイズ上限を検査してから保存先へ渡す
-                        // (S3 でも上限超過分をバケットへ書かない)
-                        val staging = deps.uploadDir.resolve("staging-${UUID.randomUUID()}.part")
-                        uploadReference = withContext(Dispatchers.IO) {
-                            writeUploadWithLimit(part, staging, deps.maxUploadBytes)
-                            try {
-                                deps.uploadStorage.store(staging, "${UUID.randomUUID()}-$original")
-                            } finally {
-                                Files.deleteIfExists(staging)
+            try {
+                val multipart = call.receiveMultipart()
+                multipart.forEachPart { part ->
+                    when (part) {
+                        is PartData.FormItem -> {
+                            when (part.name) {
+                                "projectId" -> projectId = optionalUuid(part.value, "projectId")
+                                "format" -> format = part.value.takeIf { it.isNotBlank() }?.lowercase()
+                                "sourceSrid" -> sourceSrid = part.value.takeIf { it.isNotBlank() }?.toIntOrNull()
+                                "layerRole" -> layerRole = part.value.takeIf { it.isNotBlank() }?.lowercase()
                             }
                         }
+                        is PartData.FileItem -> {
+                            filename = sanitizeFileName(part.originalFileName ?: "upload.dat")
+                            // ここではローカルへのステージングのみ行い、UploadStorage への保存は
+                            // 認可・形式・実体 (マジックバイト) の検査がすべて通ってから行う
+                            // (拒否したアップロードを S3 バケットへ書かない)
+                            stagingPath?.let { withContext(Dispatchers.IO) { Files.deleteIfExists(it) } }
+                            val staging = deps.uploadDir.resolve("staging-${UUID.randomUUID()}.part")
+                            withContext(Dispatchers.IO) { writeUploadWithLimit(part, staging, deps.maxUploadBytes) }
+                            stagingPath = staging
+                        }
+                        else -> Unit
                     }
-                    else -> Unit
+                    part.dispose()
                 }
-                part.dispose()
-            }
 
-            val actualFilename = filename ?: throw ApiException(HttpStatusCode.BadRequest, "File is required")
-            val actualUploadReference = uploadReference
-                ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
-            val resolvedProjectId = projectId ?: db.defaultProjectId()
-            try {
+                val actualFilename = filename ?: throw ApiException(HttpStatusCode.BadRequest, "File is required")
+                val staging = stagingPath ?: throw ApiException(HttpStatusCode.BadRequest, "File upload failed")
+                val resolvedProjectId = projectId ?: db.defaultProjectId()
                 call.requireProjectPermission(Action.IMPORT_EXECUTE, resolvedProjectId)
-            } catch (exc: Exception) {
-                withContext(Dispatchers.IO) { deps.uploadStorage.delete(actualUploadReference) }
-                throw exc
-            }
-            val actualFormat = format ?: inferFormat(actualFilename)
-            validateImportFormat(actualFormat)
+                val actualFormat = format ?: inferFormat(actualFilename)
+                validateImportFormat(actualFormat)
+                // 宣言 format と実体の不一致 (geojson 宣言で zip 実体等) は保存前に 400 で拒否する
+                val header = withContext(Dispatchers.IO) { readUploadHeader(staging) }
+                validateUploadMatchesFormat(header, actualFormat)
 
-            val job = db.createImportJob(
-                projectId = resolvedProjectId,
-                filename = actualFilename,
-                format = actualFormat,
-                sourceSrid = sourceSrid,
-                uploadPath = actualUploadReference,
-                layerRole = layerRole ?: "generic"
-            )
-            call.respond(HttpStatusCode.Created, job)
+                val uploadReference = withContext(Dispatchers.IO) {
+                    deps.uploadStorage.store(staging, "${UUID.randomUUID()}-$actualFilename")
+                }
+                val job = try {
+                    db.createImportJob(
+                        projectId = resolvedProjectId,
+                        filename = actualFilename,
+                        format = actualFormat,
+                        sourceSrid = sourceSrid,
+                        uploadPath = uploadReference,
+                        layerRole = layerRole ?: "generic"
+                    )
+                } catch (exc: Exception) {
+                    // ジョブ登録に失敗した孤児アップロードを保存先に残さない
+                    withContext(Dispatchers.IO) { deps.uploadStorage.delete(uploadReference) }
+                    throw exc
+                }
+                call.respond(HttpStatusCode.Created, job)
+            } finally {
+                // 正常時は store() がステージングを消費済みのため no-op。拒否・失敗時の残骸だけ消す
+                stagingPath?.let { withContext(Dispatchers.IO) { Files.deleteIfExists(it) } }
+            }
         }
 
         get(
@@ -177,4 +183,46 @@ private fun validateImportFormat(format: String) {
     if (format !in setOf("shapefile", "geojson", "gml", "kml", "gpx")) {
         throw ApiException(HttpStatusCode.BadRequest, "Unsupported import format: $format")
     }
+}
+
+// ------------------------------------------------------------------ 実体検査 (issue #19)
+// 宣言 format と実体 (マジックバイト) の照合。UploadStorage への保存前に呼び、
+// 不一致は 400 で拒否する。worker 側の GDAL ドライバ allowlist (-if) と対の多層防御
+
+/** 実体判定に読む先頭バイト数 (BOM + 空白の読み飛ばしに十分な長さ) */
+internal const val UPLOAD_HEADER_PROBE_BYTES = 512
+
+internal fun readUploadHeader(path: Path): ByteArray =
+    Files.newInputStream(path).use { it.readNBytes(UPLOAD_HEADER_PROBE_BYTES) }
+
+internal fun validateUploadMatchesFormat(header: ByteArray, format: String) {
+    val matches = when (format) {
+        // shapefile は zip アーカイブ (PK\x03\x04) のみ。空 zip (PK\x05\x06) も実体なしとして拒否する
+        "shapefile" -> hasZipMagic(header)
+        // GeoJSON は JSON テキスト: UTF-8 BOM・空白を除いた先頭が '{' または '['
+        "geojson" -> firstContentChar(header) in setOf('{', '[')
+        // XML 系はタグ開始 '<' (zip 実体等はここで弾かれる)
+        "gml", "kml", "gpx" -> firstContentChar(header) == '<'
+        else -> true
+    }
+    if (!matches) {
+        throw ApiException(HttpStatusCode.BadRequest, "Uploaded file content does not match declared format: $format")
+    }
+}
+
+private fun hasZipMagic(header: ByteArray): Boolean =
+    header.size >= 4 &&
+        header[0] == 0x50.toByte() && header[1] == 0x4B.toByte() &&
+        header[2] == 0x03.toByte() && header[3] == 0x04.toByte()
+
+private fun firstContentChar(header: ByteArray): Char? {
+    val hasBom = header.size >= 3 &&
+        header[0] == 0xEF.toByte() && header[1] == 0xBB.toByte() && header[2] == 0xBF.toByte()
+    var index = if (hasBom) 3 else 0
+    while (index < header.size) {
+        val char = header[index].toInt().toChar()
+        if (!char.isWhitespace()) return char
+        index++
+    }
+    return null
 }
