@@ -1,6 +1,6 @@
 import { Map as MapIcon } from "lucide-react";
-import type { Building, BusinessObjectFilters, Feature, Land, Layer, Party, Project } from "../types";
-import type { BuildingDraft, RelationshipDraft } from "../appTypes";
+import type { Building, Feature, Land, Layer, Party, Project } from "../contracts";
+import type { BuildingDraft, BusinessObjectFilters, RelationshipDraft } from "../appTypes";
 import {
   buildingStructureOptions,
   buildingUseOptions,

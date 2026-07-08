@@ -1,5 +1,5 @@
 import { ExternalLink, Loader2 } from "lucide-react";
-import type { BusinessLinks } from "../types";
+import type { BusinessLinks } from "../contracts";
 
 export function BusinessLinksPanel({ links, loading }: { links: BusinessLinks; loading: boolean }) {
   const hasLinks = links.lands.length > 0 || links.buildings.length > 0;

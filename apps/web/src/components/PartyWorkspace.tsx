@@ -1,5 +1,5 @@
-import type { Building, BusinessObjectFilters, Land, Party, Project } from "../types";
-import type { PartyDraft, RelationshipDraft } from "../appTypes";
+import type { Building, Land, Party, Project } from "../contracts";
+import type { BusinessObjectFilters, PartyDraft, RelationshipDraft } from "../appTypes";
 import { partyTypeOptions, relationTypeOptions } from "../constants";
 import { mergeChoiceOptions, relationshipTypeChoices } from "../utils";
 import { BusinessFilterPanel } from "./BusinessFilterPanel";

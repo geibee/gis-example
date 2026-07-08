@@ -1,6 +1,6 @@
 import { Building2 } from "lucide-react";
-import type { Building, BusinessObjectFilters, Feature, Land, Layer, Party, Project } from "../types";
-import type { LandDraft, RelationshipDraft } from "../appTypes";
+import type { Building, Feature, Land, Layer, Party, Project } from "../contracts";
+import type { BusinessObjectFilters, LandDraft, RelationshipDraft } from "../appTypes";
 import {
   businessStatusOptions,
   landUseOptions,

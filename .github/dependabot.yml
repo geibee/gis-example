@@ -8,6 +8,17 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+    # ペアで更新しないと壊れるパッケージ群は 1 PR にまとめる
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      tanstack:
+        patterns:
+          - "@tanstack/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
