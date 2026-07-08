@@ -98,6 +98,11 @@ if [[ "${VERIFY_DETECT_ONLY:-0}" == "1" ]]; then
   exit 0
 fi
 
+# -------------------------------------------------- リポジトリ横断ガード (常時)
+# dev シード・開発 realm が本番イメージ / アプリ本体コードへ混入しない構造の検査。
+# 数百 ms で終わるため変更スコープによらず毎回実行する
+bash scripts/check-dev-seed-isolation.sh
+
 if [[ $NEED_API -eq 0 && $NEED_WORKER -eq 0 && $NEED_WEB -eq 0 ]]; then
   log "PASS: 検証対象の変更なし (ドキュメントのみ)"
   exit 0

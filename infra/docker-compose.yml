@@ -1,3 +1,9 @@
+# ローカル開発専用の compose 構成。本番環境ではこのファイルを使わないこと。
+# 本番は ECS Fargate + Secrets Manager/SSM を前提とし、必要な環境変数の一覧は
+# docs/environment-variables.md を参照。
+#
+# 資格情報は infra/.env から供給する (gitignore 済み)。初回は次を実行:
+#   cp infra/.env.example infra/.env
 services:
   postgres:
     restart: unless-stopped
@@ -5,9 +11,9 @@ services:
       context: ./postgres
     image: web-gis-postgis:16-3
     environment:
-      POSTGRES_DB: gis
-      POSTGRES_USER: gis
-      POSTGRES_PASSWORD: gis
+      POSTGRES_DB: ${POSTGRES_DB:-gis}
+      POSTGRES_USER: ${POSTGRES_USER:-gis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
     # ホストへの公開はローカル開発用にループバックのみ。本番では公開しないこと
     # (API の認可を迂回して DB へ直接アクセスできてしまう)。
     # ホスト側で 5432 が使用中の場合は POSTGRES_HOST_PORT で変更できる
@@ -22,7 +28,7 @@ services:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
       - ./postgres/010-seed-tokyo-gis-data.sql.gz:/docker-entrypoint-initdb.d/010-seed-tokyo-gis-data.sql.gz:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gis -d gis"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gis} -d ${POSTGRES_DB:-gis}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -38,9 +44,9 @@ services:
     environment:
       PGHOST: postgres
       PGPORT: "5432"
-      PGDATABASE: gis
-      PGUSER: gis
-      PGPASSWORD: gis
+      PGDATABASE: ${POSTGRES_DB:-gis}
+      PGUSER: ${POSTGRES_USER:-gis}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
     entrypoint: ["bash", "/seed/seed-dev-data.sh"]
     volumes:
       - ./postgres:/seed:ro
@@ -54,7 +60,8 @@ services:
     restart: unless-stopped
     image: ghcr.io/maplibre/martin:1.3.1
     environment:
-      DATABASE_URL: postgres://gis:gis@postgres:5432/gis
+      # パスワードは URL に埋め込むため、dev 既定以外を使う場合は URL 予約文字を避けること
+      DATABASE_URL: postgres://${POSTGRES_USER:-gis}:${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}@postgres:5432/${POSTGRES_DB:-gis}
     command: ["--config", "/config/martin.yaml"]
     # タイルは API (/api/tiles) 経由で配信する。Martin の直接公開は API の認可を
     # 迂回する経路になるため、ローカル開発用にループバックのみに限定する
@@ -70,9 +77,11 @@ services:
     restart: unless-stopped
     image: quay.io/keycloak/keycloak:26.2
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       KC_HTTP_PORT: "8080"
+    # start-dev と realm import (開発ユーザー・ROPC 込み) はローカル開発専用。
+    # 本番 realm の要件は docs/environment-variables.md の ROPC / dev シードの節を参照
     command: ["start-dev", "--import-realm"]
     ports:
       - "8081:8080"
@@ -84,9 +93,9 @@ services:
     build:
       context: ../apps/api
     environment:
-      DATABASE_URL: jdbc:postgresql://postgres:5432/gis
-      DATABASE_USER: gis
-      DATABASE_PASSWORD: gis
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-gis}
+      DATABASE_USER: ${POSTGRES_USER:-gis}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       UPLOAD_DIR: /data/uploads
       # URL 系はすべて localhost = dev 専用の値。本番 (CloudFront/ALB 配下) では
       # 公開 HTTPS URL を注入する (一覧と信頼境界は docs/reverse-proxy.md)
@@ -115,9 +124,9 @@ services:
     environment:
       PGHOST: postgres
       PGPORT: "5432"
-      PGDATABASE: gis
-      PGUSER: gis
-      PGPASSWORD: gis
+      PGDATABASE: ${POSTGRES_DB:-gis}
+      PGUSER: ${POSTGRES_USER:-gis}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       POLL_INTERVAL_SECONDS: "2"
     volumes:
       - ../data:/data

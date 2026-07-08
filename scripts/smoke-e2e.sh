@@ -29,6 +29,12 @@ json_get() { # stdin の JSON から python 式で値を取り出す (例: json_
 
 if [[ "$MANAGE_COMPOSE" == "1" ]]; then
   command -v docker >/dev/null 2>&1 || fail "docker が見つかりません (fail-closed)"
+  # compose の資格情報は infra/.env から供給される (平文直書きの廃止)。
+  # スモークは dev / CI 専用のため、無ければ dev 既定値の .env.example から生成する
+  if [[ ! -f infra/.env ]]; then
+    log "infra/.env が無いため infra/.env.example から生成します (dev 既定値)"
+    cp infra/.env.example infra/.env
+  fi
   log "docker compose up --build ..."
   docker compose -f infra/docker-compose.yml up -d --build
   cleanup() {
