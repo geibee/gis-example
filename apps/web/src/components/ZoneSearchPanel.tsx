@@ -1,16 +1,18 @@
 import { type FormEvent, useMemo } from "react";
 import { Loader2, Plus, Save, Search, X } from "lucide-react";
 import type {
-  AttributeConditionDraft,
   Building,
   Feature,
   FeatureSearchResult,
   Land,
   Layer,
-  Party,
-  SpatialConditionDraft
-} from "../types";
-import type { ZoneBusinessSourceType } from "../appTypes";
+  Party
+} from "../contracts";
+import type {
+  AttributeConditionDraft,
+  SpatialConditionDraft,
+  ZoneBusinessSourceType
+} from "../appTypes";
 import { buildingUseOptions, businessStatusOptions, landUseOptions, partyTypeOptions } from "../constants";
 import {
   featureResultBusinessSummary,
