@@ -1,5 +1,5 @@
-import { type DragEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { type DragEvent, type ReactNode, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Building2, EyeOff, FileText, LogOut, Map as MapIcon, ShieldCheck, Users } from "lucide-react";
 import { useAuth } from "react-oidc-context";
 import { AppStateContext } from "./appState";
@@ -183,7 +183,9 @@ export default function App() {
       <main className={`business-workspace${app.mapSupportOpen ? " map-open" : " map-closed"}`}>
         <div className="workspace-tabs">
           <AppStateContext.Provider value={app}>
-            <Outlet />
+            <ScreenGuard me={app.me}>
+              <Outlet />
+            </ScreenGuard>
           </AppStateContext.Provider>
         </div>
 
@@ -243,8 +245,36 @@ export default function App() {
   );
 }
 
+// マッチしたルートの staticData (requiredSystemRole) を見て権限を一元的に enforce するガード。
+// 個別画面に me?.systemRole の直判定を増やさなくても、ルート定義のメタ情報だけで保護される。
+function ScreenGuard({ me, children }: { me: Me | null; children: ReactNode }) {
+  const requiredSystemRole = useRouterState({
+    select: (state) => activeScreenMeta(state.matches)?.requiredSystemRole ?? null
+  });
+  if (requiredSystemRole) {
+    // /api/me 取得完了までガード判定を保留する (未ロード時に誤リダイレクトしない)
+    if (!me) {
+      return (
+        <section className="tab-pane active">
+          <p className="admin-hint">権限を確認しています…</p>
+        </section>
+      );
+    }
+    if (me.systemRole !== requiredSystemRole) {
+      return <Navigate to="/zones" replace />;
+    }
+  }
+  return <>{children}</>;
+}
+
 // App が保持する state と handler 群。AppStateContext 経由で各画面 (薄いラッパ) へ渡す。
 function useAppController() {
+  // ルート定義のメタ情報 (staticData.title) をブラウザタイトルへ反映する
+  const screenTitle = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.title ?? null });
+  useEffect(() => {
+    document.title = screenTitle ? `${screenTitle} · Web GIS MVP` : "Web GIS MVP";
+  }, [screenTitle]);
+
   const navigate = useNavigate();
   // URL (マッチ中ルートの staticData / $id param) を唯一の正として画面状態を導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
