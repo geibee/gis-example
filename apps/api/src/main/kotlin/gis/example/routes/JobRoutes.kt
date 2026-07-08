@@ -102,6 +102,9 @@ fun Route.jobRoutes(deps: AppDependencies) {
                     withContext(Dispatchers.IO) { deps.uploadStorage.delete(uploadReference) }
                     throw exc
                 }
+                // INSERT コミット後の起動通知 (sqs モードのみ実体あり)。送信失敗は
+                // dispatcher 内で握りつぶされる — pending 行が正であり補完スキャンが回収する
+                withContext(Dispatchers.IO) { deps.jobDispatcher.notifyImportJob(job.id) }
                 call.respond(HttpStatusCode.Created, job)
             } finally {
                 // 正常時は store() がステージングを消費済みのため no-op。拒否・失敗時の残骸だけ消す
@@ -124,7 +127,10 @@ fun Route.jobRoutes(deps: AppDependencies) {
             val request = call.receive<AnalysisJobRequest>()
             call.requireProjectPermission(Action.ANALYSIS_EXECUTE, request.projectId ?: db.defaultProjectId())
             validateAnalysisRequest(db, request)
-            call.respond(HttpStatusCode.Created, db.createAnalysisJob(request))
+            val job = db.createAnalysisJob(request)
+            // INSERT コミット後の起動通知 (sqs モードのみ実体あり)。失敗しても補完スキャンが回収する
+            withContext(Dispatchers.IO) { deps.jobDispatcher.notifyAnalysisJob(job.id) }
+            call.respond(HttpStatusCode.Created, job)
         }
 
         get(
