@@ -173,6 +173,8 @@ verify_web() {
   # API 契約: Spectral lint + 生成型 (generated.ts) が openapi.yaml と同期しているか
   npm --workspace apps/web run lint:contracts
   npm --workspace apps/web run check:contracts-drift
+  # フロントエンドテスト (vitest run: 単発実行。watch にしない)
+  npm --workspace apps/web run test
   npm --workspace apps/web run build
   log "web PASS"
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { getLayerAttributeValues } from "../api";
-import type { AttributeConditionDraft, Layer, SpatialConditionDraft } from "../types";
+import type { Layer } from "../contracts";
+import type { AttributeConditionDraft, SpatialConditionDraft } from "../appTypes";
 import { attributeOperators, conditionSpatialOperators } from "../constants";
 import { attributeValueOptionKey } from "../utils";
 import { ChoiceSelect } from "./ChoiceSelect";

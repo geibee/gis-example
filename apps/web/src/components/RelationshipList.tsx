@@ -1,4 +1,4 @@
-import type { PartyRelationship } from "../types";
+import type { PartyRelationship } from "../contracts";
 
 export function RelationshipList({ relationships }: { relationships: PartyRelationship[] }) {
   return (
