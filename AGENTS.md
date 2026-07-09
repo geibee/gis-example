@@ -30,6 +30,16 @@
 - ステータスの使い分け: 非メンバーへの個別リソースは 404 (存在を隠す)、メンバーのロール不足と projectId 明示操作の拒否は 403
 - 監査ログ (`AuditLog.kt`) は mutate 成功と 401/403 を記録する。PEP が action / projectId を call attributes へ残す前提を崩さない
 
+## シークレット・設定 (環境変数)
+
+設定は**環境変数駆動**を徹底する (本番は ECS タスク定義の `secrets` で Secrets Manager / SSM から注入する前提。ファイルや埋め込みで設定を読まない)。
+
+- **`infra/docker-compose.yml` はローカル開発専用**。本番構成に使わない。dev の資格情報は `infra/.env` (gitignore 済み、`infra/.env.example` をコピー) から供給し、compose に平文で直書きしない
+- シークレット (パスワード・トークン類) をリポジトリにコミットしない。dev 既定値は `infra/.env.example` にのみ置く
+- 環境変数を追加・変更したら **`docs/environment-variables.md` の一覧を同じコミットで更新する** (ECS タスク定義作成のインプットなので、コードとの乖離は本番事故になる)
+- シークレットに既定値へのフォールバックを実装しない (`DATABASE_PASSWORD` / `PGPASSWORD` 未設定は起動失敗、が正)
+- 開発ユーザー (`infra/keycloak/realm-gis.json` / `infra/postgres/070-seed-dev-users.sql`) はアプリ本体コードへ持ち込まない。`scripts/check-dev-seed-isolation.sh` (verify.sh が毎回実行) が本番イメージ・アプリコードへの混入を検査する
+- 開発 realm の ROPC (`directAccessGrantsEnabled: true`) はスモーク E2E 専用の妥協。**本番 realm では無効化必須** (docs/environment-variables.md 参照)
 ## api のファイル構成 (機能追加の規約)
 
 `apps/api` は DI フレームワークを使わず、`Application.kt` の `module` が依存を組み立てて
@@ -45,17 +55,6 @@
 - ルート横断のリクエスト検証ヘルパは `routes/RouteSupport.kt`、SQL 組み立て・JSON 読み取りヘルパは `SqlSupport.kt` に置く
 - `Application.kt` にはプラグイン設定・依存組み立て・ルート登録以外を書かない。`/health` 以外の登録は `authenticate(OIDC_AUTH_NAME)` ブロックの内側に置く
 - 新しい依存 (設定値・外部クライアント等) は `AppDependencies` へフィールドを追加し、`module` で組み立てる
-
-## シークレット・設定 (環境変数)
-
-設定は**環境変数駆動**を徹底する (本番は ECS タスク定義の `secrets` で Secrets Manager / SSM から注入する前提。ファイルや埋め込みで設定を読まない)。
-
-- **`infra/docker-compose.yml` はローカル開発専用**。本番構成に使わない。dev の資格情報は `infra/.env` (gitignore 済み、`infra/.env.example` をコピー) から供給し、compose に平文で直書きしない
-- シークレット (パスワード・トークン類) をリポジトリにコミットしない。dev 既定値は `infra/.env.example` にのみ置く
-- 環境変数を追加・変更したら **`docs/environment-variables.md` の一覧を同じコミットで更新する** (ECS タスク定義作成のインプットなので、コードとの乖離は本番事故になる)
-- シークレットに既定値へのフォールバックを実装しない (`DATABASE_PASSWORD` / `PGPASSWORD` 未設定は起動失敗、が正)
-- 開発ユーザー (`infra/keycloak/realm-gis.json` / `infra/postgres/070-seed-dev-users.sql`) はアプリ本体コードへ持ち込まない。`scripts/check-dev-seed-isolation.sh` (verify.sh が毎回実行) が本番イメージ・アプリコードへの混入を検査する
-- 開発 realm の ROPC (`directAccessGrantsEnabled: true`) はスモーク E2E 専用の妥協。**本番 realm では無効化必須** (docs/environment-variables.md 参照)
 
 ## GIS 規約
 
