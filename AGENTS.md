@@ -115,6 +115,22 @@ VERIFY_SCOPE=all bash scripts/verify.sh
 - 型は `npm --workspace apps/web run generate:contracts` で `apps/web/src/contracts/generated.ts` に生成してコミットする(ドリフトは verify.sh の web スコープで fail)
 - 仕様の静的検査は Spectral(`npm --workspace apps/web run lint:contracts`)
 - web クライアント(`api.ts` / `types.ts`)は段階的に `contracts/generated.ts` の型へ移行する(手書き型と生成型の二重管理は移行期間のみ許容)
+- **サーバ実装との突合は `OpenApiContractSyncTest`(単体テスト = verify.sh の api スコープ)が強制する**:
+  実装のルーティングツリー(`Application.kt` の `healthRoutes` + `authenticatedApiRoutes`)と
+  openapi.yaml の paths を両方向で突合し、「実装にあるが契約に無い」「契約にあるが実装に無い」の
+  どちらも fail する。契約対象外のルート(`/health/ready` 等のインフラ専用)は同テストの
+  `contractExemptRoutes` に**理由付きで明示**する(暗黙除外の禁止。陳腐化したエントリも fail)
+- 代表エンドポイント(一覧・詳細・作成・エラー形)の実レスポンス JSON がスキーマに適合することは
+  `ContractResponseIntegrationTest`(gradle integrationTest)が検証する
+
+エンドポイント追加の手順(この順で 1 PR に収める。どれかを忘れると上記の検査が fail する):
+
+1. `routes/<機能>Routes.kt` に `RouteAuthz` 宣言付きで実装する(新モジュールは
+   `Application.kt` の `authenticatedApiRoutes` へ登録を 1 行追加)
+2. `apps/api/openapi.yaml` の paths に同じパス・メソッドを追記する(401/403 応答を含める)
+3. `npm --workspace apps/web run generate:contracts` で生成型を再生成してコミットする
+4. `bash scripts/verify.sh` — `OpenApiContractSyncTest` が 1↔2 の同期を、
+   `scripts/check-contract-drift.sh` が 2↔3 の同期を強制する
 
 ## テスト方針
 

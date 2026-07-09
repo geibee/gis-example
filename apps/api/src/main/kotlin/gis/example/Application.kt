@@ -32,6 +32,7 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.uri
 import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
@@ -137,19 +138,29 @@ fun Application.module(
         authenticate(OIDC_AUTH_NAME) {
             // 実行時の安全網: 認可判定マーカーのない 2xx 応答を 500 に置き換える
             install(authzGuardPlugin(db))
-            projectRoutes(deps)
-            meRoutes(deps)
-            adminRoutes(deps)
-            layerRoutes(deps)
-            featureRoutes(deps)
-            landRoutes(deps)
-            buildingRoutes(deps)
-            partyRoutes(deps)
-            zoneRoutes(deps)
-            jobRoutes(deps)
-            tileRoutes(deps)
+            authenticatedApiRoutes(deps)
         }
     }
     // 起動時の安全網: 認可宣言のないルートが 1 つでもあれば起動に失敗する
     validateAuthorizedRoutes(rootRoute)
+}
+
+/**
+ * 認証境界 (authenticate ブロック) の内側に置く全 API ルートの登録 (SSoT)。
+ * ここへの登録が「実装のエンドポイント一覧」の正であり、OpenApiContractSyncTest が
+ * healthRoutes と本関数の登録ツリーを走査して openapi.yaml の paths と突合する。
+ * エンドポイントの追加は routes/ のモジュールへ行い、新モジュールはここに 1 行足す
+ */
+fun Route.authenticatedApiRoutes(deps: AppDependencies) {
+    projectRoutes(deps)
+    meRoutes(deps)
+    adminRoutes(deps)
+    layerRoutes(deps)
+    featureRoutes(deps)
+    landRoutes(deps)
+    buildingRoutes(deps)
+    partyRoutes(deps)
+    zoneRoutes(deps)
+    jobRoutes(deps)
+    tileRoutes(deps)
 }
