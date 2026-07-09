@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
-import type { BusinessObjectFilters, Layer } from "../types";
+import type { Layer } from "../contracts";
+import type { BusinessObjectFilters } from "../appTypes";
 import { zoneLayerOptions } from "../utils";
 import { ChoiceSelect } from "./ChoiceSelect";
 

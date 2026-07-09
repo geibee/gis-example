@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Users } from "lucide-react";
 import { getZonePartySummary } from "../api";
-import type { ZonePartySummary as ZonePartySummaryData } from "../types";
+import type { ZonePartySummary as ZonePartySummaryData } from "../contracts";
 import { errorMessage } from "../utils";
 
 export function ZonePartySummary({

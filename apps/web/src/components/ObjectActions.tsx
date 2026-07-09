@@ -6,14 +6,18 @@ export function ObjectActions({
   onSave,
   onDelete,
   onCancel,
-  creating = false
+  creating = false,
+  formId
 }: {
   saving: boolean;
   deleting: boolean;
-  onSave: () => void;
+  /** formId を指定する場合は省略可 (フォームの submit として動く) */
+  onSave?: () => void;
   onDelete?: () => void;
   onCancel?: () => void;
   creating?: boolean;
+  /** 保存ボタンを type=submit にして関連付けるフォームの id */
+  formId?: string;
 }) {
   return (
     <div className="object-actions">
@@ -29,7 +33,13 @@ export function ObjectActions({
           削除
         </button>
       ) : null}
-      <button className="command-button" type="button" onClick={onSave} disabled={saving || deleting}>
+      <button
+        className="command-button"
+        type={formId ? "submit" : "button"}
+        form={formId}
+        onClick={onSave}
+        disabled={saving || deleting}
+      >
         {saving ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
         {creating ? "作成" : "保存"}
       </button>

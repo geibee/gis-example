@@ -617,8 +617,8 @@ export interface components {
         Me: {
             userId: string;
             subject: string;
-            email?: string | null;
-            displayName?: string | null;
+            email: string | null;
+            displayName: string | null;
             /** @enum {string} */
             systemRole: "admin" | "user";
             memberships: components["schemas"]["Membership"][];
@@ -626,8 +626,8 @@ export interface components {
         User: {
             id: string;
             subject: string;
-            email?: string | null;
-            displayName?: string | null;
+            email: string | null;
+            displayName: string | null;
             /** @enum {string} */
             systemRole: "admin" | "user";
             isActive: boolean;
@@ -643,8 +643,8 @@ export interface components {
             projectId: string;
             /** @enum {string} */
             role: "editor" | "viewer";
-            email?: string | null;
-            displayName?: string | null;
+            email: string | null;
+            displayName: string | null;
         };
         MemberPutRequest: {
             /** @enum {string} */
@@ -676,7 +676,7 @@ export interface components {
             resultSetName?: string | null;
             sourceLayerId?: string | null;
             tileSourceId: string;
-            attributes?: components["schemas"]["LayerAttribute"][];
+            attributes: components["schemas"]["LayerAttribute"][];
             createdAt: string;
         };
         Feature: {
@@ -713,8 +713,8 @@ export interface components {
             /** @description GeoJSON geometry (EPSG:4326) */
             geometry?: unknown;
             matchSummary?: string | null;
-            businessLinks?: components["schemas"]["BusinessLinks"];
-            matchedBusinessLinks?: components["schemas"]["BusinessLinks"];
+            businessLinks: components["schemas"]["BusinessLinks"];
+            matchedBusinessLinks: components["schemas"]["BusinessLinks"];
         };
         BusinessSpatialSearchRequest: {
             projectId?: string | null;
@@ -803,8 +803,8 @@ export interface components {
             memo?: string | null;
             sourceLayerId?: string | null;
             sourceFeatureId?: string | null;
-            buildings?: components["schemas"]["BusinessEntityLink"][];
-            relationships?: components["schemas"]["PartyRelationship"][];
+            buildings: components["schemas"]["BusinessEntityLink"][];
+            relationships: components["schemas"]["PartyRelationship"][];
         };
         /** @description 作成時は lotNumber / address が必要。更新は差分のみ */
         LandWriteRequest: {
@@ -844,7 +844,7 @@ export interface components {
             memo?: string | null;
             sourceLayerId?: string | null;
             sourceFeatureId?: string | null;
-            relationships?: components["schemas"]["PartyRelationship"][];
+            relationships: components["schemas"]["PartyRelationship"][];
         };
         /** @description 作成時は name が必要。更新は差分のみ */
         BuildingWriteRequest: {
@@ -876,8 +876,8 @@ export interface components {
             contact?: string | null;
             address?: string | null;
             memo?: string | null;
-            tags?: string[];
-            relationships?: components["schemas"]["PartyRelationship"][];
+            tags: string[];
+            relationships: components["schemas"]["PartyRelationship"][];
         };
         /** @description 作成時は name / partyType が必要。更新は差分のみ */
         PartyWriteRequest: {
@@ -903,10 +903,10 @@ export interface components {
             zoneFeatureId: string;
             sourceLayerId: string;
             sourceFeatureId: string;
-            landCount?: number;
-            buildingCount?: number;
-            lands?: components["schemas"]["BusinessEntityLink"][];
-            buildings?: components["schemas"]["BusinessEntityLink"][];
+            landCount: number;
+            buildingCount: number;
+            lands: components["schemas"]["BusinessEntityLink"][];
+            buildings: components["schemas"]["BusinessEntityLink"][];
         };
         /** @description 作成時は name と区域フィーチャ参照が必要。更新は差分のみ */
         ZoneWriteRequest: {
@@ -931,19 +931,19 @@ export interface components {
             id: string;
             name: string;
             partyType: string;
-            tags?: string[];
+            tags: string[];
             zoneInvolvement: number;
             projectInvolvement: number;
-            relationTypes?: string[];
+            relationTypes: string[];
             coverageRatio: number;
         };
         ZonePartySummary: {
             zoneId: string;
             containedCount: number;
             partyCount: number;
-            typeBreakdown?: components["schemas"]["ZonePartyBreakdown"][];
-            tagBreakdown?: components["schemas"]["ZonePartyBreakdown"][];
-            parties?: components["schemas"]["ZonePartySummaryEntry"][];
+            typeBreakdown: components["schemas"]["ZonePartyBreakdown"][];
+            tagBreakdown: components["schemas"]["ZonePartyBreakdown"][];
+            parties: components["schemas"]["ZonePartySummaryEntry"][];
         };
         ZoneLayerFromImportRequest: {
             projectId?: string | null;
@@ -957,7 +957,7 @@ export interface components {
             layer: components["schemas"]["Layer"];
             zonesCreated: number;
             zonesUpdated: number;
-            zones?: components["schemas"]["Zone"][];
+            zones: components["schemas"]["Zone"][];
         };
         ImportJob: {
             id: string;
