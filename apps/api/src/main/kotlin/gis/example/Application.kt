@@ -67,19 +67,33 @@ fun Application.module(
         // ブラウザから見た API の公開 URL (TileJSON の絶対 URL 生成に使う)。
         // localhost 既定は dev 専用。本番では CloudFront 配下の HTTPS URL を必ず設定する
         apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/'),
-        maxUploadBytes = (System.getenv("UPLOAD_MAX_BYTES") ?: DEFAULT_MAX_UPLOAD_BYTES.toString()).toLong()
+        maxUploadBytes = (System.getenv("UPLOAD_MAX_BYTES") ?: DEFAULT_MAX_UPLOAD_BYTES.toString()).toLong(),
+        // JOB_QUEUE_MODE=sqs でジョブ作成コミット後に SQS へ起動通知を送る (既定 polling は no-op)
+        jobDispatcher = jobDispatcherFromEnv()
     )
     val webOrigin = System.getenv("WEB_ORIGIN")
 
-    val analysisJobRunner = AnalysisJobRunner(
-        db = db,
-        pollIntervalMillis = ((System.getenv("ANALYSIS_POLL_INTERVAL_SECONDS") ?: "2").toDouble() * 1000).toLong(),
-        staleJobMaxAgeSeconds = (System.getenv("ANALYSIS_JOB_STALE_SECONDS") ?: "1800").toLong()
-    )
-    analysisJobRunner.start()
+    // 分析ランナーの配置 (issue #24)。既定 in-process は dev / 単一ホスト互換。
+    // 本番 (ECS) は external にして独立サービス (bin/analysis-worker) へ分離し、
+    // API のレイテンシが解析負荷の影響を受けないようにする
+    val analysisJobRunner = when (val mode = (System.getenv("ANALYSIS_RUNNER_MODE") ?: "in-process").trim().lowercase()) {
+        "in-process" -> {
+            val settings = AnalysisWorkerSettings.fromEnv()
+            AnalysisJobRunner(
+                db = db,
+                pollIntervalMillis = settings.pollIntervalMillis,
+                staleJobMaxAgeSeconds = settings.staleJobMaxAgeSeconds,
+                maxAttempts = settings.maxAttempts,
+                heartbeatIntervalSeconds = settings.heartbeatIntervalSeconds
+            ).also { it.start() }
+        }
+        "external" -> null
+        else -> error("ANALYSIS_RUNNER_MODE は in-process | external のいずれかを指定してください: $mode")
+    }
 
     environment.monitor.subscribe(ApplicationStopped) {
-        analysisJobRunner.stop()
+        analysisJobRunner?.stop()
+        deps.jobDispatcher.close()
         deps.uploadStorage.close()
         db.close()
     }

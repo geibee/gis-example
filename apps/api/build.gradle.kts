@@ -11,6 +11,26 @@ application {
     mainClass.set("gis.example.ApplicationKt")
 }
 
+// 分析ジョブ実行ワーカーの独立エントリポイント (issue #24)。installDist で bin/analysis-worker が
+// 生成され、compose / ECS では api と同イメージのまま command を差し替えて起動する
+val analysisWorkerStartScripts by tasks.registering(CreateStartScripts::class) {
+    applicationName = "analysis-worker"
+    mainClass.set("gis.example.AnalysisWorkerMainKt")
+    outputDir = layout.buildDirectory.dir("scripts-analysis-worker").get().asFile
+    classpath = tasks.startScripts.get().classpath
+}
+
+distributions {
+    main {
+        contents {
+            into("bin") {
+                from(analysisWorkerStartScripts)
+                filePermissions { unix("rwxr-xr-x") }
+            }
+        }
+    }
+}
+
 kotlin {
     jvmToolchain(21)
     compilerOptions {
@@ -36,6 +56,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     // アップロードの S3 保存 (UploadStorage.kt、UPLOAD_STORAGE=s3 で有効化。認証は既定チェーン)
     implementation("software.amazon.awssdk:s3:2.29.52")
+    // ジョブディスパッチの SQS 化 (JobQueue.kt / AnalysisWorkerMain.kt、JOB_QUEUE_MODE=sqs で有効化)
+    implementation("software.amazon.awssdk:sqs:2.29.52")
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.4")
     // スキーママイグレーション (versioned migration の SSoT は src/main/resources/db/migration)
@@ -51,6 +73,9 @@ dependencies {
     // 契約突合テスト (OpenApiContractSyncTest / ContractResponseIntegrationTest) が
     // openapi.yaml をパースするための最小依存 (テスト限定。本体コードでは使わない)
     testImplementation("org.yaml:snakeyaml:2.3")
+    // SQS 経路の統合テスト用の使い捨てインプロセス SQS (JobQueueSqsIntegrationTest)。
+    // CI の api-integration ジョブは PostGIS しか持たないため、SQS はテスト JVM 内に埋め込んで成立させる
+    testImplementation("org.elasticmq:elasticmq-rest-sqs_2.13:1.6.16")
 }
 
 // test = 単体テストのみ (DB 不要、軽量ゲート scripts/verify.sh が実行)

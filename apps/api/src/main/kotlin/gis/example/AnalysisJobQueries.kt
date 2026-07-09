@@ -60,15 +60,28 @@ fun Database.getAnalysisJob(id: String): AnalysisJobDto? = dataSource.connection
 
 // pending の分析ジョブを 1 件 claim する (worker-gis と同じ FOR UPDATE SKIP LOCKED 方式)。
 // claim は独立トランザクションで確定するため、実行中にプロセスが落ちたジョブは running のまま残る
-fun Database.claimPendingAnalysisJob(): ClaimedAnalysisJob? = dataSource.connection.use { connection ->
+// (途絶検知はハートビート — sweepStaleAnalysisJobs)。attempt_count は claim ごとに増え、
+// 上限超過の failed 化 (収束保証) の判定に使う
+fun Database.claimPendingAnalysisJob(): ClaimedAnalysisJob? = claimAnalysisJobWhere("status = 'pending'") { }
+
+// SQS 起動通知が指す特定ジョブの claim。at-least-once 配信による重複メッセージは
+// ここで claim に失敗する (= 実行済み or 実行中) ため、二重実行は起きない (効果としての exactly-once)
+fun Database.claimAnalysisJobById(jobId: String): ClaimedAnalysisJob? =
+    claimAnalysisJobWhere("id = ?::uuid AND status = 'pending'") { stmt -> stmt.setString(1, jobId) }
+
+private fun Database.claimAnalysisJobWhere(
+    condition: String,
+    bind: (PreparedStatement) -> Unit
+): ClaimedAnalysisJob? = dataSource.connection.use { connection ->
     connection.prepareStatement(
         """
         UPDATE app.analysis_jobs
-        SET status = 'running', started_at = now(), error_message = NULL
+        SET status = 'running', started_at = now(), heartbeat_at = now(),
+            attempt_count = attempt_count + 1, error_message = NULL
         WHERE id = (
             SELECT id
             FROM app.analysis_jobs
-            WHERE status = 'pending'
+            WHERE $condition
             ORDER BY created_at
             FOR UPDATE SKIP LOCKED
             LIMIT 1
@@ -76,6 +89,7 @@ fun Database.claimPendingAnalysisJob(): ClaimedAnalysisJob? = dataSource.connect
         RETURNING id::text, project_id::text, name, criteria::text
         """.trimIndent()
     ).use { stmt ->
+        bind(stmt)
         stmt.executeQuery().use { rs ->
             if (!rs.next()) {
                 null
@@ -91,23 +105,79 @@ fun Database.claimPendingAnalysisJob(): ClaimedAnalysisJob? = dataSource.connect
     }
 }
 
-// worker-gis の取込ジョブと同様に、実行中にプロセスが落ちて running のまま残った
-// 分析ジョブをリース期限超過で pending へ戻す
-fun Database.requeueStaleAnalysisJobs(maxAgeSeconds: Long): Int = dataSource.connection.use { connection ->
+// 実行中ジョブの生存通知。実行ワーカーが定期的に呼び、途絶したものだけを
+// sweepStaleAnalysisJobs が回収する (長時間の正常実行を誤って再キューしない)
+fun Database.heartbeatAnalysisJob(jobId: String): Unit = dataSource.connection.use { connection ->
     connection.prepareStatement(
-        """
-        UPDATE app.analysis_jobs
-        SET status = 'pending', started_at = NULL,
-            error_message = concat('実行中のまま ', ?::text, ' 秒を超えたため再キュー')
-        WHERE status = 'running'
-          AND started_at < now() - make_interval(secs => ?::double precision)
-        """.trimIndent()
+        "UPDATE app.analysis_jobs SET heartbeat_at = now() WHERE id = ?::uuid AND status = 'running'"
     ).use { stmt ->
-        stmt.setString(1, maxAgeSeconds.toString())
-        stmt.setLong(2, maxAgeSeconds)
+        stmt.setString(1, jobId)
         stmt.executeUpdate()
     }
 }
+
+data class StaleJobSweepResult(val requeued: Int, val failed: Int)
+
+// 実行中にプロセスが落ちて running のまま残った分析ジョブの回収。
+// ハートビート途絶 (heartbeat_at が閾値超過。導入前の既存行は started_at で判定) を対象に、
+//   - 試行回数が上限未満: pending へ戻す (SQS モードでは補完スキャンが再 enqueue する)
+//   - 試行回数が上限以上: failed 化 (毒ジョブを有限回で収束させる — issue #24 の第 5 層)
+fun Database.sweepStaleAnalysisJobs(heartbeatTimeoutSeconds: Long, maxAttempts: Int): StaleJobSweepResult =
+    withTransaction { connection ->
+        val stalePredicate = """
+            status = 'running'
+              AND COALESCE(heartbeat_at, started_at) < now() - make_interval(secs => ?::double precision)
+        """.trimIndent()
+        val failed = connection.prepareStatement(
+            """
+            UPDATE app.analysis_jobs
+            SET status = 'failed', finished_at = now(),
+                error_message = concat('ハートビート途絶 (試行 ', attempt_count::text, ' 回) が再試行上限に達したため打ち切り')
+            WHERE $stalePredicate
+              AND attempt_count >= ?
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setLong(1, heartbeatTimeoutSeconds)
+            stmt.setInt(2, maxAttempts)
+            stmt.executeUpdate()
+        }
+        val requeued = connection.prepareStatement(
+            """
+            UPDATE app.analysis_jobs
+            SET status = 'pending', started_at = NULL, heartbeat_at = NULL,
+                error_message = concat('ハートビートが ', ?::text, ' 秒途絶したため再キュー')
+            WHERE $stalePredicate
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, heartbeatTimeoutSeconds.toString())
+            stmt.setLong(2, heartbeatTimeoutSeconds)
+            stmt.executeUpdate()
+        }
+        StaleJobSweepResult(requeued = requeued, failed = failed)
+    }
+
+// 補完スキャン (outbox 簡易版) の対象: pending のまま一定時間経過したジョブ。
+// enqueue の取りこぼし・DLQ 落ち後の再 pending 化を SQS へ再通知するために使う。
+// 重複通知になっても claim が冪等ガードになるため無害
+fun Database.listStalePendingAnalysisJobIds(minAgeSeconds: Long, limit: Int): List<String> =
+    dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            """
+            SELECT id::text
+            FROM app.analysis_jobs
+            WHERE status = 'pending'
+              AND created_at < now() - make_interval(secs => ?::double precision)
+            ORDER BY created_at
+            LIMIT ?
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setLong(1, minAgeSeconds)
+            stmt.setInt(2, limit)
+            stmt.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(rs.getString(1)) }
+            }
+        }
+    }
 
 // claim 済み分析ジョブを実行する。結果テーブル作成・レイヤ登録・ジョブ状態更新を
 // 1 トランザクションで確定し、例外時は failed を記録する (呼び出し側へは投げない)

@@ -1,0 +1,5 @@
+# 本番イメージ (Dockerfile) に入る実行時依存のみを置く。
+# テスト専用依存は requirements.txt 側に足す (CI はそちらをインストールする)
+psycopg[binary]==3.2.3
+# アップロードの S3 取得と SQS consume (JOB_QUEUE_MODE=sqs)
+boto3==1.43.42

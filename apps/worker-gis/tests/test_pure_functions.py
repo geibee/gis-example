@@ -12,10 +12,12 @@ from src.worker import (
     DEFAULT_ZIP_MAX_TOTAL_BYTES,
     JsonLinesFormatter,
     configure_logging,
+    decode_job_message,
     fetch_upload,
     input_driver,
     inspect_zip_archive,
     is_s3_uri,
+    job_queue_mode,
     make_table_name,
     normalize_layer_role,
     ogr_source,
@@ -24,6 +26,42 @@ from src.worker import (
     quote_ident,
     zip_limits,
 )
+
+
+class TestJobQueueMessage:
+    # メッセージ本文は api 側 (JobQueue.kt の encodeJobQueueMessage / JobQueueTest) と
+    # 共有する契約。形を変えるときは両側のテストを更新すること
+
+    def test_decodes_job_id(self) -> None:
+        assert decode_job_message('{"jobId":"6b1f0000-0000-0000-0000-000000000024"}') == (
+            "6b1f0000-0000-0000-0000-000000000024"
+        )
+
+    def test_ignores_unknown_fields(self) -> None:
+        assert decode_job_message('{"jobId":"abc","futureField":1}') == "abc"
+
+    def test_malformed_body_returns_none(self) -> None:
+        # 解釈できない毒メッセージは None (consumer が削除して収束させる)
+        assert decode_job_message("not-json") is None
+        assert decode_job_message("{}") is None
+        assert decode_job_message('{"jobId":""}') is None
+        assert decode_job_message("[1,2,3]") is None
+
+
+class TestJobQueueMode:
+    def test_defaults_to_polling(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("JOB_QUEUE_MODE", raising=False)
+        assert job_queue_mode() == "polling"
+
+    def test_accepts_sqs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JOB_QUEUE_MODE", "sqs")
+        assert job_queue_mode() == "sqs"
+
+    def test_rejects_unknown_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 不正値で黙って polling へ落ちると片肺構成になり得るため fail fast
+        monkeypatch.setenv("JOB_QUEUE_MODE", "kafka")
+        with pytest.raises(RuntimeError):
+            job_queue_mode()
 
 
 class TestQuoteIdent:
