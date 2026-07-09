@@ -1,5 +1,5 @@
 import { Loader2, Save, X } from "lucide-react";
-import type { Layer } from "../types";
+import type { Layer } from "../contracts";
 import { editableFeatureAttributes } from "../utils";
 
 export function FeatureEditor({
