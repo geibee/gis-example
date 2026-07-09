@@ -14,7 +14,8 @@ import io.ktor.server.request.path
 internal val AuditedAction = io.ktor.util.AttributeKey<Action>("audit.action")
 internal val AuditedProjectId = io.ktor.util.AttributeKey<String>("audit.projectId")
 
-private val mutationMethods = setOf("POST", "PATCH", "DELETE")
+// PUT はプロジェクトメンバー upsert (AdminRoutes) が使う。変更系はすべて記録対象にする
+private val mutationMethods = setOf("POST", "PUT", "PATCH", "DELETE")
 
 fun auditLogPlugin(db: Database): ApplicationPlugin<Unit> =
     createApplicationPlugin("AuditLog") {
@@ -39,7 +40,9 @@ fun auditLogPlugin(db: Database): ApplicationPlugin<Unit> =
                     path = path,
                     statusCode = status,
                     // CloudWatch Logs 上のアプリログ (MDC callId) と突合するためのリクエスト ID
-                    callId = call.callId
+                    callId = call.callId,
+                    // クエリ層が AuditTrail (AuditChange.kt) へ登録した変更内容 (diff)
+                    detail = call.attributes.getOrNull(AuditedChanges)?.detailJsonOrNull()
                 )
             }.onFailure { exc ->
                 databaseLogger.warn("監査ログの書込みに失敗しました: {} {}", method, path, exc)
@@ -56,15 +59,16 @@ internal fun Database.insertAuditLog(
     httpMethod: String,
     path: String,
     statusCode: Int,
-    callId: String?
+    callId: String?,
+    detail: String? = null
 ) {
     dataSource.connection.use { connection ->
         connection.prepareStatement(
             """
             INSERT INTO app.audit_logs (
-                user_id, subject, action, decision, project_id, http_method, path, status_code, call_id
+                user_id, subject, action, decision, project_id, http_method, path, status_code, call_id, detail
             )
-            VALUES (?::uuid, ?, ?, ?, ?::uuid, ?, ?, ?, ?)
+            VALUES (?::uuid, ?, ?, ?, ?::uuid, ?, ?, ?, ?, ?::jsonb)
             """.trimIndent()
         ).use { stmt ->
             stmt.setString(1, userId)
@@ -76,6 +80,7 @@ internal fun Database.insertAuditLog(
             stmt.setString(7, path)
             stmt.setInt(8, statusCode)
             stmt.setString(9, callId)
+            stmt.setString(10, detail)
             stmt.executeUpdate()
         }
     }

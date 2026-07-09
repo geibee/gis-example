@@ -7,6 +7,7 @@ import gis.example.MemberPutRequest
 import gis.example.RouteAuthz.SystemAction
 import gis.example.UserPatchRequest
 import gis.example.appPrincipal
+import gis.example.auditTrail
 import gis.example.authorizedRoutes
 import gis.example.deleteProjectMember
 import gis.example.listProjectMembers
@@ -36,7 +37,7 @@ fun Route.adminRoutes(deps: AppDependencies) {
             if (id == call.appPrincipal().userId) {
                 throw ApiException(HttpStatusCode.BadRequest, "Cannot change your own role or active status")
             }
-            call.respond(db.updateUser(id, call.receive<UserPatchRequest>()))
+            call.respond(db.updateUser(id, call.receive<UserPatchRequest>(), call.auditTrail()))
         }
 
         get("/api/projects/{id}/members", SystemAction(Action.MEMBER_ADMIN)) {
@@ -60,7 +61,7 @@ fun Route.adminRoutes(deps: AppDependencies) {
                 "User id"
             )
             val request = call.receive<MemberPutRequest>()
-            call.respond(db.putProjectMember(projectId, userId, request.role))
+            call.respond(db.putProjectMember(projectId, userId, request.role, call.auditTrail()))
         }
 
         delete("/api/projects/{id}/members/{userId}", SystemAction(Action.MEMBER_ADMIN)) {
@@ -72,7 +73,7 @@ fun Route.adminRoutes(deps: AppDependencies) {
                 call.parameters["userId"] ?: throw ApiException(HttpStatusCode.BadRequest, "User id is required"),
                 "User id"
             )
-            db.deleteProjectMember(projectId, userId)
+            db.deleteProjectMember(projectId, userId, call.auditTrail())
             call.respond(HttpStatusCode.NoContent)
         }
     }

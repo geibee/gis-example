@@ -2,6 +2,8 @@
 
 package gis.example
 
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.sql.Connection
 import java.sql.SQLException
 import java.sql.Types
@@ -144,38 +146,50 @@ fun Database.listAttributeValues(layerId: String, field: String, limit: Int): Li
     }
 }
 
-fun Database.deleteLayer(id: String) {
+fun Database.deleteLayer(id: String, audit: AuditTrail) {
     try {
         withTransaction { connection ->
             val layer = loadDeletedLayerForUpdate(connection, id)
                 ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Layer not found")
+            // 監査 diff 用の削除前メタデータ (行ロック取得後・削除前に取る)
+            val before = getLayerInConnection(connection, id)
             deleteLayerInTransaction(connection, layer)
             layer.resultSetId?.let { deleteResultSetIfEmpty(connection, it) }
+            before?.let { audit.recordDelete("layer", id, it.auditSnapshot()) }
         }
     } catch (exc: SQLException) {
         throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Layer delete failed: ${exc.message ?: "invalid layer delete"}")
     }
 }
 
-fun Database.deleteResultSet(id: String) {
+fun Database.deleteResultSet(id: String, audit: AuditTrail) {
     try {
         withTransaction { connection ->
-            val resultSetExists = connection.prepareStatement(
-                "SELECT id::text FROM app.result_sets WHERE id = ?::uuid FOR UPDATE"
+            val resultSetName = connection.prepareStatement(
+                "SELECT name FROM app.result_sets WHERE id = ?::uuid FOR UPDATE"
             ).use { stmt ->
                 stmt.setString(1, id)
                 stmt.executeQuery().use { rs ->
-                    rs.next()
+                    if (rs.next()) rs.getString("name") else null
                 }
-            }
-            if (!resultSetExists) {
-                throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Result set not found")
-            }
+            } ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Result set not found")
 
             listDeletedLayersForResultSet(connection, id).forEach { layer ->
+                // カスケード削除されるレイヤも個別に記録し、対象を detail から復元できるようにする
+                getLayerInConnection(connection, layer.id)?.let {
+                    audit.recordDelete("layer", layer.id, it.auditSnapshot())
+                }
                 deleteLayerInTransaction(connection, layer)
             }
             deleteResultSetRecord(connection, id)
+            audit.recordDelete(
+                "resultSet",
+                id,
+                buildJsonObject {
+                    put("id", id)
+                    put("name", resultSetName)
+                }
+            )
         }
     } catch (exc: SQLException) {
         throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Result set delete failed: ${exc.message ?: "invalid result set delete"}")

@@ -29,6 +29,7 @@
 - 認証不要のルートは `unauthenticatedGet` (理由の明記必須) でのみ登録できる。現状は `/health` のみ
 - ステータスの使い分け: 非メンバーへの個別リソースは 404 (存在を隠す)、メンバーのロール不足と projectId 明示操作の拒否は 403
 - 監査ログ (`AuditLog.kt`) は mutate 成功と 401/403 を記録する。PEP が action / projectId を call attributes へ残す前提を崩さない
+- 変更内容 (diff) は更新系クエリが必須引数 `AuditTrail` (`AuditChange.kt`) で受け取り before/after を登録する (必須引数なので配線忘れはコンパイルエラーになる)。更新系クエリを追加するときはルートから `call.auditTrail()` を渡す。機微フィールドのマスクと巨大値 (geometry 等) の要約化は `AuditChange.kt` が一元処理する
 
 ## シークレット・設定 (環境変数)
 

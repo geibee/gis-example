@@ -6,6 +6,7 @@ import gis.example.ApiException
 import gis.example.ProjectResourceType
 import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
+import gis.example.auditTrail
 import gis.example.authorizedProjectId
 import gis.example.authorizedResourceId
 import gis.example.authorizedRoutes
@@ -41,7 +42,7 @@ fun Route.layerRoutes(deps: AppDependencies) {
             "/api/layers/{id}",
             ResourceFromPath(Action.LAYER_WRITE, ProjectResourceType.LAYER, uuidLabel = "Layer id")
         ) {
-            db.deleteLayer(call.authorizedResourceId())
+            db.deleteLayer(call.authorizedResourceId(), call.auditTrail())
             call.respond(HttpStatusCode.NoContent)
         }
 
@@ -49,7 +50,7 @@ fun Route.layerRoutes(deps: AppDependencies) {
             "/api/result-sets/{id}",
             ResourceFromPath(Action.LAYER_WRITE, ProjectResourceType.RESULT_SET, uuidLabel = "Result set id")
         ) {
-            db.deleteResultSet(call.authorizedResourceId())
+            db.deleteResultSet(call.authorizedResourceId(), call.auditTrail())
             call.respond(HttpStatusCode.NoContent)
         }
     }

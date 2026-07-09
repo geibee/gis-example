@@ -160,7 +160,7 @@ fun Database.getLand(id: String): LandDto? = dataSource.connection.use { connect
     )
 }
 
-fun Database.createLand(request: JsonObject): LandDto = try {
+fun Database.createLand(request: JsonObject, audit: AuditTrail): LandDto = try {
     dataSource.connection.use { connection ->
         val id = readRequiredText(request, "id")
         val projectId = readRequiredUuid(request, "projectId")
@@ -203,7 +203,9 @@ fun Database.createLand(request: JsonObject): LandDto = try {
             setNullableString(stmt, 14, sourceFeatureId)
             stmt.executeQuery().use { rs ->
                 rs.next()
-                getLand(rs.getString("id")) ?: error("Created land disappeared")
+                val created = getLand(rs.getString("id")) ?: error("Created land disappeared")
+                audit.recordCreate("land", created.id, created.auditSnapshot())
+                created
             }
         }
     }
@@ -211,8 +213,10 @@ fun Database.createLand(request: JsonObject): LandDto = try {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Land create failed: ${exc.message ?: "invalid land create"}")
 }
 
-fun Database.updateLand(id: String, request: JsonObject): LandDto = try {
+fun Database.updateLand(id: String, request: JsonObject, audit: AuditTrail): LandDto = try {
     dataSource.connection.use { connection ->
+        // 監査 diff 用の変更前スナップショット (存在しない ID は従来どおり 404)
+        val before = getLand(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Land not found")
         val setters = mutableListOf<String>()
         val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
         addTextPatch(request, "lotNumber", "lot_number", setters, binders, required = true)
@@ -228,7 +232,8 @@ fun Database.updateLand(id: String, request: JsonObject): LandDto = try {
         addUuidPatch(request, "sourceLayerId", "source_layer_id", setters, binders)
         addTextPatch(request, "sourceFeatureId", "source_feature_id", setters, binders)
         if (setters.isEmpty()) {
-            return@use getLand(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Land not found")
+            audit.recordUpdate("land", id, before.auditSnapshot(), before.auditSnapshot())
+            return@use before
         }
 
         val updated = connection.prepareStatement(
@@ -250,16 +255,20 @@ fun Database.updateLand(id: String, request: JsonObject): LandDto = try {
                 rs.toLandDto()
             }
         }
-        updated.copy(
+        val result = updated.copy(
             buildings = listBuildingLinksForLand(connection, id),
             relationships = listRelationshipsForTarget(connection, "land", id)
         )
+        audit.recordUpdate("land", id, before.auditSnapshot(), result.auditSnapshot())
+        result
     }
 } catch (exc: SQLException) {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Land update failed: ${exc.message ?: "invalid land update"}")
 }
 
-fun Database.deleteLand(id: String) {
+fun Database.deleteLand(id: String, audit: AuditTrail) {
+    // 監査 diff 用の削除前スナップショット (存在しない ID は従来どおり 404)
+    val before = getLand(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Land not found")
     try {
         withTransaction { connection ->
             connection.prepareStatement("UPDATE app.buildings SET land_id = NULL, updated_at = now() WHERE land_id = ?").use { stmt ->
@@ -281,6 +290,7 @@ fun Database.deleteLand(id: String) {
     } catch (exc: SQLException) {
         throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Land delete failed: ${exc.message ?: "invalid land delete"}")
     }
+    audit.recordDelete("land", id, before.auditSnapshot())
 }
 
 fun Database.listBuildings(query: BuildingListQuery): PagedList<BuildingDto> = dataSource.connection.use { connection ->
@@ -395,7 +405,7 @@ fun Database.getBuilding(id: String): BuildingDto? = dataSource.connection.use {
     building.copy(relationships = listRelationshipsForTarget(connection, "building", id))
 }
 
-fun Database.createBuilding(request: JsonObject): BuildingDto = try {
+fun Database.createBuilding(request: JsonObject, audit: AuditTrail): BuildingDto = try {
     dataSource.connection.use { connection ->
         val id = readRequiredText(request, "id")
         val projectId = readRequiredUuid(request, "projectId")
@@ -445,7 +455,9 @@ fun Database.createBuilding(request: JsonObject): BuildingDto = try {
             setNullableString(stmt, 17, sourceFeatureId)
             stmt.executeQuery().use { rs ->
                 rs.next()
-                getBuilding(rs.getString("id")) ?: error("Created building disappeared")
+                val created = getBuilding(rs.getString("id")) ?: error("Created building disappeared")
+                audit.recordCreate("building", created.id, created.auditSnapshot())
+                created
             }
         }
     }
@@ -453,8 +465,10 @@ fun Database.createBuilding(request: JsonObject): BuildingDto = try {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Building create failed: ${exc.message ?: "invalid building create"}")
 }
 
-fun Database.updateBuilding(id: String, request: JsonObject): BuildingDto = try {
+fun Database.updateBuilding(id: String, request: JsonObject, audit: AuditTrail): BuildingDto = try {
     dataSource.connection.use { connection ->
+        // 監査 diff 用の変更前スナップショット (存在しない ID は従来どおり 404)
+        val before = getBuilding(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Building not found")
         val setters = mutableListOf<String>()
         val binders = mutableListOf<(PreparedStatement, Int) -> Unit>()
         addTextPatch(request, "landId", "land_id", setters, binders)
@@ -473,7 +487,8 @@ fun Database.updateBuilding(id: String, request: JsonObject): BuildingDto = try 
         addUuidPatch(request, "sourceLayerId", "source_layer_id", setters, binders)
         addTextPatch(request, "sourceFeatureId", "source_feature_id", setters, binders)
         if (setters.isEmpty()) {
-            return@use getBuilding(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Building not found")
+            audit.recordUpdate("building", id, before.auditSnapshot(), before.auditSnapshot())
+            return@use before
         }
 
         val updatedId = connection.prepareStatement(
@@ -493,13 +508,17 @@ fun Database.updateBuilding(id: String, request: JsonObject): BuildingDto = try 
                 rs.getString("id")
             }
         }
-        getBuilding(updatedId) ?: error("Updated building disappeared")
+        val result = getBuilding(updatedId) ?: error("Updated building disappeared")
+        audit.recordUpdate("building", id, before.auditSnapshot(), result.auditSnapshot())
+        result
     }
 } catch (exc: SQLException) {
     throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Building update failed: ${exc.message ?: "invalid building update"}")
 }
 
-fun Database.deleteBuilding(id: String) {
+fun Database.deleteBuilding(id: String, audit: AuditTrail) {
+    // 監査 diff 用の削除前スナップショット (存在しない ID は従来どおり 404)
+    val before = getBuilding(id) ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Building not found")
     try {
         withTransaction { connection ->
             connection.prepareStatement("DELETE FROM app.party_relationships WHERE target_type = 'building' AND target_id = ?").use { stmt ->
@@ -517,6 +536,7 @@ fun Database.deleteBuilding(id: String) {
     } catch (exc: SQLException) {
         throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "Building delete failed: ${exc.message ?: "invalid building delete"}")
     }
+    audit.recordDelete("building", id, before.auditSnapshot())
 }
 
 // 一覧のフィルタ適用後の総件数。ページ本体と同じ FROM/WHERE (binders) を使い回す
