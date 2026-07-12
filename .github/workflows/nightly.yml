@@ -104,6 +104,16 @@ jobs:
         env:
           PGPASSWORD: gis
         run: psql -h localhost -U gis -d gis -q -f infra/postgres/init.sql
+      # API は OIDC 必須のため、開発 realm を import した Keycloak を IdP として立てる。
+      # realm ファイルは checkout 後に volume mount する必要があるため、
+      # services: ではなく docker run で起動する
+      - name: Keycloak を起動 (OIDC IdP)
+        run: |
+          docker run -d --name keycloak -p 8081:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$PWD/infra/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.2 start-dev --import-realm
       - name: API をバックグラウンド起動
         working-directory: apps/api
         env:
@@ -111,6 +121,9 @@ jobs:
           DATABASE_USER: gis
           DATABASE_PASSWORD: gis
           UPLOAD_DIR: /tmp/fuzz-uploads
+          OIDC_ISSUER: http://localhost:8081/realms/gis
+          OIDC_AUDIENCE: gis-api
+          AUTH_ADMIN_EMAILS: admin@gis.example
         run: |
           gradle run --no-daemon > /tmp/fuzz-api.log 2>&1 &
           for _ in $(seq 1 60); do
@@ -118,6 +131,27 @@ jobs:
             sleep 5
           done
           echo "API が起動しません"; tail -50 /tmp/fuzz-api.log; exit 1
+      # 全 API が認証必須のため、認証付きでファズしないとほぼ全てが 401 で終わり
+      # ハンドラ本体に到達しない (smoke-e2e と同じ ROPC でトークンを取得する)
+      - name: Keycloak からアクセストークンを取得
+        run: |
+          token=""
+          for _ in $(seq 1 36); do
+            token=$(curl -sf --max-time 5 -X POST \
+              http://localhost:8081/realms/gis/protocol/openid-connect/token \
+              -d grant_type=password -d client_id=gis-web \
+              -d username=gis-admin -d password=gis-admin \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' \
+              2>/dev/null) && [ -n "$token" ] && break
+            sleep 5
+          done
+          if [ -z "$token" ]; then
+            echo "Keycloak からトークンを取得できません"
+            docker logs keycloak 2>&1 | tail -50
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "FUZZ_AUTH_TOKEN=$token" >> "$GITHUB_ENV"
       - name: ファズ実行 (非ブロッキング運用中)
         run: bash scripts/fuzz-api.sh | tee /tmp/fuzz-report.log
       - name: ファズログをアップロード

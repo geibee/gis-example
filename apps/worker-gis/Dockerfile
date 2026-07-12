@@ -2,7 +2,10 @@ FROM ghcr.io/osgeo/gdal:ubuntu-full-3.9.2
 
 WORKDIR /app
 
-RUN apt-get update \
+# ベースイメージ同梱の Apache Arrow apt リポジトリは鍵ローテーションで apt-get update を
+# 壊すことがある (NO_PUBKEY)。このイメージでは Arrow パッケージを追加しないため除去する
+RUN rm -f /etc/apt/sources.list.d/apache-arrow.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
