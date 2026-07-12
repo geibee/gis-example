@@ -11,6 +11,8 @@
 #   FUZZ_BASE_URL      検査対象 API (default: http://localhost:8080)
 #   FUZZ_MAX_EXAMPLES  オペレーションあたりの生成数 (default: 30)
 #   FUZZ_BLOCKING      1 なら失敗で exit 1 (default: 0 = 報告のみ)
+#   FUZZ_AUTH_TOKEN    Bearer トークン。全 API が認証必須のため、未設定だと
+#                      ほぼ全リクエストが 401 で終わりハンドラ本体に到達しない
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -23,13 +25,21 @@ command -v schemathesis >/dev/null 2>&1 \
 curl -sf --max-time 3 "$BASE/health" >/dev/null \
   || { echo "[fuzz] FAIL: API が起動していません: $BASE" >&2; exit 1; }
 
+AUTH_ARGS=()
+if [[ -n "${FUZZ_AUTH_TOKEN:-}" ]]; then
+  AUTH_ARGS=(--header "Authorization: Bearer $FUZZ_AUTH_TOKEN")
+else
+  echo "[fuzz] WARN: FUZZ_AUTH_TOKEN 未設定のため匿名で実行します (ほぼ全て 401 になります)"
+fi
+
 set +e
 schemathesis run apps/api/openapi.yaml \
   --url "$BASE" \
   --seed 42 \
   --max-examples "$MAX_EXAMPLES" \
   --checks all \
-  --exclude-checks positive_data_acceptance
+  --exclude-checks positive_data_acceptance \
+  "${AUTH_ARGS[@]}"
 STATUS=$?
 set -e
 
