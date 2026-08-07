@@ -17,6 +17,7 @@ import gis.example.routes.partyRoutes
 import gis.example.routes.projectRoutes
 import gis.example.routes.reviewRoutes
 import gis.example.routes.reviewGovernanceRoutes
+import gis.example.routes.reviewNotificationRoutes
 import gis.example.routes.tileRoutes
 import gis.example.routes.zoneRoutes
 import io.ktor.http.HttpHeaders
@@ -62,6 +63,7 @@ fun Application.module(
 ) {
     db.migrateSchema()
     val uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads")
+    val reviewNotificationSender = reviewNotificationSenderFromEnv()
     val deps = AppDependencies(
         db = db,
         uploadDir = uploadDir,
@@ -71,6 +73,7 @@ fun Application.module(
         // localhost 既定は dev 専用。本番では CloudFront 配下の HTTPS URL を必ず設定する
         apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/'),
         maxUploadBytes = (System.getenv("UPLOAD_MAX_BYTES") ?: DEFAULT_MAX_UPLOAD_BYTES.toString()).toLong(),
+        reviewNotificationCapabilities = reviewNotificationSender.capabilities,
         // JOB_QUEUE_MODE=sqs でジョブ作成コミット後に SQS へ起動通知を送る (既定 polling は no-op)
         jobDispatcher = jobDispatcherFromEnv()
     )
@@ -94,8 +97,33 @@ fun Application.module(
         else -> error("ANALYSIS_RUNNER_MODE は in-process | external のいずれかを指定してください: $mode")
     }
 
+    // 外部通知は HTTP リクエスト処理から分離し、transactional outbox を非同期に配信する。
+    // 本番で API を水平分割する場合は external + bin/review-notification-worker を推奨する。
+    val reviewNotificationWorker = when (
+        val mode = (System.getenv("REVIEW_NOTIFICATION_RUNNER_MODE") ?: "in-process").trim().lowercase()
+    ) {
+        "in-process" -> if (
+            reviewNotificationSender.capabilities.email ||
+            reviewNotificationSender.capabilities.teams ||
+            reviewNotificationSender.capabilities.issue
+        ) {
+            ReviewNotificationWorker(
+                db,
+                reviewNotificationSender,
+                ReviewNotificationWorkerSettings.fromEnv()
+            ).also { it.start() }
+        } else {
+            null
+        }
+        "external" -> null
+        else -> error(
+            "REVIEW_NOTIFICATION_RUNNER_MODE は in-process | external のいずれかを指定してください: $mode"
+        )
+    }
+
     environment.monitor.subscribe(ApplicationStopped) {
         analysisJobRunner?.stop()
+        reviewNotificationWorker?.stop() ?: reviewNotificationSender.close()
         deps.jobDispatcher.close()
         deps.uploadStorage.close()
         db.close()
@@ -180,6 +208,7 @@ fun Route.authenticatedApiRoutes(deps: AppDependencies) {
     zoneRoutes(deps)
     reviewRoutes(deps)
     reviewGovernanceRoutes(deps)
+    reviewNotificationRoutes(deps)
     feedbackRoutes(deps)
     jobRoutes(deps)
     tileRoutes(deps)

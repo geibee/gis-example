@@ -69,6 +69,9 @@ export type FeedbackThreadCreateMetadata = Schemas["FeedbackThreadCreateMetadata
 export type ReviewRetentionPolicy = Schemas["ReviewRetentionPolicy"];
 export type ReviewRetentionPolicyPatchRequest = Schemas["ReviewRetentionPolicyPatchRequest"];
 export type ReviewRetentionPurgeResult = Schemas["ReviewRetentionPurgeResult"];
+export type ReviewNotificationSettings = Schemas["ReviewNotificationSettings"];
+export type ReviewNotificationSettingsPatchRequest = Schemas["ReviewNotificationSettingsPatchRequest"];
+export type ReviewNotificationRetryResult = Schemas["ReviewNotificationRetryResult"];
 
 // ---------------------------------------------------------------- ジョブ
 export type ImportJob = Schemas["ImportJob"];

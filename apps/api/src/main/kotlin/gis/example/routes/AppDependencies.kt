@@ -6,6 +6,7 @@ package gis.example.routes
 import gis.example.Database
 import gis.example.JobDispatcher
 import gis.example.NoopJobDispatcher
+import gis.example.ReviewNotificationCapabilities
 import gis.example.UploadStorage
 import java.nio.file.Path
 
@@ -17,6 +18,8 @@ data class AppDependencies(
     val uploadStorage: UploadStorage,
     val apiPublicUrl: String,
     val maxUploadBytes: Long,
+    // 外部接続先自体は環境変数から構築し、API へは有効化可否だけを渡す
+    val reviewNotificationCapabilities: ReviewNotificationCapabilities = ReviewNotificationCapabilities(),
     // ジョブ行 INSERT コミット後の起動通知 (JOB_QUEUE_MODE=sqs で SQS へ enqueue)。
     // 既定 polling ではワーカーの DB ポーリングが拾うため何もしない (JobQueue.kt)
     val jobDispatcher: JobDispatcher = NoopJobDispatcher

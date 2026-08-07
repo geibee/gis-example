@@ -270,7 +270,8 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
                 db.updateFeedbackThreadStatus(
                     id = call.authorizedResourceId(),
                     status = readRequiredText(request, "status"),
-                    audit = call.auditTrail()
+                    audit = call.auditTrail(),
+                    actorId = call.appPrincipal().userId
                 )
             )
         }

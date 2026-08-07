@@ -20,11 +20,22 @@ val analysisWorkerStartScripts by tasks.registering(CreateStartScripts::class) {
     classpath = tasks.startScripts.get().classpath
 }
 
+val reviewNotificationWorkerStartScripts by tasks.registering(CreateStartScripts::class) {
+    applicationName = "review-notification-worker"
+    mainClass.set("gis.example.ReviewNotificationWorkerMainKt")
+    outputDir = layout.buildDirectory.dir("scripts-review-notification-worker").get().asFile
+    classpath = tasks.startScripts.get().classpath
+}
+
 distributions {
     main {
         contents {
             into("bin") {
                 from(analysisWorkerStartScripts)
+                filePermissions { unix("rwxr-xr-x") }
+            }
+            into("bin") {
+                from(reviewNotificationWorkerStartScripts)
                 filePermissions { unix("rwxr-xr-x") }
             }
         }
@@ -58,6 +69,8 @@ dependencies {
     implementation("software.amazon.awssdk:s3:2.29.52")
     // ジョブディスパッチの SQS 化 (JobQueue.kt / AnalysisWorkerMain.kt、JOB_QUEUE_MODE=sqs で有効化)
     implementation("software.amazon.awssdk:sqs:2.29.52")
+    // プロトタイプレビュー通知の Email 配信 (REVIEW_EMAIL_FROM 設定時のみ SES を構築)
+    implementation("software.amazon.awssdk:sesv2:2.29.52")
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.4")
     // スキーママイグレーション (versioned migration の SSoT は src/main/resources/db/migration)

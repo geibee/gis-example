@@ -546,3 +546,24 @@ data class ReviewRetentionPurgeResultDto(
     val failedEvidenceCount: Int,
     val remainingExpiredEvidenceCount: Long
 )
+
+/** プロジェクト単位のレビュー通知設定。外部接続先そのものは環境変数からのみ読む。 */
+@Serializable
+data class ReviewNotificationSettingsDto(
+    val projectId: String,
+    val emailEnabled: Boolean,
+    val teamsEnabled: Boolean,
+    val issueEnabled: Boolean,
+    val emailAvailable: Boolean,
+    val teamsAvailable: Boolean,
+    val issueAvailable: Boolean,
+    val pendingDeliveryCount: Long,
+    val failedDeliveryCount: Long,
+    val updatedAt: String? = null
+)
+
+/** 手動再試行で待機状態へ戻した配信数。 */
+@Serializable
+data class ReviewNotificationRetryResultDto(
+    val retriedDeliveryCount: Int
+)

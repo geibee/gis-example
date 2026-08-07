@@ -35,9 +35,8 @@ export function FeedbackOverlay() {
   useEffect(() => {
     if (!session) {
       if (mode !== "idle") reset();
-      if (activeThreadId) closeThread();
     }
-  }, [activeThreadId, closeThread, mode, reset, session]);
+  }, [mode, reset, session]);
 
   // レビューモード中の最初のクリックをコメント対象の指定として横取りする。
   // capture フェーズで止めるので、業務画面側のハンドラは実行されない
@@ -70,7 +69,10 @@ export function FeedbackOverlay() {
     };
   }, [mode, reset, selectTarget]);
 
-  if (!session) return null;
+  // 受付中セッションがなくても、通知ディープリンクや管理一覧から既存スレッドは閲覧できる。
+  if (!session) {
+    return activeThreadId ? <FeedbackThreadDrawer threadId={activeThreadId} onClose={closeThread} /> : null;
+  }
 
   return (
     <>

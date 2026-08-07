@@ -6,6 +6,8 @@ import type {
   FeedbackThread,
   ReviewRetentionPolicy,
   ReviewRetentionPurgeResult,
+  ReviewNotificationSettings,
+  ReviewNotificationRetryResult,
   ReviewSession
 } from "../contracts";
 import { makeFeedbackThread, makeReviewSession } from "../testing/fixtures";
@@ -190,6 +192,23 @@ describe("ReviewScreen", () => {
     expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
   });
 
+  it("通知リンクの projectId と threadId から対象スレッドを直接開ける", async () => {
+    const thread = makeFeedbackThread({ id: "ft-notification" });
+    server.use(
+      http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([])),
+      http.get("*/api/threads/:threadId", ({ params }) =>
+        params.threadId === thread.id
+          ? HttpResponse.json<FeedbackThread>(thread)
+          : HttpResponse.json({ error: "not found" }, { status: 404 })
+      )
+    );
+
+    renderWithProviders({ path: "/review?projectId=p1&threadId=ft-notification" });
+
+    const drawer = await screen.findByRole("dialog", { name: "フィードバックスレッド" });
+    expect(await within(drawer).findByText("土地タブの名称を確認してください")).toBeInTheDocument();
+  });
+
   it("editor がプロジェクトとセッションの証跡保存期間を設定し期限切れ証跡を削除できる", async () => {
     let session = makeReviewSession({ evidenceRetentionDays: null, effectiveEvidenceRetentionDays: 90 });
     let policy: ReviewRetentionPolicy = {
@@ -243,5 +262,54 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(purgeRequests).toBe(1));
     expect(confirm).toHaveBeenCalledOnce();
     confirm.mockRestore();
+  });
+
+  it("editor が Email・Teams・Issue の一方向通知を設定し失敗配信を再試行できる", async () => {
+    let settings: ReviewNotificationSettings = {
+      projectId: "p1",
+      emailEnabled: false,
+      teamsEnabled: false,
+      issueEnabled: false,
+      emailAvailable: true,
+      teamsAvailable: true,
+      issueAvailable: true,
+      pendingDeliveryCount: 2,
+      failedDeliveryCount: 1,
+      updatedAt: null
+    };
+    let patchBody: unknown = null;
+    let retryRequests = 0;
+    server.use(
+      http.get("*/api/review-notifications", () => HttpResponse.json<ReviewNotificationSettings>(settings)),
+      http.patch("*/api/review-notifications", async ({ request }) => {
+        patchBody = await request.json();
+        settings = {
+          ...settings,
+          emailEnabled: true,
+          teamsEnabled: true,
+          issueEnabled: true,
+          updatedAt: "2026-08-07T12:00:00Z"
+        };
+        return HttpResponse.json<ReviewNotificationSettings>(settings);
+      }),
+      http.post("*/api/review-notifications/retry", () => {
+        retryRequests += 1;
+        return HttpResponse.json<ReviewNotificationRetryResult>({ retriedDeliveryCount: 1 });
+      })
+    );
+    const { user } = renderWithProviders({ path: "/review" });
+    const panel = await screen.findByRole("region", { name: "レビュー通知・外部連携" });
+
+    expect(await within(panel).findByText("配信待ち 2件 / 失敗 1件")).toBeInTheDocument();
+    await user.click(within(panel).getByRole("checkbox", { name: "Email（プロジェクトメンバー）" }));
+    await user.click(within(panel).getByRole("checkbox", { name: "Microsoft Teams" }));
+    await user.click(within(panel).getByRole("checkbox", { name: "Issue 生成" }));
+    await user.click(within(panel).getByRole("button", { name: "通知設定を更新" }));
+
+    await waitFor(() =>
+      expect(patchBody).toEqual({ emailEnabled: true, teamsEnabled: true, issueEnabled: true })
+    );
+    await user.click(within(panel).getByRole("button", { name: "失敗した通知を再試行" }));
+    await waitFor(() => expect(retryRequests).toBe(1));
   });
 });

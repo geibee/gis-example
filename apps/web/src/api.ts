@@ -44,6 +44,9 @@ import type {
   ReviewRetentionPolicy,
   ReviewRetentionPolicyPatchRequest,
   ReviewRetentionPurgeResult,
+  ReviewNotificationSettings,
+  ReviewNotificationSettingsPatchRequest,
+  ReviewNotificationRetryResult,
   UserAccount,
   UserPatchRequest,
   Zone,
@@ -608,6 +611,30 @@ export async function purgeExpiredReviewEvidence(
   return unwrap(
     await client.POST("/api/review-retention/purge", {
       params: { query: { projectId, limit } }
+    })
+  );
+}
+
+export async function getReviewNotificationSettings(projectId: string): Promise<ReviewNotificationSettings> {
+  return unwrap(await client.GET("/api/review-notifications", { params: { query: { projectId } } }));
+}
+
+export async function updateReviewNotificationSettings(
+  projectId: string,
+  request: ReviewNotificationSettingsPatchRequest
+): Promise<ReviewNotificationSettings> {
+  return unwrap(
+    await client.PATCH("/api/review-notifications", {
+      params: { query: { projectId } },
+      body: request
+    })
+  );
+}
+
+export async function retryFailedReviewNotifications(projectId: string): Promise<ReviewNotificationRetryResult> {
+  return unwrap(
+    await client.POST("/api/review-notifications/retry", {
+      params: { query: { projectId } }
     })
   );
 }

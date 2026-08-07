@@ -377,6 +377,17 @@ PATCH /api/review-retention?projectId=...    # プロジェクト既定を設定
 POST  /api/review-retention/purge?projectId=... # 期限切れ証跡を小分け削除 (REVIEW_MANAGE)
 ```
 
+実装済み (Phase 7):
+
+```http
+GET   /api/review-notifications?projectId=...       # チャネル設定・配信件数 (REVIEW_READ)
+PATCH /api/review-notifications?projectId=...       # Email / Teams / Issue の有効化 (REVIEW_MANAGE)
+POST  /api/review-notifications/retry?projectId=... # 失敗配信の手動再試行 (REVIEW_MANAGE)
+```
+
+配信はレビュー更新と同一 transaction の outbox から非同期に行い、外部サービスを正本にしない。
+詳細は [review-notifications.md](review-notifications.md) を参照。
+
 解決済みスレッドへの返信は 409 とし、暗黙には再開しない。返信は viewer 以上、状態変更は editor
 以上に限定する。いずれも既存 `AuditTrail` へ変更内容を渡し、Message 投稿と Resolve / Reopen の
 履歴を `app.audit_logs.detail` から追跡できるようにする。
@@ -407,7 +418,7 @@ POST  /api/review-retention/purge?projectId=... # 期限切れ証跡を小分け
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | **完了** |
 | 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | **完了** |
 | 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | **完了** |
-| 7 | 通知・外部連携 (Email / Teams / Issue 生成)。初期は双方向同期を避ける | 未着手 |
+| 7 | 通知・外部連携 (Email / Teams / Issue 生成)。初期は双方向同期を避ける | **完了** |
 
 公共部門で本格利用する場合、**Phase 6 までを正式リリース条件**とする。
 
@@ -436,6 +447,9 @@ POST  /api/review-retention/purge?projectId=... # 期限切れ証跡を小分け
 | コメント本人編集・版履歴 API / UI | `FeedbackQueries.kt` / `FeedbackThreadDrawer.tsx` | 6 |
 | 証跡保存方針・期限切れ削除 API / UI | `ReviewGovernanceQueries.kt` / `FeedbackManagementPanel.tsx` | 6 |
 | 証跡閲覧成功の監査 | `AuditLog.kt` / `routes/FeedbackRoutes.kt` | 6 |
+| 通知 outbox・再試行ワーカー | `ReviewNotificationQueries.kt` / `ReviewNotificationDelivery.kt` | 7 |
+| Email (SES) / Teams / Issue Webhook 一方向配信 | `ReviewNotificationDelivery.kt` / [review-notifications.md](review-notifications.md) | 7 |
+| 通知チャネル設定・失敗再試行 API / UI | `routes/ReviewNotificationRoutes.kt` / `FeedbackManagementPanel.tsx` | 7 |
 
 ### 11.1 実装時の設計判断 (設計案からの変更点)
 

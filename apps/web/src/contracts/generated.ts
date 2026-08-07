@@ -755,6 +755,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/review-notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * レビュー通知・外部連携設定を取得
+         * @description 接続先 URL や token は返さず、サーバー設定による利用可否だけを返す。
+         */
+        get: operations["getReviewNotificationSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** レビュー通知・外部連携設定を更新 */
+        patch: operations["updateReviewNotificationSettings"];
+        trace?: never;
+    };
+    "/api/review-notifications/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 失敗したレビュー通知を再試行 */
+        post: operations["retryFailedReviewNotifications"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/import-jobs": {
         parameters: {
             query?: never;
@@ -1395,6 +1433,29 @@ export interface components {
             failedEvidenceCount: number;
             /** Format: int64 */
             remainingExpiredEvidenceCount: number;
+        };
+        ReviewNotificationSettings: {
+            projectId: string;
+            emailEnabled: boolean;
+            teamsEnabled: boolean;
+            issueEnabled: boolean;
+            emailAvailable: boolean;
+            teamsAvailable: boolean;
+            issueAvailable: boolean;
+            /** Format: int64 */
+            pendingDeliveryCount: number;
+            /** Format: int64 */
+            failedDeliveryCount: number;
+            /** Format: date-time */
+            updatedAt: string | null;
+        };
+        ReviewNotificationSettingsPatchRequest: {
+            emailEnabled: boolean;
+            teamsEnabled: boolean;
+            issueEnabled: boolean;
+        };
+        ReviewNotificationRetryResult: {
+            retriedDeliveryCount: number;
         };
         FeedbackThread: {
             id: string;
@@ -3270,6 +3331,96 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewRetentionPurgeResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getReviewNotificationSettings: {
+        parameters: {
+            query: {
+                projectId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewNotificationSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateReviewNotificationSettings: {
+        parameters: {
+            query: {
+                projectId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewNotificationSettingsPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新済み */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewNotificationSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 有効化した接続先がサーバーに未設定 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    retryFailedReviewNotifications: {
+        parameters: {
+            query: {
+                projectId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 再試行受付結果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewNotificationRetryResult"];
                 };
             };
             400: components["responses"]["BadRequest"];

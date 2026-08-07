@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ChevronLeft, ChevronRight, Image, MessageSquareText, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import {
+  BellRing,
+  ChevronLeft,
+  ChevronRight,
+  Image,
+  MessageSquareText,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+  X
+} from "lucide-react";
 import { useAppShell } from "../appShell";
 import type { FeedbackSummary as FeedbackSummaryDto, FeedbackThread, ReviewSession } from "../contracts";
 import {
@@ -13,6 +24,11 @@ import {
   useUpdateReviewRetentionPolicyMutation
 } from "../queries/reviewGovernance";
 import { useUpdateReviewSessionMutation } from "../queries/reviewSessions";
+import {
+  useRetryFailedReviewNotificationsMutation,
+  useReviewNotificationSettingsQuery,
+  useUpdateReviewNotificationSettingsMutation
+} from "../queries/reviewNotifications";
 import { notifyError, notifySuccess } from "../notifications";
 import { captureExcludeAttribute, useReview } from "../review";
 import { errorMessage } from "../utils";
@@ -90,6 +106,7 @@ export function FeedbackManagementPanel({
       ) : null}
       {summaryQuery.data ? <FeedbackSummary summary={summaryQuery.data} selectedSessionId={session.id} /> : null}
       {canManage ? <ReviewRetentionPanel projectId={projectId} session={session} /> : null}
+      {canManage ? <ReviewNotificationPanel projectId={projectId} /> : null}
 
       <form className="feedback-management-filters" aria-label="フィードバックの絞り込み" onSubmit={applySearch}>
         <label>
@@ -236,6 +253,112 @@ export function FeedbackManagementPanel({
       {evidenceThread ? (
         <FeedbackEvidenceDialog thread={evidenceThread} onClose={() => setEvidenceThread(null)} />
       ) : null}
+    </section>
+  );
+}
+
+function ReviewNotificationPanel({ projectId }: { projectId: string }) {
+  const settingsQuery = useReviewNotificationSettingsQuery(projectId);
+  const updateSettings = useUpdateReviewNotificationSettingsMutation();
+  const retryFailed = useRetryFailedReviewNotificationsMutation();
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [teamsEnabled, setTeamsEnabled] = useState(false);
+  const [issueEnabled, setIssueEnabled] = useState(false);
+
+  useEffect(() => {
+    if (!settingsQuery.data) return;
+    setEmailEnabled(settingsQuery.data.emailEnabled);
+    setTeamsEnabled(settingsQuery.data.teamsEnabled);
+    setIssueEnabled(settingsQuery.data.issueEnabled);
+  }, [settingsQuery.data]);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await updateSettings.mutateAsync({
+        projectId,
+        request: { emailEnabled, teamsEnabled, issueEnabled }
+      });
+      notifySuccess("レビュー通知の設定を更新しました");
+    } catch (error) {
+      notifyError(errorMessage(error));
+    }
+  };
+
+  const retry = async () => {
+    try {
+      const result = await retryFailed.mutateAsync(projectId);
+      notifySuccess(`${result.retriedDeliveryCount}件の通知を再試行します`);
+    } catch (error) {
+      notifyError(errorMessage(error));
+    }
+  };
+
+  const settings = settingsQuery.data;
+  return (
+    <section className="review-notifications" aria-label="レビュー通知・外部連携">
+      <header>
+        <div>
+          <BellRing size={16} />
+          <h3>通知・外部連携</h3>
+        </div>
+        <span>
+          配信待ち {settings?.pendingDeliveryCount ?? 0}件 / 失敗 {settings?.failedDeliveryCount ?? 0}件
+        </span>
+      </header>
+      <p>証跡画像は送信せず、指摘本文と内部リンクだけを一方向に配信します。</p>
+      {settingsQuery.isError ? (
+        <p className="notice error" role="alert">
+          {errorMessage(settingsQuery.error)}
+        </p>
+      ) : null}
+      <form onSubmit={(event) => void save(event)}>
+        <label>
+          <input
+            type="checkbox"
+            checked={emailEnabled}
+            disabled={!settings?.emailAvailable && !emailEnabled}
+            onChange={(event) => setEmailEnabled(event.target.checked)}
+          />
+          Email（プロジェクトメンバー）
+          {!settings?.emailAvailable ? <small>サーバー未設定</small> : null}
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={teamsEnabled}
+            disabled={!settings?.teamsAvailable && !teamsEnabled}
+            onChange={(event) => setTeamsEnabled(event.target.checked)}
+          />
+          Microsoft Teams
+          {!settings?.teamsAvailable ? <small>サーバー未設定</small> : null}
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={issueEnabled}
+            disabled={!settings?.issueAvailable && !issueEnabled}
+            onChange={(event) => setIssueEnabled(event.target.checked)}
+          />
+          Issue 生成
+          {!settings?.issueAvailable ? <small>サーバー未設定</small> : null}
+        </label>
+        <button type="submit" className="subtle-button" disabled={settingsQuery.isPending || updateSettings.isPending}>
+          通知設定を更新
+        </button>
+      </form>
+      <div className="review-notifications-retry">
+        <span>失敗した配信は自動で最大回数まで再試行されます。</span>
+        <button
+          type="button"
+          className="subtle-button"
+          disabled={!settings?.failedDeliveryCount || retryFailed.isPending}
+          onClick={() => void retry()}
+        >
+          <RefreshCw size={14} />
+          失敗した通知を再試行
+        </button>
+      </div>
     </section>
   );
 }

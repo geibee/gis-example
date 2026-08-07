@@ -1,6 +1,11 @@
 package gis.example.integration
 
 import gis.example.Database
+import gis.example.ClaimedReviewNotification
+import gis.example.ReviewNotificationCapabilities
+import gis.example.ReviewNotificationSender
+import gis.example.ReviewNotificationWorker
+import gis.example.ReviewNotificationWorkerSettings
 import gis.example.module
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.MultiPartFormDataContent
@@ -415,6 +420,140 @@ class FeedbackThreadIntegrationTest {
         val messages = body(detail.bodyAsText()).getValue("messages").jsonArray.map { it.jsonObject }
         assertEquals(2, messages.size)
         assertEquals("確認結果を追記します", messages.last().getValue("body").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `レビュー更新と通知outboxが同時に確定しIssueはスレッド作成時だけ生成される`() = withApp { client ->
+        rawConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO app.review_notification_settings (
+                    project_id, email_enabled, teams_enabled, issue_enabled
+                ) VALUES (?::uuid, true, true, true)
+                ON CONFLICT (project_id) DO UPDATE SET
+                    email_enabled = true, teams_enabled = true, issue_enabled = true, updated_at = now()
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, defaultProject)
+                stmt.executeUpdate()
+            }
+        }
+        val sessionId = createSession(client)
+        val threadId = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata).bodyAsText())
+            .getValue("id").jsonPrimitive.content
+        assertEquals(HttpStatusCode.Created, postMessage(client, threadId, viewerBearer, "通知対象の返信").status)
+        assertEquals(HttpStatusCode.OK, patchStatus(client, threadId, editorBearer, "RESOLVED").status)
+
+        rawConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                SELECT o.event_type, d.channel, d.destination, o.payload::text
+                FROM app.review_notification_outbox AS o
+                JOIN app.review_notification_deliveries AS d ON d.outbox_id = o.id
+                WHERE o.thread_id = ?::uuid
+                ORDER BY o.created_at, d.channel, d.destination
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, threadId)
+                stmt.executeQuery().use { rs ->
+                    val deliveries = buildList {
+                        while (rs.next()) {
+                            add(listOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)))
+                        }
+                    }
+                    assertEquals(7, deliveries.size)
+                    assertEquals(1, deliveries.count { it[1] == "ISSUE" }, "Issue はスレッドにつき1件")
+                    assertEquals(3, deliveries.count { it[1] == "TEAMS" })
+                    assertEquals(3, deliveries.count { it[1] == "EMAIL" })
+                    assertEquals(
+                        2,
+                        deliveries.count { it[2] == "fe@gis.example" },
+                        "投稿者本人を除き、作成と返信は editor へ送る"
+                    )
+                    assertEquals(
+                        1,
+                        deliveries.count { it[2] == "fv@gis.example" },
+                        "editor による解決は viewer へ送る"
+                    )
+                    assertTrue(deliveries.all { "screenshot" !in it[3] }, "外部通知へ証跡情報を含めない")
+                }
+            }
+            connection.prepareStatement(
+                """
+                UPDATE app.review_notification_settings
+                SET email_enabled = false, teams_enabled = false, issue_enabled = false, updated_at = now()
+                WHERE project_id = ?::uuid
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, defaultProject)
+                stmt.executeUpdate()
+            }
+        }
+        val sent = mutableListOf<ClaimedReviewNotification>()
+        val sender = object : ReviewNotificationSender {
+            override val capabilities = ReviewNotificationCapabilities(email = true, teams = true, issue = true)
+            override fun send(notification: ClaimedReviewNotification): String {
+                sent += notification
+                return "external-test-id"
+            }
+        }
+        Database.fromEnv().use { notificationDb ->
+            val worker = ReviewNotificationWorker(
+                notificationDb,
+                sender,
+                ReviewNotificationWorkerSettings(pollIntervalMillis = 1, maxAttempts = 5, leaseSeconds = 120)
+            )
+            assertTrue(worker.pollOnce(), "outbox から1件を claim して配信する")
+        }
+        assertEquals(1, sent.size)
+        rawConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                SELECT count(*)
+                FROM app.review_notification_deliveries AS d
+                JOIN app.review_notification_outbox AS o ON o.id = d.outbox_id
+                WHERE o.thread_id = ?::uuid
+                  AND d.status = 'SUCCEEDED'
+                  AND d.external_reference = 'external-test-id'
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, threadId)
+                stmt.executeQuery().use { rs ->
+                    rs.next()
+                    assertEquals(1, rs.getInt(1), "外部受理後に delivery を成功状態へ確定する")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `通知設定はメンバーが参照できeditorだけが変更できる`() = withApp { client ->
+        val viewerRead = client.get("/api/review-notifications?projectId=$defaultProject") {
+            header(HttpHeaders.Authorization, viewerBearer)
+        }
+        assertEquals(HttpStatusCode.OK, viewerRead.status, viewerRead.bodyAsText())
+        val settings = body(viewerRead.bodyAsText())
+        assertEquals(false, settings.getValue("emailAvailable").jsonPrimitive.content.toBoolean())
+        assertNull(settings["teamsWebhookUrl"], "Webhook URL は API へ公開しない")
+
+        val viewerPatch = client.patch("/api/review-notifications?projectId=$defaultProject") {
+            header(HttpHeaders.Authorization, viewerBearer)
+            contentType(ContentType.Application.Json)
+            setBody("""{"emailEnabled":false,"teamsEnabled":false,"issueEnabled":false}""")
+        }
+        assertEquals(HttpStatusCode.Forbidden, viewerPatch.status)
+
+        val unavailable = client.patch("/api/review-notifications?projectId=$defaultProject") {
+            header(HttpHeaders.Authorization, editorBearer)
+            contentType(ContentType.Application.Json)
+            setBody("""{"emailEnabled":false,"teamsEnabled":true,"issueEnabled":false}""")
+        }
+        assertEquals(HttpStatusCode.Conflict, unavailable.status, unavailable.bodyAsText())
+
+        val outsiderRead = client.get("/api/review-notifications?projectId=$defaultProject") {
+            header(HttpHeaders.Authorization, outsiderBearer)
+        }
+        assertEquals(HttpStatusCode.Forbidden, outsiderRead.status)
     }
 
     @Test

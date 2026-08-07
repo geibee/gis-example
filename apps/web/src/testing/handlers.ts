@@ -18,6 +18,7 @@ import type {
   Project,
   ProjectMember,
   ReviewRetentionPolicy,
+  ReviewNotificationSettings,
   ReviewSession,
   UserAccount,
   Zone,
@@ -62,6 +63,20 @@ export const defaultHandlers = [
       defaultEvidenceRetentionDays: null,
       expiredEvidenceCount: 0,
       expiredEvidenceBytes: 0
+    })
+  ),
+  http.get("*/api/review-notifications", ({ request }) =>
+    HttpResponse.json<ReviewNotificationSettings>({
+      projectId: new URL(request.url).searchParams.get("projectId") ?? "p1",
+      emailEnabled: false,
+      teamsEnabled: false,
+      issueEnabled: false,
+      emailAvailable: false,
+      teamsAvailable: false,
+      issueAvailable: false,
+      pendingDeliveryCount: 0,
+      failedDeliveryCount: 0,
+      updatedAt: null
     })
   ),
   http.get("*/api/threads/:threadId", ({ params }) =>

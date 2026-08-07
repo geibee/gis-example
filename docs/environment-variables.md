@@ -45,6 +45,18 @@ ECS タスク定義を作成するときの完全なインプットとして、�
 | `S3_KEY_PREFIX` | 任意 | `uploads/` | タスク定義 |
 | `UPLOAD_MAX_BYTES` | 任意 | `209715200` (200MB。web の nginx `client_max_body_size` と揃える) | タスク定義 |
 | `REVIEW_EVIDENCE_MAX_BYTES` | 任意 | `10485760` (10MB。1440x900 の証跡 PNG は実測 70KB 前後) | タスク定義 |
+| `REVIEW_NOTIFICATION_RUNNER_MODE` | 任意 (`in-process` \| `external`) | `in-process` | タスク定義。本番の水平分割時は `external` + `bin/review-notification-worker`。詳細は [review-notifications.md](review-notifications.md) |
+| `REVIEW_NOTIFICATION_POLL_INTERVAL_SECONDS` | 任意 | `2` | タスク定義 |
+| `REVIEW_NOTIFICATION_MAX_ATTEMPTS` | 任意 | `5` | タスク定義 |
+| `REVIEW_NOTIFICATION_LEASE_SECONDS` | 任意 (配信中ワーカー停止時に再 claim するまでの時間) | `120` | タスク定義 |
+| `REVIEW_NOTIFICATION_REQUEST_TIMEOUT_SECONDS` | 任意 (Teams / Issue Webhook の接続・応答期限) | `10` | タスク定義 |
+| `REVIEW_APP_URL` | 任意 | `WEB_ORIGIN` → `http://localhost:5173` | SSM (通知内のレビュー画面リンク) |
+| `REVIEW_EMAIL_FROM` | 任意 (設定すると Email チャネルが利用可能) | なし | SSM (SES で検証済みの送信元) |
+| `REVIEW_SES_REGION` | 任意 (未設定時は AWS SDK 既定チェーン) | なし | タスク定義 |
+| `REVIEW_SES_ENDPOINT_URL` | 任意 (**dev の SES 互換モック専用**。本番では設定しない) | なし | — |
+| `REVIEW_TEAMS_WEBHOOK_URL` | 任意 (設定すると Teams チャネルが利用可能) | なし | **Secrets Manager** |
+| `REVIEW_ISSUE_WEBHOOK_URL` | 任意 (設定すると Issue 生成チャネルが利用可能) | なし | **Secrets Manager** |
+| `REVIEW_ISSUE_WEBHOOK_TOKEN` | 任意 (Issue Webhook の Bearer token) | なし | **Secrets Manager** |
 | `API_PUBLIC_URL` | 任意 (本番は明示) | `http://localhost:8080` | タスク定義 / SSM |
 | `WEB_ORIGIN` | 任意 (本番は明示。未設定時も anyHost には開放しない) | `http://localhost:5173` | タスク定義 / SSM |
 | `OIDC_ISSUER` | **必須** (未設定は起動失敗) | なし (compose が注入) | タスク定義 / SSM |

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Building2,
@@ -15,7 +15,7 @@ import { AppShellProvider, useAppShell } from "./appShell";
 import { MapStateProvider } from "./mapState";
 import { FeedbackOverlay } from "./components/FeedbackOverlay";
 import { MapPaneHost } from "./components/MapPaneHost";
-import { ReviewProvider } from "./review";
+import { ReviewProvider, useReview } from "./review";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
 import { Toaster } from "./ui/Toaster";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
@@ -40,14 +40,41 @@ export default function App() {
 function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const { me, projects, selectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const { me, projects, selectedProject, setSelectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const { openThread } = useReview();
 
   // URL (マッチ中ルートの staticData) を唯一の正としてタブ強調・タイトルを導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
   const screenTitle = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.title ?? null });
+  const linkedProjectId = useRouterState({
+    select: (state) => {
+      const value = (state.location.search as Record<string, unknown>).projectId;
+      return typeof value === "string" ? value : null;
+    }
+  });
+  const linkedThreadId = useRouterState({
+    select: (state) => {
+      const value = (state.location.search as Record<string, unknown>).threadId;
+      return typeof value === "string" ? value : null;
+    }
+  });
+  const handledReviewLink = useRef("");
   useEffect(() => {
     document.title = screenTitle ? `${screenTitle} · Web GIS MVP` : "Web GIS MVP";
   }, [screenTitle]);
+
+  useEffect(() => {
+    if (activeTab !== "review" || !linkedThreadId) {
+      handledReviewLink.current = "";
+      return;
+    }
+    if (linkedProjectId && !projects.some((project) => project.id === linkedProjectId)) return;
+    const linkKey = `${linkedProjectId ?? ""}:${linkedThreadId}`;
+    if (handledReviewLink.current === linkKey) return;
+    handledReviewLink.current = linkKey;
+    if (linkedProjectId && linkedProjectId !== selectedProject) setSelectedProject(linkedProjectId);
+    openThread(linkedThreadId);
+  }, [activeTab, linkedProjectId, linkedThreadId, openThread, projects, selectedProject, setSelectedProject]);
 
   const navigateTab = (tab: BusinessTab) => void navigate({ to: tabBasePath[tab] });
 

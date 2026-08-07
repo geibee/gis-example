@@ -19,6 +19,10 @@ export const keys = {
     all: ["review-retention"] as const,
     policy: (projectId: string) => ["review-retention", projectId] as const
   },
+  reviewNotifications: {
+    all: ["review-notifications"] as const,
+    settings: (projectId: string) => ["review-notifications", projectId] as const
+  },
   feedbackThreads: {
     all: ["feedback-threads"] as const,
     list: (reviewSessionId: string) => ["feedback-threads", "list", reviewSessionId] as const,

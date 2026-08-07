@@ -160,6 +160,14 @@ fun Database.createFeedbackThread(
             }
         }
         insertFeedbackMessageVersion(connection, messageId, 1, input.body, createdBy)
+        enqueueReviewNotification(
+            connection = connection,
+            threadId = threadId,
+            messageId = messageId,
+            eventType = "THREAD_CREATED",
+            actorId = createdBy,
+            body = input.body
+        )
         threadId
     }
     val created = getFeedbackThread(id) ?: error("Created feedback thread disappeared")
@@ -464,6 +472,14 @@ fun Database.createFeedbackMessage(
             stmt.setString(1, threadId)
             stmt.executeUpdate()
         }
+        enqueueReviewNotification(
+            connection = connection,
+            threadId = threadId,
+            messageId = id,
+            eventType = "MESSAGE_CREATED",
+            actorId = authorId,
+            body = body
+        )
         id
     }
     val created = getFeedbackMessage(messageId) ?: error("Created feedback message disappeared")
@@ -566,7 +582,8 @@ fun Database.getFeedbackMessageHistory(id: String): List<FeedbackMessageVersionD
 fun Database.updateFeedbackThreadStatus(
     id: String,
     status: String,
-    audit: AuditTrail
+    audit: AuditTrail,
+    actorId: String? = null
 ): FeedbackThreadDto = try {
     if (status !in feedbackThreadStatuses) {
         throw ApiException(
@@ -577,14 +594,30 @@ fun Database.updateFeedbackThreadStatus(
     val before = getFeedbackThread(id)
         ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback thread not found")
     withTransaction { connection ->
-        connection.prepareStatement(
-            "UPDATE app.feedback_threads SET status = ?, updated_at = now() WHERE id = ?::uuid"
+        val currentStatus = connection.prepareStatement(
+            "SELECT status FROM app.feedback_threads WHERE id = ?::uuid FOR UPDATE"
         ).use { stmt ->
-            stmt.setString(1, status)
-            stmt.setString(2, id)
-            if (stmt.executeUpdate() == 0) {
-                throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback thread not found")
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        } ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback thread not found")
+        if (currentStatus != status) {
+            connection.prepareStatement(
+                "UPDATE app.feedback_threads SET status = ?, updated_at = now() WHERE id = ?::uuid"
+            ).use { stmt ->
+                stmt.setString(1, status)
+                stmt.setString(2, id)
+                stmt.executeUpdate()
             }
+        }
+        if (currentStatus != status) {
+            enqueueReviewNotification(
+                connection = connection,
+                threadId = id,
+                messageId = null,
+                eventType = if (status == "RESOLVED") "THREAD_RESOLVED" else "THREAD_REOPENED",
+                actorId = actorId,
+                body = firstFeedbackMessageBody(connection, id)
+            )
         }
     }
     val after = getFeedbackThread(id)
@@ -597,6 +630,19 @@ fun Database.updateFeedbackThreadStatus(
         "Feedback thread status update failed: ${exc.message ?: "invalid feedback thread status"}"
     )
 }
+
+private fun firstFeedbackMessageBody(connection: Connection, threadId: String): String =
+    connection.prepareStatement(
+        """
+        SELECT body FROM app.feedback_messages
+        WHERE thread_id = ?::uuid
+        ORDER BY created_at, id
+        LIMIT 1
+        """.trimIndent()
+    ).use { stmt ->
+        stmt.setString(1, threadId)
+        stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else "" }
+    }
 
 /** 証跡画像の実体参照 (UploadStorage 用)。存在しない・証跡なしの場合は null */
 fun Database.getEvidenceReference(threadId: String): Pair<String, String>? =

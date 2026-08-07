@@ -2683,6 +2683,66 @@ input[type="file"] {
   font: inherit;
 }
 
+.review-notifications {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
+  background: #f5f3ff;
+}
+
+.review-notifications > header,
+.review-notifications > header > div,
+.review-notifications-retry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.review-notifications h3,
+.review-notifications p {
+  margin: 0;
+}
+
+.review-notifications h3 {
+  color: #4c1d95;
+  font-size: 13px;
+}
+
+.review-notifications > header span,
+.review-notifications > p,
+.review-notifications-retry {
+  color: #5b6473;
+  font-size: 11px;
+}
+
+.review-notifications form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-notifications form label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 6px;
+  color: #3f3f46;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.review-notifications form small {
+  grid-column: 2;
+  color: #7c3aed;
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .subtle-button.danger {
   border-color: #fecaca;
   color: #b91c1c;
@@ -2852,7 +2912,8 @@ input[type="file"] {
   .feedback-summary-cards,
   .feedback-summary-breakdown,
   .feedback-management-filters,
-  .review-retention form {
+  .review-retention form,
+  .review-notifications form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

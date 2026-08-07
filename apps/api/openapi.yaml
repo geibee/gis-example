@@ -1439,6 +1439,72 @@ paths:
                 $ref: "#/components/schemas/ReviewRetentionPurgeResult"
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/review-notifications:
+    get:
+      tags: [review]
+      operationId: getReviewNotificationSettings
+      summary: レビュー通知・外部連携設定を取得
+      description: 接続先 URL や token は返さず、サーバー設定による利用可否だけを返す。
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewNotificationSettings"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [review]
+      operationId: updateReviewNotificationSettings
+      summary: レビュー通知・外部連携設定を更新
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewNotificationSettingsPatchRequest"
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: 更新済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewNotificationSettings"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 有効化した接続先がサーバーに未設定
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/review-notifications/retry:
+    post:
+      tags: [review]
+      operationId: retryFailedReviewNotifications
+      summary: 失敗したレビュー通知を再試行
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+      responses:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "200":
+          description: 再試行受付結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewNotificationRetryResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
   /api/import-jobs:
     post:
       tags: [jobs]
@@ -2388,6 +2454,45 @@ components:
         failedEvidenceCount: { type: integer }
         remainingExpiredEvidenceCount: { type: integer, format: int64 }
       required: [purgedEvidenceCount, purgedEvidenceBytes, failedEvidenceCount, remainingExpiredEvidenceCount]
+
+    ReviewNotificationSettings:
+      type: object
+      properties:
+        projectId: { type: string }
+        emailEnabled: { type: boolean }
+        teamsEnabled: { type: boolean }
+        issueEnabled: { type: boolean }
+        emailAvailable: { type: boolean }
+        teamsAvailable: { type: boolean }
+        issueAvailable: { type: boolean }
+        pendingDeliveryCount: { type: integer, format: int64 }
+        failedDeliveryCount: { type: integer, format: int64 }
+        updatedAt: { type: [string, "null"], format: date-time }
+      required:
+        - projectId
+        - emailEnabled
+        - teamsEnabled
+        - issueEnabled
+        - emailAvailable
+        - teamsAvailable
+        - issueAvailable
+        - pendingDeliveryCount
+        - failedDeliveryCount
+        - updatedAt
+
+    ReviewNotificationSettingsPatchRequest:
+      type: object
+      properties:
+        emailEnabled: { type: boolean }
+        teamsEnabled: { type: boolean }
+        issueEnabled: { type: boolean }
+      required: [emailEnabled, teamsEnabled, issueEnabled]
+
+    ReviewNotificationRetryResult:
+      type: object
+      properties:
+        retriedDeliveryCount: { type: integer }
+      required: [retriedDeliveryCount]
 
     FeedbackThread:
       type: object
