@@ -327,6 +327,39 @@ class FeedbackThreadIntegrationTest {
     }
 
     @Test
+    fun `投稿元の画面を記録し、画面ごとに絞り込める (コメントピン用)`() = withApp { client ->
+        val sessionId = createSession(client)
+        postThread(client, sessionId, viewerBearer, uiTargetMetadata, pngBytes)
+        // 対象外の画面 (ReviewScope に無い) からの投稿も pageId は記録する
+        val outOfScope = uiTargetMetadata.replace("\"pageId\": \"/lands\"", "\"pageId\": \"/parties\"")
+        postThread(client, sessionId, viewerBearer, outOfScope, pngBytes)
+
+        fun pageIds(bodyText: String) =
+            Json.parseToJsonElement(bodyText).jsonArray.map { it.jsonObject["pageId"]?.jsonPrimitive?.content }
+
+        val all = client.get("/api/review-sessions/$sessionId/threads") {
+            header(HttpHeaders.Authorization, viewerBearer)
+        }
+        assertEquals(listOf("/parties", "/lands"), pageIds(all.bodyAsText()), "新しい順で両方返る")
+
+        val filtered = client.get("/api/review-sessions/$sessionId/threads?pageId=/lands") {
+            header(HttpHeaders.Authorization, viewerBearer)
+        }
+        assertEquals(HttpStatusCode.OK, filtered.status)
+        assertEquals(listOf("/lands"), pageIds(filtered.bodyAsText()))
+
+        val outOfScopeThread = Json.parseToJsonElement(
+            client.get("/api/review-sessions/$sessionId/threads?pageId=/parties") {
+                header(HttpHeaders.Authorization, viewerBearer)
+            }.bodyAsText()
+        ).jsonArray.single().jsonObject
+        assertNull(
+            outOfScopeThread["reviewScopeId"]?.jsonPrimitive?.contentOrNull(),
+            "レビュー対象外の画面では ReviewScope に紐づかないが pageId は残る"
+        )
+    }
+
+    @Test
     fun `スレッド一覧と詳細はメンバーのみ読める`() = withApp { client ->
         val sessionId = createSession(client)
         val threadId = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata, pngBytes).bodyAsText())

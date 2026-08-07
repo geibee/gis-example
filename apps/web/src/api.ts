@@ -460,10 +460,26 @@ export async function getReviewSession(id: string): Promise<ReviewSession> {
   return unwrap(await client.GET("/api/review-sessions/{id}", { params: { path: { id } } }));
 }
 
-export async function getFeedbackThreads(reviewSessionId: string): Promise<FeedbackThread[]> {
+export async function getFeedbackThreads(reviewSessionId: string, pageId?: string): Promise<FeedbackThread[]> {
   return unwrap(
-    await client.GET("/api/review-sessions/{id}/threads", { params: { path: { id: reviewSessionId } } })
+    await client.GET("/api/review-sessions/{id}/threads", {
+      params: { path: { id: reviewSessionId }, query: { pageId: pageId || undefined } }
+    })
   );
+}
+
+/**
+ * 証跡 PNG を取得する。openapi-fetch は JSON 応答を前提とするため、画像だけは
+ * 同じ認証・再送ロジック (fetchWithResilience) を使って直接読む。
+ * 保存先パスは公開されないので、必ずこの API 経由で取得する。
+ */
+export async function getFeedbackEvidenceBlob(threadId: string): Promise<Blob> {
+  const request = new Request(`${API_BASE}/api/threads/${encodeURIComponent(threadId)}/evidence`, {
+    headers: getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : undefined
+  });
+  const response = await fetchWithResilience(request);
+  if (!response.ok) raiseApiError(response, undefined);
+  return response.blob();
 }
 
 /**

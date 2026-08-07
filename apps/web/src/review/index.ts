@@ -10,6 +10,14 @@ export {
   type ViewportEvidence
 } from "./capture";
 export {
+  feedbackTargetFromMapClick,
+  type FeedbackAdapterMap,
+  type FeedbackMapAdapterOptions,
+  type FeedbackQueriedFeatureWithLayer
+} from "./mapAdapter";
+export {
+  mapPositionTarget,
+  mapTargetFromFeature,
   resolveMapTarget,
   resolveScreenTarget,
   type FeedbackMapClick,
@@ -27,3 +35,4 @@ export {
   type FeedbackTargetType,
   type RelativePoint
 } from "./types";
+export { ReviewModeProvider, useReviewMode, type ReviewModeState } from "./reviewMode";

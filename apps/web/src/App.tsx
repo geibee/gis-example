@@ -13,6 +13,7 @@ import {
 import { useAuth } from "react-oidc-context";
 import { AppShellProvider, useAppShell } from "./appShell";
 import { MapStateProvider } from "./mapState";
+import { ReviewModeProvider } from "./review";
 import { FeedbackOverlay } from "./components/FeedbackOverlay";
 import { MapPaneHost } from "./components/MapPaneHost";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
@@ -28,7 +29,10 @@ export default function App() {
   return (
     <AppShellProvider>
       <MapStateProvider>
-        <AppLayout />
+        {/* レビューモードは業務画面と地図ペインの両方が参照するため、シェル直下に置く */}
+        <ReviewModeProvider>
+          <AppLayout />
+        </ReviewModeProvider>
       </MapStateProvider>
     </AppShellProvider>
   );

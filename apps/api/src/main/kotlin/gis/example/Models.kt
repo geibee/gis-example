@@ -467,6 +467,8 @@ data class FeedbackThreadDto(
     val projectId: String,
     val reviewSessionId: String,
     val reviewScopeId: String? = null,
+    /** 投稿元の画面。ピンを「その画面」にだけ出すために持つ (対象外画面でも記録する) */
+    val pageId: String? = null,
     val perspectiveCode: String,
     val perspectiveLabel: String,
     /** UI_ELEMENT / SCREEN_POSITION / MAP_FEATURE / MAP_POSITION */

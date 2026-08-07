@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { feedbackTargetAttribute } from "../review/types";
 
 // 一覧画面共通の型付きテーブル。列定義 (render) を宣言的に渡す薄い共通化で、
 // 行クリック選択・選択行ハイライト・件数表示・クライアントページングを備える。
@@ -30,6 +31,11 @@ export type DataTableProps<TRow> = {
   tableClassName?: string;
   /** 横スクロールコンテナ (business-table-scroll) で包むか。既定 true */
   scroll?: boolean;
+  /**
+   * レビューのコメント対象としての安定 ID (docs/prototype-review.md 3.3)。
+   * 「この一覧に表示すべき項目」への指摘を、列構成が変わっても追跡できるようにする
+   */
+  feedbackId?: string;
 };
 
 export function DataTable<TRow>({
@@ -42,7 +48,8 @@ export function DataTable<TRow>({
   emptyMessage,
   pageSize,
   tableClassName = "business-table",
-  scroll = true
+  scroll = true,
+  feedbackId
 }: DataTableProps<TRow>) {
   const [rawPage, setPage] = useState(0);
   const paged = Boolean(pageSize && rows.length > pageSize);
@@ -52,7 +59,7 @@ export function DataTable<TRow>({
   const pageRows = paged ? rows.slice(page * pageSize!, (page + 1) * pageSize!) : rows;
 
   const table = (
-    <table className={tableClassName}>
+    <table className={tableClassName} {...(feedbackId ? { [feedbackTargetAttribute]: feedbackId } : {})}>
       <thead>
         <tr>
           {columns.map((column) => (

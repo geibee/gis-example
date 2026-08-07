@@ -8,6 +8,7 @@ import type {
   Me,
   Party,
   Project,
+  FeedbackThread,
   ProjectMember,
   ReviewSession,
   UserAccount,
@@ -184,6 +185,38 @@ export function makeReviewSession(overrides: Partial<ReviewSession> = {}): Revie
     scopes: [
       { id: "sc-1", pageId: "/lands", description: "案件一覧", reviewable: true, displayOrder: 10 },
       { id: "sc-2", pageId: "/admin", description: "管理画面", reviewable: false, displayOrder: 20 }
+    ],
+    ...overrides
+  };
+}
+
+export function makeFeedbackThread(overrides: Partial<FeedbackThread> = {}): FeedbackThread {
+  return {
+    id: "ft-1",
+    projectId: "p1",
+    reviewSessionId: "rs-1",
+    reviewScopeId: null,
+    pageId: "/zones",
+    perspectiveCode: "BUSINESS_FLOW",
+    perspectiveLabel: "業務フロー",
+    targetType: "SCREEN_POSITION",
+    targetMetadata: { type: "SCREEN_POSITION", relativeX: 0.4, relativeY: 0.6 },
+    evidence: null,
+    status: "OPEN",
+    createdBy: "u1",
+    createdByName: "顧客レビュアー",
+    createdAt: "2026-08-12T10:15:00+09:00",
+    updatedAt: "2026-08-12T10:15:00+09:00",
+    messages: [
+      {
+        id: "fm-1",
+        threadId: "ft-1",
+        authorId: "u1",
+        authorName: "顧客レビュアー",
+        body: "検索後の流れが分かりにくい",
+        createdAt: "2026-08-12T10:15:00+09:00",
+        editedAt: null
+      }
     ],
     ...overrides
   };

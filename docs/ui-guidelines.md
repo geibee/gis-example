@@ -92,6 +92,29 @@ const confirmed = await confirmDialog({
 if (!confirmed) return;
 ```
 
+## レビューのコメント対象 ID (`data-feedback-id`)
+
+プロトタイプレビュー基盤 ([prototype-review.md](prototype-review.md)) は、顧客の指摘を
+「画面のこの辺」ではなく「この項目について」として保存する。そのための安定 ID は
+**共通部品が自動で出す**ので、通常の画面実装では何も書かなくてよい。
+
+| 部品 | 既定の `data-feedback-id` |
+|---|---|
+| `ui/form/fields.tsx` の各フィールド | react-hook-form の `name` (例: `contractExpirationDate`) |
+| `ui/DataTable` | `feedbackId` を渡したときのみ (一覧への指摘を追跡したい画面で指定) |
+| `components/ObjectSidebar` | `object-list` |
+| 地図コンテナ (`MapSupportPane`) | `map` |
+
+注意点:
+
+- ID は **DOM 構造ではなく業務上の意味**に対応させる。レイアウト変更で ID が変わると、
+  過去の指摘がどの項目に対するものか分からなくなる
+- 同じ `name` の項目が 1 画面に複数ある場合だけ `feedbackId` を明示する
+- 地図上の指摘は DOM ではなく地物 (`source` / `featureId`) として保存されるため、
+  `data-feedback-id` は不要 (`review/mapAdapter.ts` が担当する)
+- レビュー UI 自身 (フィードバックボタン等) には `data-review-exclude` を付ける。
+  証跡スクリーンショットに写り込ませないため
+
 ## テスト
 
 - 共通部品の単体テスト: `ui/*.test.tsx` を参照

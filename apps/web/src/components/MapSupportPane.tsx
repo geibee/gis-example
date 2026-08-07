@@ -97,7 +97,7 @@ export function MapSupportPane({
       </header>
 
       <div className="support-map-panel">
-        <div ref={mapContainerRef} className="map-container" />
+        <div ref={mapContainerRef} className="map-container" data-feedback-id="map" />
       </div>
 
       <div className="map-support-scroll">

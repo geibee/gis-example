@@ -315,11 +315,11 @@ POST  /api/review-sessions                   # 観点・対象画面をまとめ
 PATCH /api/review-sessions/{id}              # 観点・対象画面はキー指定時のみ全置換 (REVIEW_MANAGE)
 ```
 
-実装済み (Phase 2):
+実装済み (Phase 2〜3):
 
 ```http
 POST  /api/review-sessions/{id}/threads      # multipart/form-data (REVIEW_COMMENT)
-GET   /api/review-sessions/{id}/threads      # (REVIEW_READ)
+GET   /api/review-sessions/{id}/threads      # ?pageId= でその画面のコメントに絞る (REVIEW_READ)
 GET   /api/threads/{threadId}                # (REVIEW_READ)
 GET   /api/threads/{threadId}/evidence       # 証跡 PNG。private, no-store (REVIEW_READ)
 ```
@@ -352,7 +352,7 @@ PATCH /api/threads/{threadId}/status
 | 0 | Screenshot スパイク (DOM + MapLibre 合成) | **完了** (第 4 章) |
 | 1 | ReviewSession / Perspective / ACTIVE・FUTURE・OUT_OF_SCOPE / ReviewGuide / ReviewScope | **完了** |
 | 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | **完了** |
-| 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | 未着手 |
+| 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | **完了** |
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | 未着手 |
 | 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | 未着手 |
 | 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | 未着手 |
@@ -375,6 +375,9 @@ PATCH /api/threads/{threadId}/status
 | 投稿 API (multipart) と証跡配信 | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 2 |
 | 認可 (`REVIEW_COMMENT`) | `Authorization.kt` | 2 |
 | フィードバックオーバーレイ | `apps/web/src/components/FeedbackOverlay.tsx` | 2 |
+| FeedbackMapAdapter (地図クリック → 地物/地点) | `apps/web/src/review/mapAdapter.ts` | 3 |
+| 安定 ID の自動付与 (フォーム項目・一覧・地図) | `apps/web/src/ui/form/fields.tsx` ほか | 3 |
+| コメントピン (画面・地図) | `apps/web/src/components/feedbackPins.tsx` / `MapPane.tsx` | 3 |
 
 ### 11.1 Phase 1 の設計判断 (設計案からの変更点)
 
@@ -393,6 +396,12 @@ PATCH /api/threads/{threadId}/status
   撮ると、パネルに隠れた画面が証跡に残らないため。
 - **証跡の取得失敗で投稿を止めない。** キャプチャに失敗しても指摘そのものは残せる方が価値が高い
   (失敗理由は投稿前に画面へ出す)。
+- **安定 ID はフォーム項目の `name` から自動で付ける。** 画面ごとに ID を手で振る運用は
+  必ず抜けが出るため、`ui/form/fields.tsx` が `data-feedback-id` を既定で出力する。
+  同じ `name` が 1 画面に複数ある場合だけ `feedbackId` で明示する。
+- **地図クリックだけは MapPane が解決する。** DOM クリックの横取り (オーバーレイ) は
+  地図コンテナを素通しし、レイヤ構成を知っている `FeedbackMapAdapter` が
+  MAP_FEATURE / MAP_POSITION まで決める。地物に当たらなければ地点コメントに落とす。
 - **期間はオフセット付き ISO-8601 のみ受け付ける。** 「いつまで受け付けるか」を機械的に
   比較する値なので、ローカル時刻の解釈揺れを持ち込まない。既存 API の `createdAt`
   (PostgreSQL 既定表記) とは表記が異なるが、同一 DTO 内では ISO-8601 に揃えている。

@@ -143,6 +143,7 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
                 FeedbackThreadListQuery(
                     reviewSessionId = call.authorizedResourceId(),
                     status = params["status"],
+                    pageId = params["pageId"],
                     limit = parseListLimit(params["limit"]),
                     offset = parseListOffset(params["offset"])
                 )

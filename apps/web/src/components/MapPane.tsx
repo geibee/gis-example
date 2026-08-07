@@ -12,7 +12,8 @@ import {
 } from "../mapUtils";
 import type { FeatureSearchResult, Layer } from "../contracts";
 import type { MapPaneApi } from "../appTypes";
-import { captureReadyCanvasContextAttributes } from "../review/types";
+import { feedbackTargetFromMapClick } from "../review/mapAdapter";
+import { captureReadyCanvasContextAttributes, type FeedbackTarget } from "../review/types";
 import { MapSupportPane } from "./MapSupportPane";
 
 type SupportPaneProps = Omit<ComponentProps<typeof MapSupportPane>, "mapContainerRef">;
@@ -27,6 +28,23 @@ type MapPaneProps = SupportPaneProps & {
   layerById: Map<string, Layer>;
   onPickFeature: (layer: Layer, featureId: string) => void;
   onNotice: (message: string) => void;
+  /**
+   * レビューのコメント対象を選んでいる最中か (docs/prototype-review.md Phase 3)。
+   * true の間、地図クリックは地物選択ではなくコメント対象の指定として解釈する
+   */
+  feedbackPicking: boolean;
+  onFeedbackTarget: (target: FeedbackTarget) => void;
+  /** 地図上に出すコメントピン (MAP_FEATURE / MAP_POSITION のスレッド) */
+  feedbackPins: FeedbackMapPin[];
+  onSelectFeedbackPin: (threadId: string) => void;
+};
+
+/** 地図上に立てるコメントピン 1 件 */
+export type FeedbackMapPin = {
+  threadId: string;
+  longitude: number;
+  latitude: number;
+  resolved: boolean;
 };
 
 export default function MapPane({
@@ -37,6 +55,10 @@ export default function MapPane({
   layerById,
   onPickFeature,
   onNotice,
+  feedbackPicking,
+  onFeedbackTarget,
+  feedbackPins,
+  onSelectFeedbackPin,
   ...supportPaneProps
 }: MapPaneProps) {
   const { open, baseMapVisible, visibleLayerIds } = supportPaneProps;
@@ -46,6 +68,7 @@ export default function MapPane({
   const appLayerByStyleLayer = useRef<Record<string, string>>({});
   const initializedLayerBounds = useRef(false);
   const seenLayerIds = useRef<Set<string>>(new Set());
+  const feedbackMarkers = useRef<maplibregl.Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -212,6 +235,21 @@ export default function MapPane({
       const queryLayerIds = Object.values(styleLayersByLayerId.current)
         .flat()
         .filter((id) => map.getLayer(id));
+
+      // レビューモード中は地物選択ではなくコメント対象の指定として扱う。
+      // 地図は DOM 要素を持たないため、オーバーレイ側の DOM クリック横取りではなく
+      // ここで MAP_FEATURE / MAP_POSITION まで解決する (FeedbackMapAdapter)
+      if (feedbackPicking) {
+        onFeedbackTarget(
+          feedbackTargetFromMapClick(map, event, {
+            layers: queryLayerIds,
+            featureIdPropertyOf: (styleLayerId) =>
+              layerById.get(appLayerByStyleLayer.current[styleLayerId])?.featureIdColumn
+          })
+        );
+        return;
+      }
+
       if (!queryLayerIds.length) return;
 
       const features = map.queryRenderedFeatures(event.point, { layers: queryLayerIds });
@@ -232,7 +270,33 @@ export default function MapPane({
     return () => {
       map.off("click", handleClick);
     };
-  }, [layerById, mapReady, onNotice, onPickFeature]);
+  }, [feedbackPicking, layerById, mapReady, onFeedbackTarget, onNotice, onPickFeature]);
+
+  // コメントピン (地図地物・地点へのコメント) の描画。
+  // MapLibre の Marker は DOM 要素なので、証跡キャプチャには写る (レビュー UI ではなく
+  // 「レビュー対象の画面に付いた印」なので data-review-exclude は付けない)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map) return;
+
+    for (const marker of feedbackMarkers.current) marker.remove();
+    feedbackMarkers.current = feedbackPins.map((pin) => {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.className = `feedback-map-pin${pin.resolved ? " resolved" : ""}`;
+      element.setAttribute("aria-label", "コメントを開く");
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        onSelectFeedbackPin(pin.threadId);
+      });
+      return new maplibregl.Marker({ element }).setLngLat([pin.longitude, pin.latitude]).addTo(map);
+    });
+
+    return () => {
+      for (const marker of feedbackMarkers.current) marker.remove();
+      feedbackMarkers.current = [];
+    };
+  }, [feedbackPins, mapReady, onSelectFeedbackPin]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => mapRef.current?.resize(), 0);

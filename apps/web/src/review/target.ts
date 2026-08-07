@@ -90,23 +90,36 @@ export function resolveMapTarget(
   event: FeedbackMapClick,
   options: ResolveMapTargetOptions = {}
 ): FeedbackTarget {
-  const longitude = event.lngLat.lng;
-  const latitude = event.lngLat.lat;
-  const position: FeedbackTarget = { type: "MAP_POSITION", longitude, latitude };
-
   const layers = options.layers;
-  if (layers && layers.length === 0) return position;
+  if (layers && layers.length === 0) return mapPositionTarget(event);
 
   const [feature] = map.queryRenderedFeatures([event.point.x, event.point.y], layers ? { layers } : undefined);
-  if (!feature) return position;
+  return mapTargetFromFeature(feature, event, options.featureIdProperty);
+}
 
-  const featureId = readFeatureId(feature, options.featureIdProperty);
-  if (featureId === null) return position;
+/** 地図上の地点 (地物に当たらなかった場合) */
+export function mapPositionTarget(event: FeedbackMapClick): FeedbackTarget {
+  return { type: "MAP_POSITION", longitude: event.lngLat.lng, latitude: event.lngLat.lat };
+}
+
+/**
+ * 取得済みの地物から対象を組み立てる。地物に当たらない・ID を取り出せない場合は
+ * 地点コメント (MAP_POSITION) に落とす。
+ * 問い合わせを 2 度行わずに済むよう、地物の取得と対象の組み立てを分けている
+ */
+export function mapTargetFromFeature(
+  feature: FeedbackQueriedFeature | undefined,
+  event: FeedbackMapClick,
+  featureIdProperty?: string
+): FeedbackTarget {
+  if (!feature) return mapPositionTarget(event);
+  const featureId = readFeatureId(feature, featureIdProperty);
+  if (featureId === null) return mapPositionTarget(event);
 
   return {
     type: "MAP_FEATURE",
-    longitude,
-    latitude,
+    longitude: event.lngLat.lng,
+    latitude: event.lngLat.lat,
     source: feature.source,
     ...(feature.sourceLayer ? { sourceLayer: feature.sourceLayer } : {}),
     featureId

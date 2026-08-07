@@ -2219,3 +2219,86 @@ input[type="file"] {
   font: inherit;
   resize: vertical;
 }
+
+.feedback-launcher-row {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: flex;
+  gap: 8px;
+}
+
+.feedback-launcher-row .feedback-launcher {
+  position: static;
+}
+
+.feedback-launcher.secondary {
+  background: #fff;
+  border: 1px solid #cbd5f5;
+  color: #0f172a;
+}
+
+/* コメントピン。証跡には写ってよい (レビュー UI ではなく画面に付いた印) が、
+   画面ピンはオーバーレイ要素なので data-review-exclude を付けている */
+.feedback-screen-pin,
+.feedback-map-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 2px;
+  background: #be123c;
+  box-shadow: 0 2px 6px rgb(15 23 42 / 35%);
+  color: #fff;
+  cursor: pointer;
+}
+
+.feedback-screen-pin {
+  position: fixed;
+  z-index: 38;
+  transform: translate(-50%, -100%);
+}
+
+.feedback-screen-pin.resolved,
+.feedback-map-pin.resolved {
+  background: #0f766e;
+}
+
+.feedback-thread-card {
+  position: fixed;
+  right: 20px;
+  bottom: 76px;
+  z-index: 42;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, calc(100vw - 40px));
+  max-height: 60vh;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid #d3dae1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 18%);
+}
+
+.feedback-thread-card h2 {
+  font-size: 14px;
+}
+
+.feedback-thread-meta {
+  margin: 0;
+  color: #637381;
+  font-size: 12px;
+}
+
+.feedback-thread-body {
+  margin: 0;
+  color: #263238;
+  font-size: 13px;
+  white-space: pre-wrap;
+}

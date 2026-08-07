@@ -197,6 +197,8 @@ Phase 1 として、レビューセッション (何を・どの画面を・ど�
 
 Phase 2 として、コメント投稿を実装済み。受付中のセッションがあると全画面の右下に「フィードバック」ボタンが出て、**対象箇所をクリック → 観点を選択 → コメント入力** でコンテキスト付きの指摘を残せる。証跡 PNG は対象クリックの瞬間に固定化され、`multipart/form-data` でメタデータと同時に送られる。証跡は公開ストレージに置かず `GET /api/threads/{id}/evidence` (認可つき・`private, no-store`) でのみ配信する。「受付中でないセッション」「ACTIVE でない観点」への投稿は UI だけでなくサーバ側でも拒否する。
 
+Phase 3 として、地図地物へのコメントとピン表示を実装済み。レビューモード中の地図クリックは `FeedbackMapAdapter` が **地物 (`source` / `featureId`) または地点 (経緯度)** として解決するため、「この筆について」という指摘が画面座標に落ちない。フォーム項目の安定 ID (`data-feedback-id`) は共通部品が `name` から自動で出す ([`docs/ui-guidelines.md`](docs/ui-guidelines.md))。「コメントを見る」で既存の指摘が画面ピン・地図マーカーとして表示される。
+
 権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 
 ## Notes

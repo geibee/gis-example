@@ -13,6 +13,7 @@ import type {
   Me,
   Party,
   Project,
+  FeedbackThread,
   ProjectMember,
   ReviewSession,
   UserAccount,
@@ -22,6 +23,7 @@ import type {
 import {
   makeMe,
   makeProject,
+  makeFeedbackThread,
   makeProjectMember,
   makeReviewSession,
   makeUserAccount,
@@ -39,6 +41,7 @@ export const defaultHandlers = [
   http.get("*/api/projects", () => HttpResponse.json<Project[]>([makeProject()])),
   http.get("*/api/layers", () => HttpResponse.json<Layer[]>([])),
   http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([makeReviewSession()])),
+  http.get("*/api/review-sessions/:id/threads", () => HttpResponse.json<FeedbackThread[]>([makeFeedbackThread()])),
 
   http.get("*/api/zones", () => HttpResponse.json<Zone[]>(defaultZones)),
   http.get("*/api/zones/:id", ({ params }) => {

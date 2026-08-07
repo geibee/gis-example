@@ -73,7 +73,7 @@ describe("FeedbackOverlay", () => {
     const { user } = renderWithProviders({ path: "/zones" });
 
     await enterFeedbackMode(user);
-    expect(screen.getByText("コメントしたい箇所をクリックしてください")).toBeInTheDocument();
+    expect(screen.getByText(/コメントしたい箇所をクリックしてください/)).toBeInTheDocument();
 
     // 業務画面の任意の要素をコメント対象として指定する
     await user.click(screen.getByRole("button", { name: "土地" }));
@@ -191,10 +191,10 @@ describe("FeedbackOverlay", () => {
   it("Escape でレビューモードを抜けられる", async () => {
     const { user } = renderWithProviders({ path: "/zones" });
     await enterFeedbackMode(user);
-    expect(screen.getByText("コメントしたい箇所をクリックしてください")).toBeInTheDocument();
+    expect(screen.getByText(/コメントしたい箇所をクリックしてください/)).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
-    expect(screen.queryByText("コメントしたい箇所をクリックしてください")).not.toBeInTheDocument();
+    expect(screen.queryByText(/コメントしたい箇所をクリックしてください/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /フィードバック/ })).toBeInTheDocument();
   });
 });

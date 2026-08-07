@@ -46,6 +46,8 @@ data class FeedbackThreadInput(
 data class FeedbackThreadListQuery(
     val reviewSessionId: String,
     val status: String?,
+    /** 指定するとその画面で付いたコメントだけを返す (画面上のピン表示に使う) */
+    val pageId: String?,
     val limit: Int? = null,
     val offset: Int = 0
 )
@@ -112,22 +114,23 @@ fun Database.createFeedbackThread(
         val threadId = connection.prepareStatement(
             """
             INSERT INTO app.feedback_threads (
-                project_id, review_session_id, review_scope_id, perspective_code,
+                project_id, review_session_id, review_scope_id, page_id, perspective_code,
                 target_type, target_metadata, evidence_id, created_by
             )
-            SELECT s.project_id, s.id, ?::uuid, ?, ?, ?::jsonb, ?::uuid, ?::uuid
+            SELECT s.project_id, s.id, ?::uuid, ?, ?, ?, ?::jsonb, ?::uuid, ?::uuid
             FROM app.review_sessions AS s
             WHERE s.id = ?::uuid
             RETURNING id::text
             """.trimIndent()
         ).use { stmt ->
             setNullableUuidString(stmt, 1, scopeId)
-            stmt.setString(2, input.perspectiveCode)
-            stmt.setString(3, input.targetType)
-            stmt.setString(4, input.targetMetadata.toString())
-            setNullableUuidString(stmt, 5, evidenceId)
-            setNullableUuidString(stmt, 6, createdBy)
-            stmt.setString(7, input.reviewSessionId)
+            setNullableString(stmt, 2, input.pageId)
+            stmt.setString(3, input.perspectiveCode)
+            stmt.setString(4, input.targetType)
+            stmt.setString(5, input.targetMetadata.toString())
+            setNullableUuidString(stmt, 6, evidenceId)
+            setNullableUuidString(stmt, 7, createdBy)
+            stmt.setString(8, input.reviewSessionId)
             stmt.executeQuery().use { rs ->
                 if (!rs.next()) throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Review session not found")
                 rs.getString(1)
@@ -168,6 +171,10 @@ fun Database.listFeedbackThreads(query: FeedbackThreadListQuery): PagedList<Feed
             }
             filters.add("t.status = ?")
             binders.add { stmt, index -> stmt.setString(index, status) }
+        }
+        query.pageId?.trim()?.takeIf { it.isNotEmpty() }?.let { pageId ->
+            filters.add("t.page_id = ?")
+            binders.add { stmt, index -> stmt.setString(index, pageId) }
         }
         val baseSql = """
             FROM app.feedback_threads AS t
@@ -316,6 +323,7 @@ private fun feedbackThreadColumns(): String = """
     t.project_id::text AS project_id,
     t.review_session_id::text AS review_session_id,
     t.review_scope_id::text AS review_scope_id,
+    t.page_id,
     t.perspective_code,
     p.label AS perspective_label,
     t.target_type,
@@ -343,6 +351,7 @@ private fun ResultSet.toFeedbackThreadDto(): FeedbackThreadDto = FeedbackThreadD
     projectId = getString("project_id"),
     reviewSessionId = getString("review_session_id"),
     reviewScopeId = getString("review_scope_id"),
+    pageId = getString("page_id"),
     perspectiveCode = getString("perspective_code"),
     perspectiveLabel = getString("perspective_label"),
     targetType = getString("target_type"),

@@ -29,7 +29,7 @@ export function ObjectSidebar({
   children: React.ReactNode;
 }) {
   return (
-    <aside className="object-sidebar">
+    <aside className="object-sidebar" data-feedback-id="object-list">
       <header className="panel-header">
         <div>
           <p className="eyebrow">Business Object</p>

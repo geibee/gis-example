@@ -1091,6 +1091,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PathId"
         - { name: status, in: query, schema: { type: string, enum: [OPEN, RESOLVED] } }
+        - name: pageId
+          in: query
+          description: 指定するとその画面で付いたコメントだけを返す (画面上のピン表示に使う)
+          schema: { type: string }
         - { $ref: "#/components/parameters/ListLimit" }
         - { $ref: "#/components/parameters/ListOffset" }
       responses:
@@ -2049,6 +2053,7 @@ components:
         projectId: { type: string }
         reviewSessionId: { type: string }
         reviewScopeId: { type: [string, "null"] }
+        pageId: { type: [string, "null"] }
         perspectiveCode: { type: string }
         perspectiveLabel: { type: string }
         targetType: { type: string, enum: [UI_ELEMENT, SCREEN_POSITION, MAP_FEATURE, MAP_POSITION] }

@@ -1164,6 +1164,7 @@ export interface components {
             projectId: string;
             reviewSessionId: string;
             reviewScopeId?: string | null;
+            pageId?: string | null;
             perspectiveCode: string;
             perspectiveLabel: string;
             /** @enum {string} */
@@ -2636,6 +2637,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: "OPEN" | "RESOLVED";
+                /** @description 指定するとその画面で付いたコメントだけを返す (画面上のピン表示に使う) */
+                pageId?: string;
                 /** @description 1 ページの最大件数 */
                 limit?: components["parameters"]["ListLimit"];
                 /** @description 読み飛ばす件数 */

@@ -2,6 +2,8 @@ import { lazy, Suspense } from "react";
 import { useAppShell } from "../appShell";
 import { useMapState } from "../mapState";
 import { notifyError } from "../notifications";
+import { useReviewMode } from "../review";
+import { useFeedbackMapPins } from "./feedbackPins";
 
 // 地図ペイン (maplibre-gl を含む) はメインチャンクとは別チャンクとして遅延ロードする
 const MapPane = lazy(() => import("./MapPane"));
@@ -11,6 +13,8 @@ const MapPane = lazy(() => import("./MapPane"));
 export function MapPaneHost() {
   const { mapSupportOpen, setMapSupportOpen } = useAppShell();
   const map = useMapState();
+  const review = useReviewMode();
+  const { mapPins, selectPin } = useFeedbackMapPins();
 
   return (
     <Suspense fallback={<aside className={`map-support-pane${mapSupportOpen ? "" : " closed"}`} />}>
@@ -22,6 +26,10 @@ export function MapPaneHost() {
         layerById={map.layerById}
         onPickFeature={map.handleMapFeatureClick}
         onNotice={notifyError}
+        feedbackPicking={review.picking}
+        onFeedbackTarget={review.submitTarget}
+        feedbackPins={mapPins}
+        onSelectFeedbackPin={selectPin}
         open={mapSupportOpen}
         onToggle={() => setMapSupportOpen((open) => !open)}
         baseMapVisible={map.baseMapVisible}
