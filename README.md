@@ -201,6 +201,8 @@ Phase 3 として、主要なナビゲーション・一覧行・詳細ヘッダ
 
 Phase 4 として、ピンから開く Thread Drawer、メッセージ一覧・返信、`OPEN` / `RESOLVED` の解決・再開を実装済み。viewer は返信でき、状態変更は editor 以上に限定する。解決済みスレッドへの返信は暗黙に再開せず 409 で拒否し、editor が明示的に Reopen してから会話を続ける。返信と状態変更は既存の監査ログへ変更内容を記録する。
 
+Phase 5 として、レビュー画面に管理パネルを実装済み。プロジェクト全体の未解決・解決済み・証跡あり件数と、セッション別・観点別の内訳を確認できる。選択中セッションのスレッドは状態・観点・証跡有無・コメント本文でサーバ側検索でき、一覧から Thread Drawer と認可付き証跡ビューアを開ける。
+
 権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 
 ## Notes

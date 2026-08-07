@@ -31,8 +31,10 @@ import type {
   Project,
   FeedbackMessage,
   FeedbackMessageCreateRequest,
+  FeedbackSummary,
   FeedbackThread,
   FeedbackThreadCreateMetadata,
+  FeedbackThreadSearchQuery,
   FeedbackThreadStatusPatchRequest,
   ProjectMember,
   ReviewSession,
@@ -471,6 +473,32 @@ export async function getFeedbackThreads(reviewSessionId: string): Promise<Feedb
 
 export async function getFeedbackThread(threadId: string): Promise<FeedbackThread> {
   return unwrap(await client.GET("/api/threads/{threadId}", { params: { path: { threadId } } }));
+}
+
+export type FeedbackThreadSearchResult = {
+  items: FeedbackThread[];
+  totalCount: number;
+};
+
+export async function searchFeedbackThreads(query: FeedbackThreadSearchQuery): Promise<FeedbackThreadSearchResult> {
+  const result = await client.GET("/api/threads", { params: { query } });
+  const items = unwrap(result);
+  const header = result.response.headers.get("X-Total-Count");
+  const totalCount = header === null ? items.length : Number.parseInt(header, 10);
+  return { items, totalCount: Number.isFinite(totalCount) ? totalCount : items.length };
+}
+
+export async function getFeedbackSummary(projectId: string): Promise<FeedbackSummary> {
+  return unwrap(await client.GET("/api/threads/summary", { params: { query: { projectId } } }));
+}
+
+export async function getFeedbackEvidence(threadId: string): Promise<Blob> {
+  return unwrap(
+    await client.GET("/api/threads/{threadId}/evidence", {
+      params: { path: { threadId } },
+      parseAs: "blob"
+    })
+  );
 }
 
 /**

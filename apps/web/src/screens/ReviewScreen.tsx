@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useAppShell } from "../appShell";
 import { ReviewGuide, reviewSessionStatusLabels } from "../components/ReviewGuide";
+import { FeedbackManagementPanel } from "../components/FeedbackManagementPanel";
 import { useReviewSessionsQuery } from "../queries/reviewSessions";
 import { errorMessage } from "../utils";
 
-// レビュー画面 (docs/prototype-review.md Phase 1)。
-// プロジェクトのレビューセッションを選び、そのガイド (何を・どの観点で見てほしいか) を表示する。
-// コメント投稿 (Phase 2) はここで選んだ観点を引き継ぐ想定。
+// レビュー画面 (docs/prototype-review.md Phase 1〜5)。
+// セッションのガイドと、フィードバックの検索・集計・証跡確認を同じ文脈で表示する。
 export default function ReviewScreen() {
   const { selectedProject } = useAppShell();
   const sessionsQuery = useReviewSessionsQuery(selectedProject);
@@ -65,12 +65,20 @@ export default function ReviewScreen() {
 
         <div className="review-guide-pane">
           {selectedSession ? (
-            <ReviewGuide
-              session={selectedSession}
-              selectedPerspective={selectedPerspective}
-              // 受付中のセッションでのみ観点を選べる (準備中・終了後は読むだけ)
-              onSelectPerspective={selectedSession.status === "open" ? setSelectedPerspective : undefined}
-            />
+            <>
+              <ReviewGuide
+                session={selectedSession}
+                selectedPerspective={selectedPerspective}
+                // 受付中のセッションでのみ観点を選べる (準備中・終了後は読むだけ)
+                onSelectPerspective={selectedSession.status === "open" ? setSelectedPerspective : undefined}
+              />
+              <FeedbackManagementPanel
+                projectId={selectedProject}
+                session={selectedSession}
+                selectedPerspective={selectedPerspective}
+                onPerspectiveChange={setSelectedPerspective}
+              />
+            </>
           ) : null}
         </div>
       </div>

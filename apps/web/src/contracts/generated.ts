@@ -562,6 +562,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 管理用フィードバックスレッド検索
+         * @description プロジェクト内のスレッドをセッション・状態・観点・証跡有無・本文で検索する。
+         */
+        get: operations["searchFeedbackThreads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * プロジェクト内フィードバック集計
+         * @description ページングに左右されない状態・セッション・観点別の件数を返す。
+         */
+        get: operations["getFeedbackSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{threadId}": {
         parameters: {
             query?: never;
@@ -1205,6 +1245,40 @@ export interface components {
         FeedbackThreadStatusPatchRequest: {
             /** @enum {string} */
             status: "OPEN" | "RESOLVED";
+        };
+        FeedbackSessionSummary: {
+            reviewSessionId: string;
+            title: string;
+            /** @enum {string} */
+            sessionStatus: "draft" | "open" | "closed";
+            /** Format: int64 */
+            totalCount: number;
+            /** Format: int64 */
+            openCount: number;
+            /** Format: int64 */
+            resolvedCount: number;
+        };
+        FeedbackPerspectiveSummary: {
+            perspectiveCode: string;
+            perspectiveLabel: string;
+            /** Format: int64 */
+            totalCount: number;
+            /** Format: int64 */
+            openCount: number;
+            /** Format: int64 */
+            resolvedCount: number;
+        };
+        FeedbackSummary: {
+            /** Format: int64 */
+            totalCount: number;
+            /** Format: int64 */
+            openCount: number;
+            /** Format: int64 */
+            resolvedCount: number;
+            /** Format: int64 */
+            withEvidenceCount: number;
+            sessions: components["schemas"]["FeedbackSessionSummary"][];
+            perspectives: components["schemas"]["FeedbackPerspectiveSummary"][];
         };
         FeedbackThread: {
             id: string;
@@ -2765,6 +2839,66 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    searchFeedbackThreads: {
+        parameters: {
+            query: {
+                projectId: string;
+                reviewSessionId?: string;
+                status?: "OPEN" | "RESOLVED";
+                perspectiveCode?: string;
+                hasEvidence?: boolean;
+                q?: string;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackThread"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getFeedbackSummary: {
+        parameters: {
+            query: {
+                projectId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getFeedbackThread: {

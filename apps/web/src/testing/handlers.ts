@@ -8,6 +8,7 @@ import { http, HttpResponse } from "msw";
 import type {
   Building,
   FeedbackThread,
+  FeedbackSummary,
   Feature,
   FeatureSearchResult,
   Land,
@@ -43,6 +44,17 @@ export const defaultHandlers = [
   http.get("*/api/layers", () => HttpResponse.json<Layer[]>([])),
   http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([makeReviewSession()])),
   http.get("*/api/review-sessions/:id/threads", () => HttpResponse.json<FeedbackThread[]>([])),
+  http.get("*/api/threads", () => HttpResponse.json<FeedbackThread[]>([], { headers: { "X-Total-Count": "0" } })),
+  http.get("*/api/threads/summary", () =>
+    HttpResponse.json<FeedbackSummary>({
+      totalCount: 0,
+      openCount: 0,
+      resolvedCount: 0,
+      withEvidenceCount: 0,
+      sessions: [],
+      perspectives: []
+    })
+  ),
   http.get("*/api/threads/:threadId", ({ params }) =>
     HttpResponse.json<FeedbackThread>(makeFeedbackThread({ id: String(params.threadId) }))
   ),

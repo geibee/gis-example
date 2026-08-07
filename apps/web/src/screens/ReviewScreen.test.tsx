@@ -1,8 +1,8 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
-import type { ReviewSession } from "../contracts";
-import { makeReviewSession } from "../testing/fixtures";
+import type { FeedbackSummary, FeedbackThread, ReviewSession } from "../contracts";
+import { makeFeedbackThread, makeReviewSession } from "../testing/fixtures";
 import { renderWithProviders } from "../testing/renderWithProviders";
 import { server } from "../testing/server";
 
@@ -81,5 +81,105 @@ describe("ReviewScreen", () => {
     expect(
       await screen.findByText("このプロジェクトにはまだレビューセッションがありません。")
     ).toBeInTheDocument();
+  });
+
+  it("プロジェクト集計と選択セッションのフィードバック一覧を表示・絞り込みできる", async () => {
+    const summary: FeedbackSummary = {
+      totalCount: 5,
+      openCount: 3,
+      resolvedCount: 2,
+      withEvidenceCount: 4,
+      sessions: [
+        {
+          reviewSessionId: "rs-1",
+          title: "第1回 業務フローレビュー",
+          sessionStatus: "open",
+          totalCount: 4,
+          openCount: 3,
+          resolvedCount: 1
+        },
+        {
+          reviewSessionId: "rs-2",
+          title: "第2回 デザインレビュー",
+          sessionStatus: "draft",
+          totalCount: 1,
+          openCount: 0,
+          resolvedCount: 1
+        }
+      ],
+      perspectives: [
+        {
+          perspectiveCode: "BUSINESS_FLOW",
+          perspectiveLabel: "業務フロー",
+          totalCount: 3,
+          openCount: 2,
+          resolvedCount: 1
+        }
+      ]
+    };
+    const thread = makeFeedbackThread({
+      evidence: {
+        id: "ev-1",
+        contentType: "image/png",
+        byteSize: 128,
+        viewportWidth: 1440,
+        viewportHeight: 900,
+        scrollX: 0,
+        scrollY: 0,
+        pixelRatio: 1,
+        frontendVersion: "test",
+        route: "/lands?status=open",
+        capturedAt: "2026-08-12T10:15:00+09:00"
+      }
+    });
+    const requestedQueries: string[] = [];
+    let evidenceRequests = 0;
+    server.use(
+      http.get("*/api/threads/summary", () => HttpResponse.json<FeedbackSummary>(summary)),
+      http.get("*/api/threads", ({ request }) => {
+        requestedQueries.push(new URL(request.url).search);
+        return HttpResponse.json<FeedbackThread[]>([thread], { headers: { "X-Total-Count": "1" } });
+      }),
+      http.get("*/api/threads/:threadId/evidence", () => {
+        evidenceRequests += 1;
+        return new HttpResponse(new Uint8Array([137, 80, 78, 71]), {
+          headers: { "Content-Type": "image/png" }
+        });
+      })
+    );
+    const { user } = renderWithProviders({ path: "/review" });
+
+    const management = await screen.findByRole("region", { name: "フィードバック管理" });
+    const aggregate = await within(management).findByRole("group", { name: "フィードバック集計" });
+    expect(within(aggregate).getByText("5")).toBeInTheDocument();
+    expect(within(management).getByRole("region", { name: "セッション別集計" })).toHaveTextContent(
+      "第2回 デザインレビュー"
+    );
+    expect(within(management).getByRole("region", { name: "観点別集計" })).toHaveTextContent("業務フロー");
+    expect(within(management).getByText("土地タブの名称を確認してください")).toBeInTheDocument();
+
+    await user.selectOptions(within(management).getByLabelText("状態"), "RESOLVED");
+    await waitFor(() => expect(requestedQueries[requestedQueries.length - 1]).toContain("status=RESOLVED"));
+    await user.selectOptions(within(management).getByLabelText("証跡"), "with");
+    await waitFor(() => expect(requestedQueries[requestedQueries.length - 1]).toContain("hasEvidence=true"));
+
+    await user.click(within(management).getByRole("button", { name: /証跡を確認/ }));
+    const evidenceDialog = await screen.findByRole("dialog", { name: "証跡の確認" });
+    expect(within(evidenceDialog).getByText("/lands?status=open")).toBeInTheDocument();
+    await waitFor(() => expect(evidenceRequests).toBe(1));
+  });
+
+  it("管理一覧から会話 Drawer を開ける", async () => {
+    const thread = makeFeedbackThread();
+    server.use(
+      http.get("*/api/threads", () =>
+        HttpResponse.json<FeedbackThread[]>([thread], { headers: { "X-Total-Count": "1" } })
+      )
+    );
+    const { user } = renderWithProviders({ path: "/review" });
+    const management = await screen.findByRole("region", { name: "フィードバック管理" });
+
+    await user.click(await within(management).findByRole("button", { name: /スレッドを開く/ }));
+    expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
   });
 });

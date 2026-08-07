@@ -2,7 +2,7 @@
 // サーバ契約型の定義元は apps/api/openapi.yaml → generated.ts のみ。
 // ここでは手書きの型定義を行わず、components["schemas"] の別名だけを公開する。
 // (新規エンドポイント追加時は openapi.yaml 更新 → generate:contracts 再生成 → ここに別名を足すだけ)
-import type { components } from "./generated";
+import type { components, operations as OperationMap } from "./generated";
 
 export type { components, operations, paths } from "./generated";
 
@@ -57,6 +57,10 @@ export type FeedbackThread = Schemas["FeedbackThread"];
 export type FeedbackMessage = Schemas["FeedbackMessage"];
 export type FeedbackMessageCreateRequest = Schemas["FeedbackMessageCreateRequest"];
 export type FeedbackThreadStatusPatchRequest = Schemas["FeedbackThreadStatusPatchRequest"];
+export type FeedbackSummary = Schemas["FeedbackSummary"];
+export type FeedbackSessionSummary = Schemas["FeedbackSessionSummary"];
+export type FeedbackPerspectiveSummary = Schemas["FeedbackPerspectiveSummary"];
+export type FeedbackThreadSearchQuery = OperationMap["searchFeedbackThreads"]["parameters"]["query"];
 export type ReviewEvidence = Schemas["ReviewEvidence"];
 export type FeedbackThreadCreateMetadata = Schemas["FeedbackThreadCreateMetadata"];
 

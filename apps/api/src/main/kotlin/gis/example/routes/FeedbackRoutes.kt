@@ -9,12 +9,15 @@ import gis.example.Action
 import gis.example.ApiException
 import gis.example.FeedbackThreadInput
 import gis.example.FeedbackThreadListQuery
+import gis.example.FeedbackThreadSearchQuery
 import gis.example.ProjectResourceType
 import gis.example.ReviewEvidenceInput
+import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
 import gis.example.appPrincipal
 import gis.example.auditTrail
 import gis.example.authorizedResourceId
+import gis.example.authorizedProjectId
 import gis.example.authorizedRoutes
 import gis.example.createFeedbackThread
 import gis.example.createFeedbackMessage
@@ -23,12 +26,14 @@ import gis.example.feedbackTargetTypes
 import gis.example.getEvidenceReference
 import gis.example.getFeedbackThread
 import gis.example.listFeedbackThreads
+import gis.example.searchFeedbackThreads
 import gis.example.readOptionalDouble
 import gis.example.readOptionalInt
 import gis.example.readOptionalText
 import gis.example.readOptionalTimestamp
 import gis.example.readRequiredText
 import gis.example.requirePostableSession
+import gis.example.summarizeFeedbackThreads
 import gis.example.updateFeedbackThreadStatus
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -152,6 +157,30 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
             )
             call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
             call.respond(result.items)
+        }
+
+        // 管理画面はセッションをまたいで状態・観点・証跡有無・本文を検索する
+        get("/api/threads", ProjectFromQuery(Action.REVIEW_READ)) {
+            val params = call.request.queryParameters
+            val result = db.searchFeedbackThreads(
+                FeedbackThreadSearchQuery(
+                    projectId = call.authorizedProjectId(),
+                    reviewSessionId = optionalUuid(params["reviewSessionId"], "reviewSessionId"),
+                    status = params["status"],
+                    perspectiveCode = params["perspectiveCode"],
+                    hasEvidence = parseOptionalBoolean(params["hasEvidence"], "hasEvidence"),
+                    query = params["q"],
+                    limit = parseListLimit(params["limit"]),
+                    offset = parseListOffset(params["offset"])
+                )
+            )
+            call.response.header(TOTAL_COUNT_HEADER, result.totalCount.toString())
+            call.respond(result.items)
+        }
+
+        // 一覧とは分離し、ページングに左右されないプロジェクト全体の集計を返す
+        get("/api/threads/summary", ProjectFromQuery(Action.REVIEW_READ)) {
+            call.respond(db.summarizeFeedbackThreads(call.authorizedProjectId()))
         }
 
         get(

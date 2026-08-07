@@ -481,3 +481,33 @@ data class FeedbackThreadDto(
     val updatedAt: String,
     val messages: List<FeedbackMessageDto> = emptyList()
 )
+
+@Serializable
+data class FeedbackSessionSummaryDto(
+    val reviewSessionId: String,
+    val title: String,
+    val sessionStatus: String,
+    val totalCount: Long,
+    val openCount: Long,
+    val resolvedCount: Long
+)
+
+@Serializable
+data class FeedbackPerspectiveSummaryDto(
+    val perspectiveCode: String,
+    val perspectiveLabel: String,
+    val totalCount: Long,
+    val openCount: Long,
+    val resolvedCount: Long
+)
+
+/** レビュー管理画面のプロジェクト横断集計。件数はページング前の全スレッドを対象とする。 */
+@Serializable
+data class FeedbackSummaryDto(
+    val totalCount: Long,
+    val openCount: Long,
+    val resolvedCount: Long,
+    val withEvidenceCount: Long,
+    val sessions: List<FeedbackSessionSummaryDto> = emptyList(),
+    val perspectives: List<FeedbackPerspectiveSummaryDto> = emptyList()
+)

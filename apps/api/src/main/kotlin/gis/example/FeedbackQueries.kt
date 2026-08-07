@@ -50,6 +50,17 @@ data class FeedbackThreadListQuery(
     val offset: Int = 0
 )
 
+data class FeedbackThreadSearchQuery(
+    val projectId: String,
+    val reviewSessionId: String?,
+    val status: String?,
+    val perspectiveCode: String?,
+    val hasEvidence: Boolean?,
+    val query: String?,
+    val limit: Int? = null,
+    val offset: Int = 0
+)
+
 /**
  * 投稿の受付可否。セッションが受付中で、指定観点がそのセッションで ACTIVE であることを要求する。
  * 拒否理由はそのまま顧客に見えるので、何が起きたか分かる文言にする。
@@ -197,6 +208,172 @@ fun Database.listFeedbackThreads(query: FeedbackThreadListQuery): PagedList<Feed
         PagedList(
             items = threads.map { thread -> thread.copy(messages = messages[thread.id].orEmpty()) },
             totalCount = totalCount
+        )
+    }
+
+/** 管理画面向けのプロジェクト横断検索。値はすべてバインドし、任意条件だけを SQL へ足す。 */
+fun Database.searchFeedbackThreads(query: FeedbackThreadSearchQuery): PagedList<FeedbackThreadDto> =
+    dataSource.connection.use { connection ->
+        val filters = mutableListOf("t.project_id = ?::uuid")
+        val binders = mutableListOf<(java.sql.PreparedStatement, Int) -> Unit>(
+            { stmt, index -> stmt.setString(index, query.projectId) }
+        )
+        query.reviewSessionId?.let { reviewSessionId ->
+            filters.add("t.review_session_id = ?::uuid")
+            binders.add { stmt, index -> stmt.setString(index, reviewSessionId) }
+        }
+        query.status?.trim()?.takeIf { it.isNotEmpty() }?.let { status ->
+            if (status !in feedbackThreadStatuses) {
+                throw ApiException(
+                    io.ktor.http.HttpStatusCode.BadRequest,
+                    "status must be one of ${feedbackThreadStatuses.sorted()}"
+                )
+            }
+            filters.add("t.status = ?")
+            binders.add { stmt, index -> stmt.setString(index, status) }
+        }
+        query.perspectiveCode?.trim()?.takeIf { it.isNotEmpty() }?.let { perspectiveCode ->
+            filters.add("t.perspective_code = ?")
+            binders.add { stmt, index -> stmt.setString(index, perspectiveCode) }
+        }
+        query.hasEvidence?.let { hasEvidence ->
+            filters.add(if (hasEvidence) "t.evidence_id IS NOT NULL" else "t.evidence_id IS NULL")
+        }
+        query.query?.trim()?.takeIf { it.isNotEmpty() }?.let { text ->
+            filters.add(
+                """
+                EXISTS (
+                    SELECT 1 FROM app.feedback_messages AS search_message
+                    WHERE search_message.thread_id = t.id
+                      AND lower(search_message.body) LIKE lower(?)
+                )
+                """.trimIndent()
+            )
+            binders.add { stmt, index -> stmt.setString(index, "%$text%") }
+        }
+
+        val baseSql = """
+            FROM app.feedback_threads AS t
+            ${whereClause(filters)}
+        """.trimIndent()
+        val totalCount = queryTotalCount(connection, baseSql, binders)
+        val threads = connection.prepareStatement(
+            """
+            SELECT ${feedbackThreadColumns()}
+            FROM app.feedback_threads AS t
+            JOIN app.review_perspectives AS p ON p.code = t.perspective_code
+            LEFT JOIN app.review_evidence AS e ON e.id = t.evidence_id
+            LEFT JOIN app.users AS u ON u.id = t.created_by
+            ${whereClause(filters)}
+            ORDER BY t.updated_at DESC, t.id${pagingClause(query.limit, query.offset)}
+            """.trimIndent()
+        ).use { stmt ->
+            bindPatchValues(stmt, binders)
+            stmt.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) add(rs.toFeedbackThreadDto())
+                }
+            }
+        }
+        val messages = listMessagesForThreads(connection, threads.map { it.id })
+        PagedList(
+            items = threads.map { thread -> thread.copy(messages = messages[thread.id].orEmpty()) },
+            totalCount = totalCount
+        )
+    }
+
+/** プロジェクト全体を対象に、状態・セッション・観点の集計を 3 クエリで返す。 */
+fun Database.summarizeFeedbackThreads(projectId: String): FeedbackSummaryDto =
+    dataSource.connection.use { connection ->
+        val totals = connection.prepareStatement(
+            """
+            SELECT count(*) AS total_count,
+                   count(*) FILTER (WHERE status = 'OPEN') AS open_count,
+                   count(*) FILTER (WHERE status = 'RESOLVED') AS resolved_count,
+                   count(*) FILTER (WHERE evidence_id IS NOT NULL) AS with_evidence_count
+            FROM app.feedback_threads
+            WHERE project_id = ?::uuid
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, projectId)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                longArrayOf(
+                    rs.getLong("total_count"),
+                    rs.getLong("open_count"),
+                    rs.getLong("resolved_count"),
+                    rs.getLong("with_evidence_count")
+                )
+            }
+        }
+        val sessions = connection.prepareStatement(
+            """
+            SELECT s.id::text, s.title, s.status,
+                   count(t.id) AS total_count,
+                   count(t.id) FILTER (WHERE t.status = 'OPEN') AS open_count,
+                   count(t.id) FILTER (WHERE t.status = 'RESOLVED') AS resolved_count
+            FROM app.review_sessions AS s
+            LEFT JOIN app.feedback_threads AS t ON t.review_session_id = s.id
+            WHERE s.project_id = ?::uuid
+            GROUP BY s.id, s.title, s.status, s.created_at
+            ORDER BY s.created_at DESC, s.id
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, projectId)
+            stmt.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            FeedbackSessionSummaryDto(
+                                reviewSessionId = rs.getString(1),
+                                title = rs.getString(2),
+                                sessionStatus = rs.getString(3),
+                                totalCount = rs.getLong(4),
+                                openCount = rs.getLong(5),
+                                resolvedCount = rs.getLong(6)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        val perspectives = connection.prepareStatement(
+            """
+            SELECT p.code, p.label,
+                   count(t.id) AS total_count,
+                   count(t.id) FILTER (WHERE t.status = 'OPEN') AS open_count,
+                   count(t.id) FILTER (WHERE t.status = 'RESOLVED') AS resolved_count
+            FROM app.feedback_threads AS t
+            JOIN app.review_perspectives AS p ON p.code = t.perspective_code
+            WHERE t.project_id = ?::uuid
+            GROUP BY p.code, p.label, p.display_order
+            ORDER BY p.display_order, p.code
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, projectId)
+            stmt.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            FeedbackPerspectiveSummaryDto(
+                                perspectiveCode = rs.getString(1),
+                                perspectiveLabel = rs.getString(2),
+                                totalCount = rs.getLong(3),
+                                openCount = rs.getLong(4),
+                                resolvedCount = rs.getLong(5)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        FeedbackSummaryDto(
+            totalCount = totals[0],
+            openCount = totals[1],
+            resolvedCount = totals[2],
+            withEvidenceCount = totals[3],
+            sessions = sessions,
+            perspectives = perspectives
         )
     }
 

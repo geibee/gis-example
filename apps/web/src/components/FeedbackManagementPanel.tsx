@@ -1,0 +1,352 @@
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { ChevronLeft, ChevronRight, Image, MessageSquareText, Search, X } from "lucide-react";
+import type { FeedbackSummary as FeedbackSummaryDto, FeedbackThread, ReviewSession } from "../contracts";
+import {
+  useFeedbackEvidenceQuery,
+  useFeedbackSummaryQuery,
+  useFeedbackThreadSearchQuery
+} from "../queries/feedbackThreads";
+import { captureExcludeAttribute, useReview } from "../review";
+import { errorMessage } from "../utils";
+
+const PAGE_SIZE = 20;
+
+type FeedbackManagementPanelProps = {
+  projectId: string;
+  session: ReviewSession;
+  selectedPerspective: string | null;
+  onPerspectiveChange: (code: string | null) => void;
+};
+
+/** Phase 5: プロジェクト横断集計と、選択セッション内のスレッド検索・証跡確認。 */
+export function FeedbackManagementPanel({
+  projectId,
+  session,
+  selectedPerspective,
+  onPerspectiveChange
+}: FeedbackManagementPanelProps) {
+  const { openThread } = useReview();
+  const [status, setStatus] = useState<"" | "OPEN" | "RESOLVED">("");
+  const [evidence, setEvidence] = useState<"" | "with" | "without">("");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchText, setSearchText] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [evidenceThread, setEvidenceThread] = useState<FeedbackThread | null>(null);
+
+  useEffect(() => setOffset(0), [projectId, session.id]);
+
+  const searchQuery = useMemo(
+    () => ({
+      projectId,
+      reviewSessionId: session.id,
+      status: status || undefined,
+      perspectiveCode: selectedPerspective ?? undefined,
+      hasEvidence: evidence === "" ? undefined : evidence === "with",
+      q: searchText || undefined,
+      limit: PAGE_SIZE,
+      offset
+    }),
+    [evidence, offset, projectId, searchText, selectedPerspective, session.id, status]
+  );
+  const threadsQuery = useFeedbackThreadSearchQuery(searchQuery);
+  const summaryQuery = useFeedbackSummaryQuery(projectId);
+  const threads = threadsQuery.data?.items ?? [];
+  const totalCount = threadsQuery.data?.totalCount ?? 0;
+  const page = Math.floor(offset / PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  const applySearch = (event: FormEvent) => {
+    event.preventDefault();
+    setOffset(0);
+    setSearchText(searchDraft.trim());
+  };
+
+  return (
+    <section className="feedback-management" aria-label="フィードバック管理">
+      <header className="feedback-management-header">
+        <div>
+          <p className="eyebrow">レビュー管理</p>
+          <h2>フィードバックの確認</h2>
+        </div>
+        <span className="review-guide-note">一覧は「{session.title}」で絞り込まれています</span>
+      </header>
+
+      {summaryQuery.isError ? (
+        <p className="notice error" role="alert">
+          {errorMessage(summaryQuery.error)}
+        </p>
+      ) : null}
+      {summaryQuery.data ? <FeedbackSummary summary={summaryQuery.data} selectedSessionId={session.id} /> : null}
+
+      <form className="feedback-management-filters" aria-label="フィードバックの絞り込み" onSubmit={applySearch}>
+        <label>
+          状態
+          <select
+            value={status}
+            onChange={(event) => {
+              setOffset(0);
+              setStatus(event.target.value as typeof status);
+            }}
+          >
+            <option value="">すべて</option>
+            <option value="OPEN">未解決</option>
+            <option value="RESOLVED">解決済み</option>
+          </select>
+        </label>
+        <label>
+          観点
+          <select
+            value={selectedPerspective ?? ""}
+            onChange={(event) => {
+              setOffset(0);
+              onPerspectiveChange(event.target.value || null);
+            }}
+          >
+            <option value="">すべて</option>
+            {session.perspectives.map((perspective) => (
+              <option value={perspective.code} key={perspective.code}>
+                {perspective.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          証跡
+          <select
+            value={evidence}
+            onChange={(event) => {
+              setOffset(0);
+              setEvidence(event.target.value as typeof evidence);
+            }}
+          >
+            <option value="">すべて</option>
+            <option value="with">証跡あり</option>
+            <option value="without">証跡なし</option>
+          </select>
+        </label>
+        <label className="feedback-management-search">
+          コメント本文
+          <span>
+            <input
+              type="search"
+              value={searchDraft}
+              placeholder="コメントを検索"
+              onChange={(event) => setSearchDraft(event.target.value)}
+            />
+            <button type="submit" className="subtle-button" aria-label="コメントを検索">
+              <Search size={14} />
+            </button>
+          </span>
+        </label>
+      </form>
+
+      {threadsQuery.isError ? (
+        <p className="notice error" role="alert">
+          {errorMessage(threadsQuery.error)}
+        </p>
+      ) : null}
+      {threadsQuery.isPending ? <p className="review-guide-note">フィードバックを読み込んでいます...</p> : null}
+      {!threadsQuery.isPending && !threadsQuery.isError && threads.length === 0 ? (
+        <p className="empty-state compact">条件に一致するフィードバックはありません。</p>
+      ) : null}
+
+      <div className="feedback-management-list" aria-label="フィードバックスレッド一覧">
+        {threads.map((thread) => {
+          const firstMessage = thread.messages[0];
+          return (
+            <article className="feedback-management-thread" key={thread.id}>
+              <button
+                type="button"
+                className="feedback-management-thread-main"
+                aria-label={`スレッドを開く: ${firstMessage?.body ?? thread.perspectiveLabel}`}
+                onClick={() => openThread(thread.id)}
+              >
+                <span className="feedback-management-thread-meta">
+                  <strong>{thread.perspectiveLabel}</strong>
+                  <span className={`feedback-thread-status${thread.status === "RESOLVED" ? " resolved" : ""}`}>
+                    {thread.status === "RESOLVED" ? "解決済み" : "未解決"}
+                  </span>
+                  <time dateTime={thread.updatedAt}>{formatTimestamp(thread.updatedAt)}</time>
+                </span>
+                <span className="feedback-management-thread-body">
+                  {firstMessage?.body ?? "コメント本文はありません"}
+                </span>
+                <span className="feedback-management-thread-footer">
+                  {thread.createdByName ?? "退職済みユーザー"} · {thread.messages.length}件のメッセージ
+                </span>
+              </button>
+              {thread.evidence ? (
+                <button
+                  type="button"
+                  className="subtle-button feedback-evidence-button"
+                  aria-label={`証跡を確認: ${firstMessage?.body ?? thread.perspectiveLabel}`}
+                  onClick={() => setEvidenceThread(thread)}
+                >
+                  <Image size={14} />
+                  証跡
+                </button>
+              ) : (
+                <span className="feedback-no-evidence">証跡なし</span>
+              )}
+            </article>
+          );
+        })}
+      </div>
+
+      {totalCount > 0 ? (
+        <nav className="feedback-management-pagination" aria-label="フィードバックページ切り替え">
+          <span>全 {totalCount} 件</span>
+          <button
+            type="button"
+            className="subtle-button"
+            aria-label="前のフィードバックページ"
+            disabled={page === 0}
+            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <span>
+            {page + 1} / {pageCount}
+          </span>
+          <button
+            type="button"
+            className="subtle-button"
+            aria-label="次のフィードバックページ"
+            disabled={page >= pageCount - 1}
+            onClick={() => setOffset(offset + PAGE_SIZE)}
+          >
+            <ChevronRight size={14} />
+          </button>
+        </nav>
+      ) : null}
+
+      {evidenceThread ? (
+        <FeedbackEvidenceDialog thread={evidenceThread} onClose={() => setEvidenceThread(null)} />
+      ) : null}
+    </section>
+  );
+}
+
+function FeedbackSummary({
+  summary,
+  selectedSessionId
+}: {
+  summary: FeedbackSummaryDto;
+  selectedSessionId: string;
+}) {
+  return (
+    <div className="feedback-summary" role="group" aria-label="フィードバック集計">
+      <dl className="feedback-summary-cards">
+        <SummaryCard label="全件" value={summary.totalCount} />
+        <SummaryCard label="未解決" value={summary.openCount} />
+        <SummaryCard label="解決済み" value={summary.resolvedCount} />
+        <SummaryCard label="証跡あり" value={summary.withEvidenceCount} />
+      </dl>
+      <div className="feedback-summary-breakdown">
+        <section aria-label="セッション別集計">
+          <h3>セッション別</h3>
+          <ul>
+            {summary.sessions.map((item) => (
+              <li className={item.reviewSessionId === selectedSessionId ? "selected" : ""} key={item.reviewSessionId}>
+                <span>{item.title}</span>
+                <span>
+                  {item.totalCount}件（未解決 {item.openCount}）
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section aria-label="観点別集計">
+          <h3>観点別</h3>
+          <ul>
+            {summary.perspectives.map((item) => (
+              <li key={item.perspectiveCode}>
+                <span>{item.perspectiveLabel}</span>
+                <span>
+                  {item.totalCount}件（未解決 {item.openCount}）
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function FeedbackEvidenceDialog({ thread, onClose }: { thread: FeedbackThread; onClose: () => void }) {
+  const evidenceQuery = useFeedbackEvidenceQuery(thread.id);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!evidenceQuery.data || typeof URL.createObjectURL !== "function") return;
+    const url = URL.createObjectURL(evidenceQuery.data);
+    setImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [evidenceQuery.data]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="feedback-evidence-backdrop" {...{ [captureExcludeAttribute]: "" }}>
+      <section className="feedback-evidence-dialog" role="dialog" aria-label="証跡の確認">
+        <header className="panel-header">
+          <div>
+            <p className="eyebrow">投稿時点の画面</p>
+            <h2>{thread.perspectiveLabel}</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="証跡を閉じる" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+        {thread.evidence ? (
+          <p className="feedback-evidence-metadata">
+            <code>{thread.evidence.route}</code>
+            <span>
+              {thread.evidence.viewportWidth}×{thread.evidence.viewportHeight} · {formatTimestamp(thread.evidence.capturedAt)}
+            </span>
+          </p>
+        ) : null}
+        {evidenceQuery.isPending ? <p className="review-guide-note">証跡を読み込んでいます...</p> : null}
+        {evidenceQuery.isError ? (
+          <p className="notice error" role="alert">
+            {errorMessage(evidenceQuery.error)}
+          </p>
+        ) : null}
+        {imageUrl ? <img src={imageUrl} alt="コメント投稿時点の証跡" /> : null}
+        {evidenceQuery.isSuccess && !imageUrl ? (
+          <p className="review-guide-note">
+            <MessageSquareText size={14} /> 証跡を取得しました。
+          </p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function formatTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(parsed);
+}

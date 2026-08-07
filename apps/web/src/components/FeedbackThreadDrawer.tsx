@@ -54,8 +54,8 @@ export function FeedbackThreadDrawer({ threadId, onClose }: FeedbackThreadDrawer
 function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; onClose: () => void }) {
   const { me } = useAppShell();
   const [body, setBody] = useState("");
-  const createMessage = useCreateFeedbackMessageMutation(thread.reviewSessionId);
-  const updateStatus = useUpdateFeedbackThreadStatusMutation(thread.reviewSessionId);
+  const createMessage = useCreateFeedbackMessageMutation();
+  const updateStatus = useUpdateFeedbackThreadStatusMutation();
   const canManage =
     me?.systemRole === "admin" ||
     me?.memberships.some((membership) => membership.projectId === thread.projectId && membership.role === "editor") ===

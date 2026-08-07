@@ -318,6 +318,16 @@ Overlay 自身の DOM には `data-review-exclude` を付ける (証跡に自分
 地図ポップアップは `closeOnClick: false` とし、コメント対象を選ぶクリックで既存コメントの概要が
 意図せず閉じる挙動を避ける。
 
+### 8.4 Phase 5 の検索・集計と証跡表示
+
+管理画面の絞り込みと集計は、取得済みの 1 ページだけをブラウザで加工せず API / SQL 側で行う。
+スレッド一覧は `projectId` を必須とし、セッション・状態・観点・証跡有無・全メッセージ本文を条件に
+検索する。値はすべてバインドパラメータで渡し、一覧の総件数は `X-Total-Count` で返す。
+
+集計はプロジェクト全体の件数に加え、コメントが 0 件のレビューセッションも含むセッション別内訳と、
+実際に投稿された観点別内訳を返す。証跡は公開 URL やブラウザキャッシュへ置かず、既存の認可付き API
+から Blob として取得し、`data-review-exclude` を付けたダイアログ内だけで表示する。
+
 ---
 
 ## 9. API 案
@@ -350,6 +360,13 @@ POST  /api/threads/{threadId}/messages       # OPEN のスレッドへ返信 (RE
 PATCH /api/threads/{threadId}/status         # Resolve / Reopen (REVIEW_MANAGE)
 ```
 
+実装済み (Phase 5):
+
+```http
+GET   /api/threads?projectId=...             # 状態・観点・証跡・本文検索とページング (REVIEW_READ)
+GET   /api/threads/summary?projectId=...     # 全体・セッション別・観点別集計 (REVIEW_READ)
+```
+
 解決済みスレッドへの返信は 409 とし、暗黙には再開しない。返信は viewer 以上、状態変更は editor
 以上に限定する。いずれも既存 `AuditTrail` へ変更内容を渡し、Message 投稿と Resolve / Reopen の
 履歴を `app.audit_logs.detail` から追跡できるようにする。
@@ -377,7 +394,7 @@ PATCH /api/threads/{threadId}/status         # Resolve / Reopen (REVIEW_MANAGE)
 | 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | **完了** |
 | 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | **完了** |
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | **完了** |
-| 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | 未着手 |
+| 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | **完了** |
 | 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | 未着手 |
 | 7 | 通知・外部連携 (Email / Teams / Issue 生成)。初期は双方向同期を避ける | 未着手 |
 
@@ -402,6 +419,8 @@ PATCH /api/threads/{threadId}/status         # Resolve / Reopen (REVIEW_MANAGE)
 | 地図対象解決と地図コメントピン | `FeedbackMapAdapter.tsx` / `MapPane.tsx` | 3 |
 | スレッド返信・解決・再開 API | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 4 |
 | Thread Drawer / Message 一覧 / Reply / Status | `FeedbackThreadDrawer.tsx` | 4 |
+| プロジェクト横断検索・セッション別/観点別集計 API | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 5 |
+| 管理パネル / フィルタ / 証跡ビューア | `FeedbackManagementPanel.tsx` / `screens/ReviewScreen.tsx` | 5 |
 
 ### 11.1 実装時の設計判断 (設計案からの変更点)
 

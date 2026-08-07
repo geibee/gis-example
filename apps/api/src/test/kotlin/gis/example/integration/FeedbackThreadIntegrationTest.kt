@@ -114,14 +114,18 @@ class FeedbackThreadIntegrationTest {
 
     private fun body(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
 
-    private suspend fun createSession(client: HttpClient, status: String = "open"): String {
+    private suspend fun createSession(
+        client: HttpClient,
+        status: String = "open",
+        projectId: String = defaultProject
+    ): String {
         val response = client.post("/api/review-sessions") {
             header(HttpHeaders.Authorization, editorBearer)
             contentType(ContentType.Application.Json)
             setBody(
                 """
                 {
-                  "projectId": "$defaultProject",
+                  "projectId": "$projectId",
                   "title": "コメント投稿の検証",
                   "status": "$status",
                   "perspectives": [
@@ -442,6 +446,84 @@ class FeedbackThreadIntegrationTest {
         assertEquals(
             HttpStatusCode.NotFound,
             patchStatus(client, threadId, outsiderBearer, "RESOLVED").status
+        )
+    }
+
+    @Test
+    fun `管理画面用にプロジェクト横断検索とセッション観点別集計ができる`() = withApp { client ->
+        val managementProject = "50000000-0000-4000-8000-000000000005"
+        rawConnection().use { connection ->
+            connection.createStatement().use { stmt ->
+                stmt.execute(
+                    """
+                    INSERT INTO app.projects (id, name)
+                    VALUES ('$managementProject', 'Phase 5 管理画面テスト')
+                    ON CONFLICT (id) DO NOTHING;
+
+                    INSERT INTO app.project_members (user_id, project_id, role)
+                    VALUES ('e0000000-0000-4000-8000-000000000001', '$managementProject', 'editor')
+                    ON CONFLICT (user_id, project_id) DO UPDATE SET role = EXCLUDED.role;
+                    """.trimIndent()
+                )
+            }
+        }
+        val sessionId = createSession(client, projectId = managementProject)
+        val withEvidenceId = body(
+            postThread(client, sessionId, editorBearer, uiTargetMetadata, pngBytes).bodyAsText()
+        ).getValue("id").jsonPrimitive.content
+        val resolvedMetadata = uiTargetMetadata.replace("この項目は必要ですか？", "phase five resolved comment")
+        val resolvedId = body(
+            postThread(client, sessionId, editorBearer, resolvedMetadata).bodyAsText()
+        ).getValue("id").jsonPrimitive.content
+        assertEquals(HttpStatusCode.OK, patchStatus(client, resolvedId, editorBearer, "RESOLVED").status)
+
+        val search = client.get(
+            "/api/threads?projectId=$managementProject&reviewSessionId=$sessionId" +
+                "&status=RESOLVED&perspectiveCode=BUSINESS_FLOW&hasEvidence=false&q=resolved"
+        ) {
+            header(HttpHeaders.Authorization, editorBearer)
+        }
+        assertEquals(HttpStatusCode.OK, search.status, search.bodyAsText())
+        assertEquals("1", search.headers["X-Total-Count"])
+        val searched = Json.parseToJsonElement(search.bodyAsText()).jsonArray.map { it.jsonObject }
+        assertEquals(listOf(resolvedId), searched.map { it.getValue("id").jsonPrimitive.content })
+
+        val evidenceSearch = client.get(
+            "/api/threads?projectId=$managementProject&reviewSessionId=$sessionId&hasEvidence=true"
+        ) {
+            header(HttpHeaders.Authorization, editorBearer)
+        }
+        val evidenceThreads = Json.parseToJsonElement(evidenceSearch.bodyAsText()).jsonArray.map { it.jsonObject }
+        assertEquals(listOf(withEvidenceId), evidenceThreads.map { it.getValue("id").jsonPrimitive.content })
+
+        val summaryResponse = client.get("/api/threads/summary?projectId=$managementProject") {
+            header(HttpHeaders.Authorization, editorBearer)
+        }
+        assertEquals(HttpStatusCode.OK, summaryResponse.status, summaryResponse.bodyAsText())
+        val summary = body(summaryResponse.bodyAsText())
+        assertEquals(2, summary.getValue("totalCount").jsonPrimitive.content.toInt())
+        assertEquals(1, summary.getValue("openCount").jsonPrimitive.content.toInt())
+        assertEquals(1, summary.getValue("resolvedCount").jsonPrimitive.content.toInt())
+        assertEquals(1, summary.getValue("withEvidenceCount").jsonPrimitive.content.toInt())
+        val sessionSummary = summary.getValue("sessions").jsonArray.single().jsonObject
+        assertEquals(sessionId, sessionSummary.getValue("reviewSessionId").jsonPrimitive.content)
+        assertEquals(2, sessionSummary.getValue("totalCount").jsonPrimitive.content.toInt())
+        val perspectiveSummary = summary.getValue("perspectives").jsonArray.single().jsonObject
+        assertEquals("BUSINESS_FLOW", perspectiveSummary.getValue("perspectiveCode").jsonPrimitive.content)
+        assertEquals(2, perspectiveSummary.getValue("totalCount").jsonPrimitive.content.toInt())
+
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            client.get("/api/threads?projectId=$managementProject&hasEvidence=maybe") {
+                header(HttpHeaders.Authorization, editorBearer)
+            }.status
+        )
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.get("/api/threads/summary?projectId=$managementProject") {
+                header(HttpHeaders.Authorization, outsiderBearer)
+            }.status,
+            "projectId 明示操作の非メンバー拒否は 403"
         )
     }
 
