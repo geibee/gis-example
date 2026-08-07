@@ -37,6 +37,11 @@ const screenDefinitions: ScreenDefinition[] = [
   { basePath: "/buildings", detail: true, meta: { tab: "buildings", title: "建物" }, loadComponent: () => import("./screens/BuildingsScreen") },
   { basePath: "/parties", detail: true, meta: { tab: "parties", title: "関係者" }, loadComponent: () => import("./screens/PartiesScreen") },
   {
+    basePath: "/review",
+    meta: { tab: "review", title: "レビュー" },
+    loadComponent: () => import("./screens/ReviewScreen")
+  },
+  {
     basePath: "/admin",
     meta: { tab: "admin", title: "管理", requiredSystemRole: "admin" },
     loadComponent: () => import("./screens/AdminScreen")

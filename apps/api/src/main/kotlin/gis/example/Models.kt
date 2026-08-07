@@ -389,3 +389,47 @@ data class ProjectMemberDto(
 data class MemberPutRequest(
     val role: String
 )
+
+// ---------------------------------------------------------------- レビュー基盤 (docs/prototype-review.md)
+
+/**
+ * セッション内でのレビュー観点とその状態。
+ *
+ * status は ACTIVE / FUTURE / OUT_OF_SCOPE。FUTURE・OUT_OF_SCOPE も「行として返す」ことが要点で、
+ * UI はグレーアウトして表示する (「今は見なくてよい」と「存在を忘れている」を区別させる)
+ */
+@Serializable
+data class ReviewPerspectiveDto(
+    val code: String,
+    val label: String,
+    val description: String? = null,
+    val displayOrder: Int,
+    val status: String,
+    val guidance: String? = null
+)
+
+/** セッション内でレビュー対象となる画面・機能 */
+@Serializable
+data class ReviewScopeDto(
+    val id: String,
+    val pageId: String,
+    val description: String? = null,
+    val reviewable: Boolean,
+    val displayOrder: Int
+)
+
+@Serializable
+data class ReviewSessionDto(
+    val id: String,
+    val projectId: String,
+    val title: String,
+    val description: String? = null,
+    val status: String,
+    val startAt: String? = null,
+    val endAt: String? = null,
+    val createdBy: String? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    val perspectives: List<ReviewPerspectiveDto> = emptyList(),
+    val scopes: List<ReviewScopeDto> = emptyList()
+)

@@ -47,6 +47,8 @@ issue #25 の設計ドキュメント。数百画面規模を見据え、認可�
 | `import.run` | GIS ファイル取込の実行 | `IMPORT_EXECUTE` |
 | `analysis.run` | 空間分析の実行 | `ANALYSIS_EXECUTE` |
 | `jobs.view` | 取込・分析ジョブの進捗閲覧 | `JOB_READ` |
+| `review.view` | レビューセッションのガイド閲覧 (何を・どの観点で見てほしいか) | `REVIEW_READ` |
+| `review.manage` | レビューセッションの開設・観点/対象画面の設定 | `REVIEW_MANAGE` |
 | `admin.users.manage` | ユーザー管理 (system 管理画面) | `USER_ADMIN` |
 | `admin.members.manage` | プロジェクトメンバー管理 (system 管理画面) | `MEMBER_ADMIN` |
 
@@ -63,8 +65,18 @@ issue #25 の設計ドキュメント。数百画面規模を見据え、認可�
 |---|---|---|
 | system `admin` | システム | 全 Permission (組込みの破壊不能ルール。PDP が無条件許可) |
 | system `user` | システム | なし (プロジェクトロールに従う) |
-| project `viewer` | プロジェクト | `projects.view` `layers.view` `map.view` `business-data.view` `jobs.view` |
-| project `editor` | プロジェクト | viewer + `layers.manage` `features.edit` `business-data.edit` `import.run` `analysis.run` |
+| project `viewer` | プロジェクト | `projects.view` `layers.view` `map.view` `business-data.view` `jobs.view` `review.view` |
+| project `editor` | プロジェクト | viewer + `layers.manage` `features.edit` `business-data.edit` `import.run` `analysis.run` `review.manage` |
+
+レビュー基盤 (docs/prototype-review.md) のロール想定は本リポジトリの 2 ロールへ次のように対応させている。
+専用ロール (Reviewer / CustomerAdmin / Developer / ReviewManager) を切るのは、顧客側メンバーを
+開発側と分離して管理する必要が出た時点で検討する (`RolePermissionResolver` の差し替え点は既にある)。
+
+| レビュー基盤のロール | 本リポジトリ |
+|---|---|
+| Reviewer (コメント・閲覧) | project `viewer` |
+| ReviewManager (セッション・観点の管理) | project `editor` |
+| SystemAdmin | system `admin` |
 
 新しいロール (例: 取込オペレータ = viewer + `import.run` + `jobs.view`) の追加は
 `Authorization.kt` の `BuiltinRoleDefinitions` への宣言追加のみで完結する。ただし

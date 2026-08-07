@@ -306,18 +306,23 @@ Overlay 自身の DOM には `data-review-exclude` を付ける (証跡に自分
 エンドポイントを追加するときは AGENTS.md の手順 (RouteAuthz 宣言 → openapi.yaml 追記 →
 生成型の再生成 → verify) を 1 PR に収める。
 
+実装済み (Phase 1):
+
 ```http
-GET   /api/review-sessions/{id}
-GET   /api/review-sessions/{id}/scopes
+GET   /api/review-sessions?projectId=...     # 観点・対象画面を含む (REVIEW_READ)
+GET   /api/review-sessions/{id}              # 同上 (REVIEW_READ)
+POST  /api/review-sessions                   # 観点・対象画面をまとめて指定 (REVIEW_MANAGE)
+PATCH /api/review-sessions/{id}              # 観点・対象画面はキー指定時のみ全置換 (REVIEW_MANAGE)
+```
+
+今後 (Phase 2 以降):
+
+```http
 POST  /api/review-sessions/{id}/threads      # multipart/form-data (metadata JSON + screenshot)
 GET   /api/review-sessions/{id}/threads
 GET   /api/threads/{threadId}
 POST  /api/threads/{threadId}/messages
 PATCH /api/threads/{threadId}/status
-POST  /api/review-sessions                   # 管理系
-PATCH /api/review-sessions/{id}
-POST  /api/review-sessions/{id}/perspectives
-POST  /api/review-sessions/{id}/scopes
 ```
 
 ---
@@ -339,7 +344,7 @@ POST  /api/review-sessions/{id}/scopes
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 0 | Screenshot スパイク (DOM + MapLibre 合成) | **完了** (第 4 章) |
-| 1 | ReviewSession / Perspective / ACTIVE・FUTURE・OUT_OF_SCOPE / ReviewGuide / ReviewScope | 未着手 |
+| 1 | ReviewSession / Perspective / ACTIVE・FUTURE・OUT_OF_SCOPE / ReviewGuide / ReviewScope | **完了** |
 | 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | 未着手 |
 | 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | 未着手 |
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | 未着手 |
@@ -349,13 +354,32 @@ POST  /api/review-sessions/{id}/scopes
 
 公共部門で本格利用する場合、**Phase 6 までを正式リリース条件**とする。
 
-Phase 0 の成果として先行実装済みのもの:
+実装済みのもの:
 
-| 実装 | 置き場所 |
-|---|---|
-| ビューポート証跡の生成 | `apps/web/src/review/capture.ts` |
-| コメント対象の解決 (UI / 画面座標 / 地物 / 地点) | `apps/web/src/review/target.ts` |
-| 地図の WebGL 設定の配線と固定 | `apps/web/src/components/MapPane.tsx` + `capture.test.ts` |
+| 実装 | 置き場所 | Phase |
+|---|---|---|
+| ビューポート証跡の生成 | `apps/web/src/review/capture.ts` | 0 |
+| コメント対象の解決 (UI / 画面座標 / 地物 / 地点) | `apps/web/src/review/target.ts` | 0 |
+| 地図の WebGL 設定の配線と固定 | `apps/web/src/components/MapPane.tsx` + `capture.test.ts` | 0 |
+| スキーマ (セッション・観点マスタ・観点状態・対象画面) | `db/migration/V5__review_sessions.sql` | 1 |
+| セッション API (一覧・詳細・作成・更新) | `ReviewQueries.kt` / `routes/ReviewRoutes.kt` | 1 |
+| 認可 (`REVIEW_READ` / `REVIEW_MANAGE`) | `Authorization.kt` ([authorization.md](authorization.md)) | 1 |
+| レビューガイド画面 | `apps/web/src/components/ReviewGuide.tsx` / `screens/ReviewScreen.tsx` | 1 |
+
+### 11.1 Phase 1 の設計判断 (設計案からの変更点)
+
+- **観点・対象画面の専用エンドポイントは作らなかった。** `POST /api/review-sessions/{id}/perspectives`
+  等に分けず、`ReviewSession` の一部として作成・更新する。「今回のレビューで何を見てもらうか」は
+  原子的に決まるべき集合で、部分更新を許すと「何を外したか」が曖昧になるため。
+  `PATCH` ではキーを指定したときだけ全置換する。
+- **専用ロールは切らなかった。** 設計案の Reviewer / ReviewManager は既存の project
+  `viewer` / `editor` に対応させた (対応表は [authorization.md](authorization.md))。
+  顧客側メンバーを開発側と分離して管理する必要が出た時点で専用ロールを検討する。
+- **レビュー観点はマスタテーブル (`app.review_perspectives`) に置いた。** 組織ごとに観点を
+  足す場合もコード変更を伴わない。組込みの 8 観点は V5 マイグレーションで投入する。
+- **期間はオフセット付き ISO-8601 のみ受け付ける。** 「いつまで受け付けるか」を機械的に
+  比較する値なので、ローカル時刻の解釈揺れを持ち込まない。既存 API の `createdAt`
+  (PostgreSQL 既定表記) とは表記が異なるが、同一 DTO 内では ISO-8601 に揃えている。
 
 ### 11.1 実装難易度の見立て
 

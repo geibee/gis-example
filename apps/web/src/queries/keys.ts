@@ -9,6 +9,12 @@ import type { BusinessListSearchCriteria } from "../appTypes";
 export const keys = {
   me: ["me"] as const,
   projects: ["projects"] as const,
+  reviewSessions: {
+    all: ["review-sessions"] as const,
+    lists: () => ["review-sessions", "list"] as const,
+    list: (projectId: string, status?: string) => ["review-sessions", "list", projectId, status ?? null] as const,
+    detail: (id: string) => ["review-sessions", "detail", id] as const
+  },
   layers: {
     all: ["layers"] as const,
     list: (projectId: string) => ["layers", "list", projectId] as const

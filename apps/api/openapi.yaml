@@ -20,6 +20,7 @@ tags:
   - name: features
   - name: business
   - name: zones
+  - name: review
   - name: jobs
   - name: tiles
 
@@ -981,6 +982,107 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/review-sessions:
+    get:
+      tags: [review]
+      operationId: listReviewSessions
+      summary: レビューセッション一覧
+      description: |
+        プロトタイプレビュー管理基盤 (docs/prototype-review.md) のレビューセッション。
+        観点 (perspectives) と対象画面 (scopes) を含めて返す。
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, open, closed] } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReviewSession"
+        "400": { $ref: "#/components/responses/BadRequest" }
+    post:
+      tags: [review]
+      operationId: createReviewSession
+      summary: レビューセッション作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewSessionCreateRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewSession"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/review-sessions/{id}:
+    get:
+      tags: [review]
+      operationId: getReviewSession
+      summary: レビューセッション取得
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewSession"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [review]
+      operationId: updateReviewSession
+      summary: レビューセッション更新
+      description: |
+        perspectives / scopes はキーを指定した場合のみ全置換する
+        (部分更新にすると「今回のレビューから何を外したか」が曖昧になるため)。
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewSessionPatchRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 更新済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewSession"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/import-jobs:
     post:
       tags: [jobs]
@@ -1680,6 +1782,106 @@ components:
           items:
             $ref: "#/components/schemas/ZonePartySummaryEntry"
       required: [zoneId, containedCount, partyCount, typeBreakdown, tagBreakdown, parties]
+
+    ReviewPerspective:
+      type: object
+      description: |
+        セッション内でのレビュー観点とその状態。FUTURE / OUT_OF_SCOPE も返し、
+        UI はグレーアウトして表示する (「今は見なくてよい」と「存在を忘れている」の区別)。
+      properties:
+        code: { type: string }
+        label: { type: string }
+        description: { type: [string, "null"] }
+        displayOrder: { type: integer }
+        status: { type: string, enum: [ACTIVE, FUTURE, OUT_OF_SCOPE] }
+        guidance: { type: [string, "null"] }
+      required: [code, label, displayOrder, status]
+
+    ReviewScope:
+      type: object
+      properties:
+        id: { type: string }
+        pageId: { type: string }
+        description: { type: [string, "null"] }
+        reviewable: { type: boolean }
+        displayOrder: { type: integer }
+      required: [id, pageId, reviewable, displayOrder]
+
+    ReviewSession:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        title: { type: string }
+        description: { type: [string, "null"] }
+        status: { type: string, enum: [draft, open, closed] }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time }
+        createdBy: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        perspectives:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewPerspective"
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewScope"
+      # perspectives / scopes は常に出力される (空配列を含む)
+      required: [id, projectId, title, status, createdAt, updatedAt, perspectives, scopes]
+
+    ReviewPerspectiveWriteRequest:
+      type: object
+      properties:
+        code: { type: string }
+        status: { type: string, enum: [ACTIVE, FUTURE, OUT_OF_SCOPE] }
+        guidance: { type: [string, "null"] }
+      required: [code, status]
+
+    ReviewScopeWriteRequest:
+      type: object
+      properties:
+        pageId: { type: string }
+        description: { type: [string, "null"] }
+        reviewable: { type: boolean, default: true }
+      required: [pageId]
+
+    ReviewSessionCreateRequest:
+      type: object
+      properties:
+        projectId: { type: string }
+        title: { type: string }
+        description: { type: [string, "null"] }
+        status: { type: string, enum: [draft, open, closed], default: draft }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time }
+        perspectives:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewPerspectiveWriteRequest"
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewScopeWriteRequest"
+      required: [projectId, title]
+
+    ReviewSessionPatchRequest:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: [string, "null"] }
+        status: { type: string, enum: [draft, open, closed] }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time }
+        perspectives:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewPerspectiveWriteRequest"
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewScopeWriteRequest"
 
     ZoneLayerFromImportRequest:
       type: object

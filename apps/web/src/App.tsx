@@ -1,6 +1,15 @@
 import { useEffect, type ReactNode } from "react";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Building2, EyeOff, FileText, LogOut, Map as MapIcon, ShieldCheck, Users } from "lucide-react";
+import {
+  Building2,
+  ClipboardCheck,
+  EyeOff,
+  FileText,
+  LogOut,
+  Map as MapIcon,
+  ShieldCheck,
+  Users
+} from "lucide-react";
 import { useAuth } from "react-oidc-context";
 import { AppShellProvider, useAppShell } from "./appShell";
 import { MapStateProvider } from "./mapState";
@@ -64,6 +73,10 @@ function AppLayout() {
           <button className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
             <Users size={17} />
             関係者
+          </button>
+          <button className={activeTab === "review" ? "active" : ""} type="button" onClick={() => navigateTab("review")}>
+            <ClipboardCheck size={17} />
+            レビュー
           </button>
           {me?.systemRole === "admin" ? (
             <button className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>

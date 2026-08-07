@@ -49,6 +49,11 @@ export type ZonePartySummary = Schemas["ZonePartySummary"];
 export type ZoneLayerFromImportRequest = Schemas["ZoneLayerFromImportRequest"];
 export type ZoneLayerOperation = Schemas["ZoneLayerOperation"];
 
+// ---------------------------------------------------------------- レビュー (docs/prototype-review.md)
+export type ReviewSession = Schemas["ReviewSession"];
+export type ReviewPerspective = Schemas["ReviewPerspective"];
+export type ReviewScope = Schemas["ReviewScope"];
+
 // ---------------------------------------------------------------- ジョブ
 export type ImportJob = Schemas["ImportJob"];
 export type AnalysisJobRequest = Schemas["AnalysisJobRequest"];

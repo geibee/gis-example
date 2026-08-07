@@ -14,6 +14,7 @@ import gis.example.routes.layerRoutes
 import gis.example.routes.meRoutes
 import gis.example.routes.partyRoutes
 import gis.example.routes.projectRoutes
+import gis.example.routes.reviewRoutes
 import gis.example.routes.tileRoutes
 import gis.example.routes.zoneRoutes
 import io.ktor.http.HttpHeaders
@@ -175,6 +176,7 @@ fun Route.authenticatedApiRoutes(deps: AppDependencies) {
     buildingRoutes(deps)
     partyRoutes(deps)
     zoneRoutes(deps)
+    reviewRoutes(deps)
     jobRoutes(deps)
     tileRoutes(deps)
 }

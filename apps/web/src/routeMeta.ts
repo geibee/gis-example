@@ -43,6 +43,7 @@ export const tabBasePath = {
   lands: "/lands",
   buildings: "/buildings",
   parties: "/parties",
+  review: "/review",
   admin: "/admin"
 } as const;
 

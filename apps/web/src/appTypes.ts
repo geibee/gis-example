@@ -47,7 +47,7 @@ export type LayerListItem =
   | { type: "layer"; layer: Layer }
   | { type: "resultSet"; id: string; name: string; layers: Layer[] };
 
-export type BusinessTab = "zone" | "lands" | "buildings" | "parties" | "admin";
+export type BusinessTab = "zone" | "lands" | "buildings" | "parties" | "review" | "admin";
 export type ZoneBusinessSourceType = "all" | "land" | "building";
 
 // 地図チャンク (components/MapPane.tsx) が公開する命令的 API。

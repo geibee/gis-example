@@ -1926,3 +1926,176 @@ input[type="file"] {
   font-size: 11px;
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------- レビュー (docs/prototype-review.md) */
+
+.review-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  min-height: 0;
+}
+
+.review-session-list ul,
+.review-perspective-list,
+.review-scope-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-session-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.review-session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d3dae1;
+  border-radius: 8px;
+  background: #fff;
+  color: #263238;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.review-session-item.selected {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+
+.review-session-title {
+  font-weight: 700;
+}
+
+.review-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid #d3dae1;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.review-guide-header h2 {
+  margin-bottom: 8px;
+  font-size: 18px;
+}
+
+.review-guide-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #637381;
+  font-size: 12px;
+}
+
+.review-guide-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.review-guide-description {
+  margin-bottom: 0;
+  color: #4b5563;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.review-guide-note {
+  margin: 0;
+  color: #637381;
+  font-size: 12px;
+}
+
+.review-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.review-status-draft {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.review-status-open {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.review-status-closed {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.review-perspective-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-perspective {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #d3dae1;
+  border-radius: 999px;
+  background: #fff;
+  color: #263238;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.review-perspective.selected {
+  border-color: #0f766e;
+  background: #0f766e;
+  color: #fff;
+}
+
+/* 「今回は見なくてよい」観点は隠さずグレーアウトして残す。
+   存在は分かるが選べない、を見た目とセマンティクス (disabled) の両方で示す */
+.review-perspective:disabled {
+  border-style: dashed;
+  background: #f8fafc;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.review-perspective-guidance {
+  color: inherit;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.review-scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.review-scope-list code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  font-size: 12px;
+}
+
+.review-scope-excluded {
+  color: #94a3b8;
+}

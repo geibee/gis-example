@@ -30,14 +30,16 @@ class AccessPolicyTest {
         Action.FEATURE_READ,
         Action.BUSINESS_READ,
         Action.JOB_READ,
-        Action.TILE_READ
+        Action.TILE_READ,
+        Action.REVIEW_READ
     )
     private val writeActions = setOf(
         Action.LAYER_WRITE,
         Action.FEATURE_WRITE,
         Action.BUSINESS_WRITE,
         Action.IMPORT_EXECUTE,
-        Action.ANALYSIS_EXECUTE
+        Action.ANALYSIS_EXECUTE,
+        Action.REVIEW_MANAGE
     )
     private val systemActions = setOf(Action.USER_ADMIN, Action.MEMBER_ADMIN)
 

@@ -30,6 +30,7 @@ import type {
   PartyWriteRequest,
   Project,
   ProjectMember,
+  ReviewSession,
   UserAccount,
   UserPatchRequest,
   Zone,
@@ -445,4 +446,14 @@ export async function deleteProjectMember(projectId: string, userId: string): Pr
       params: { path: { id: projectId, userId } }
     })
   );
+}
+
+// ---------------------------------------------------------------- レビュー (docs/prototype-review.md)
+
+export async function getReviewSessions(projectId: string, status?: ReviewSession["status"]): Promise<ReviewSession[]> {
+  return unwrap(await client.GET("/api/review-sessions", { params: { query: { projectId, status } } }));
+}
+
+export async function getReviewSession(id: string): Promise<ReviewSession> {
+  return unwrap(await client.GET("/api/review-sessions/{id}", { params: { path: { id } } }));
 }

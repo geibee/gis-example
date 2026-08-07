@@ -29,6 +29,8 @@ enum class Action {
     ANALYSIS_EXECUTE,
     JOB_READ,
     TILE_READ,
+    REVIEW_READ,
+    REVIEW_MANAGE,
     USER_ADMIN,
     MEMBER_ADMIN
 }
@@ -50,6 +52,8 @@ enum class Permission(val key: String) {
     IMPORT_RUN("import.run"),
     ANALYSIS_RUN("analysis.run"),
     JOBS_VIEW("jobs.view"),
+    REVIEW_VIEW("review.view"),
+    REVIEW_MANAGE("review.manage"),
     ADMIN_USERS_MANAGE("admin.users.manage"),
     ADMIN_MEMBERS_MANAGE("admin.members.manage")
 }
@@ -71,6 +75,8 @@ val Action.requiredPermission: Permission
         Action.ANALYSIS_EXECUTE -> Permission.ANALYSIS_RUN
         Action.JOB_READ -> Permission.JOBS_VIEW
         Action.TILE_READ -> Permission.MAP_VIEW
+        Action.REVIEW_READ -> Permission.REVIEW_VIEW
+        Action.REVIEW_MANAGE -> Permission.REVIEW_MANAGE
         Action.USER_ADMIN -> Permission.ADMIN_USERS_MANAGE
         Action.MEMBER_ADMIN -> Permission.ADMIN_MEMBERS_MANAGE
     }
@@ -91,14 +97,18 @@ object BuiltinRoleDefinitions : RolePermissionResolver {
         Permission.LAYERS_VIEW,
         Permission.MAP_VIEW,
         Permission.BUSINESS_DATA_VIEW,
-        Permission.JOBS_VIEW
+        Permission.JOBS_VIEW,
+        // レビュー対象者 (docs/prototype-review.md の Reviewer) はガイドを読める必要がある
+        Permission.REVIEW_VIEW
     )
     private val editorPermissions = viewerPermissions + setOf(
         Permission.LAYERS_MANAGE,
         Permission.FEATURES_EDIT,
         Permission.BUSINESS_DATA_EDIT,
         Permission.IMPORT_RUN,
-        Permission.ANALYSIS_RUN
+        Permission.ANALYSIS_RUN,
+        // レビューセッションの開設・観点設定 (同 ReviewManager)
+        Permission.REVIEW_MANAGE
     )
 
     override fun permissionsOf(role: ProjectRole): Set<Permission> = when (role) {

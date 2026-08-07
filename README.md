@@ -193,6 +193,8 @@ web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-
 
 最大の技術的不確実性だった「業務 DOM と MapLibre の WebGL 描画を 1 枚の証跡 PNG に合成できるか」は Phase 0 の技術検証で解消済み (`apps/web/spike/review-capture/`)。**地図を証跡に写すには MapLibre の生成時に `canvasContextAttributes: { preserveDrawingBuffer: true }` が必須** で、外すとエラーなしに「地図だけ白紙の証跡」になる (`apps/web/src/review/capture.test.ts` が配線を固定)。
 
+Phase 1 として、レビューセッション (何を・どの画面を・どの観点で見てほしいか) の API (`/api/review-sessions`) と、レビュー画面 (`/review`) のガイド表示までを実装済み。観点は `ACTIVE` / `FUTURE` / `OUT_OF_SCOPE` の 3 状態を持ち、**今回選べない観点も消さずグレーアウトして表示する** (「今は見なくてよい」と「存在を忘れている」を顧客が区別できるようにするため)。権限は `review.view` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
+
 ## Notes
 
 - API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。全環境変数の一覧と本番 (ECS + Secrets Manager) での供給元は [`docs/environment-variables.md`](docs/environment-variables.md)。

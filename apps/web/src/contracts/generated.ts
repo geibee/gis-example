@@ -495,6 +495,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/review-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * レビューセッション一覧
+         * @description プロトタイプレビュー管理基盤 (docs/prototype-review.md) のレビューセッション。
+         *     観点 (perspectives) と対象画面 (scopes) を含めて返す。
+         */
+        get: operations["listReviewSessions"];
+        put?: never;
+        /** レビューセッション作成 */
+        post: operations["createReviewSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review-sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** レビューセッション取得 */
+        get: operations["getReviewSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * レビューセッション更新
+         * @description perspectives / scopes はキーを指定した場合のみ全置換する
+         *     (部分更新にすると「今回のレビューから何を外したか」が曖昧になるため)。
+         */
+        patch: operations["updateReviewSession"];
+        trace?: never;
+    };
     "/api/import-jobs": {
         parameters: {
             query?: never;
@@ -944,6 +988,85 @@ export interface components {
             typeBreakdown: components["schemas"]["ZonePartyBreakdown"][];
             tagBreakdown: components["schemas"]["ZonePartyBreakdown"][];
             parties: components["schemas"]["ZonePartySummaryEntry"][];
+        };
+        /**
+         * @description セッション内でのレビュー観点とその状態。FUTURE / OUT_OF_SCOPE も返し、
+         *     UI はグレーアウトして表示する (「今は見なくてよい」と「存在を忘れている」の区別)。
+         */
+        ReviewPerspective: {
+            code: string;
+            label: string;
+            description?: string | null;
+            displayOrder: number;
+            /** @enum {string} */
+            status: "ACTIVE" | "FUTURE" | "OUT_OF_SCOPE";
+            guidance?: string | null;
+        };
+        ReviewScope: {
+            id: string;
+            pageId: string;
+            description?: string | null;
+            reviewable: boolean;
+            displayOrder: number;
+        };
+        ReviewSession: {
+            id: string;
+            projectId: string;
+            title: string;
+            description?: string | null;
+            /** @enum {string} */
+            status: "draft" | "open" | "closed";
+            /** Format: date-time */
+            startAt?: string | null;
+            /** Format: date-time */
+            endAt?: string | null;
+            createdBy?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            perspectives: components["schemas"]["ReviewPerspective"][];
+            scopes: components["schemas"]["ReviewScope"][];
+        };
+        ReviewPerspectiveWriteRequest: {
+            code: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "FUTURE" | "OUT_OF_SCOPE";
+            guidance?: string | null;
+        };
+        ReviewScopeWriteRequest: {
+            pageId: string;
+            description?: string | null;
+            /** @default true */
+            reviewable: boolean;
+        };
+        ReviewSessionCreateRequest: {
+            projectId: string;
+            title: string;
+            description?: string | null;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "open" | "closed";
+            /** Format: date-time */
+            startAt?: string | null;
+            /** Format: date-time */
+            endAt?: string | null;
+            perspectives?: components["schemas"]["ReviewPerspectiveWriteRequest"][];
+            scopes?: components["schemas"]["ReviewScopeWriteRequest"][];
+        };
+        ReviewSessionPatchRequest: {
+            title?: string;
+            description?: string | null;
+            /** @enum {string} */
+            status?: "draft" | "open" | "closed";
+            /** Format: date-time */
+            startAt?: string | null;
+            /** Format: date-time */
+            endAt?: string | null;
+            perspectives?: components["schemas"]["ReviewPerspectiveWriteRequest"][];
+            scopes?: components["schemas"]["ReviewScopeWriteRequest"][];
         };
         ZoneLayerFromImportRequest: {
             projectId?: string | null;
@@ -2248,6 +2371,120 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ZoneLayerOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listReviewSessions: {
+        parameters: {
+            query: {
+                projectId: string;
+                status?: "draft" | "open" | "closed";
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSession"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createReviewSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSessionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 作成済み */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getReviewSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateReviewSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSessionPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新済み */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSession"];
                 };
             };
             400: components["responses"]["BadRequest"];
