@@ -108,7 +108,7 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 
 ## web (apps/web — ビルド時のみ)
 
-ソース: `src/api.ts` / `src/auth.ts` の `import.meta.env`。Vite の `VITE_*` は
+ソース: `src/api.ts` / `src/auth.ts` / `src/review/capture.ts` の `import.meta.env`。Vite の `VITE_*` は
 **ビルド時に JS へ埋め込まれる**ため、実行時の環境変数では変更できない。
 環境ごとにイメージを分けるか、ビルドパイプラインで環境別に `--build-arg` /
 `.env.production` を与える。**シークレットを `VITE_*` に入れないこと** (配布物に平文で残る)。
@@ -118,6 +118,11 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 | `VITE_API_BASE` | 任意 | `""` (同一オリジン相対パス) | ビルド引数 |
 | `VITE_OIDC_AUTHORITY` | 任意 (本番は明示) | `http://localhost:8081/realms/gis` | ビルド引数 |
 | `VITE_OIDC_CLIENT_ID` | 任意 | `gis-web` | ビルド引数 |
+| `VITE_APP_VERSION` | 任意 (レビュー基盤を使うなら必須) | `"dev"` | ビルド引数 (git SHA / ビルド番号) |
+
+`VITE_APP_VERSION` はレビュー証跡 (`docs/prototype-review.md`) に「どのプロトタイプへの
+指摘か」を残すための識別子。未設定でも動くが `dev` 固定になり、後から対象ビルドを
+追跡できなくなる。
 
 ## martin (タイルサーバー)
 

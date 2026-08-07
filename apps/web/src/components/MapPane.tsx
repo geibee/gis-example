@@ -12,6 +12,7 @@ import {
 } from "../mapUtils";
 import type { FeatureSearchResult, Layer } from "../contracts";
 import type { MapPaneApi } from "../appTypes";
+import { captureReadyCanvasContextAttributes } from "../review/types";
 import { MapSupportPane } from "./MapSupportPane";
 
 type SupportPaneProps = Omit<ComponentProps<typeof MapSupportPane>, "mapContainerRef">;
@@ -81,6 +82,9 @@ export default function MapPane({
       center: imperialPalaceCenter,
       zoom: defaultMapZoom,
       attributionControl: { compact: true },
+      // レビュー証跡 (docs/prototype-review.md) が地図を PNG に取り込めるようにする。
+      // 外すと地図領域が白紙の証跡になり、しかもエラーにならないので気付けない
+      canvasContextAttributes: captureReadyCanvasContextAttributes,
       // tilejson とタイル (/api/tiles) は MapLibre が直接取得するため、
       // ここでアクセストークンを付与する (API の認証必須化に対応)
       transformRequest: (url) => {
