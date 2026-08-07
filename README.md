@@ -187,6 +187,12 @@ web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-
 - 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。閲覧成功は記録しない。書込みはベストエフォートで、失敗してもリクエストは落とさない
 - 管理 API: `GET /api/me`(自分のロールとメンバーシップ)、admin 専用の `GET /api/users`・`PATCH /api/users/{id}`(system_role / is_active。自分自身は変更不可)・`GET/PUT/DELETE /api/projects/{id}/members/{userId}`。メンバーシップの変更は次のリクエストから即時反映される
 
+## Prototype Review
+
+プロトタイプに対して顧客が非同期でレビューコメントを付け、開発側とスレッドで対話・解決管理するための基盤。設計と実装計画は [`docs/prototype-review.md`](docs/prototype-review.md) を参照。
+
+最大の技術的不確実性だった「業務 DOM と MapLibre の WebGL 描画を 1 枚の証跡 PNG に合成できるか」は Phase 0 の技術検証で解消済み (`apps/web/spike/review-capture/`)。**地図を証跡に写すには MapLibre の生成時に `canvasContextAttributes: { preserveDrawingBuffer: true }` が必須** で、外すとエラーなしに「地図だけ白紙の証跡」になる (`apps/web/src/review/capture.test.ts` が配線を固定)。
+
 ## Notes
 
 - API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。全環境変数の一覧と本番 (ECS + Secrets Manager) での供給元は [`docs/environment-variables.md`](docs/environment-variables.md)。
