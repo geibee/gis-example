@@ -15,6 +15,10 @@ export const keys = {
     list: (projectId: string, status?: string) => ["review-sessions", "list", projectId, status ?? null] as const,
     detail: (id: string) => ["review-sessions", "detail", id] as const
   },
+  feedbackThreads: {
+    all: ["feedback-threads"] as const,
+    list: (reviewSessionId: string) => ["feedback-threads", "list", reviewSessionId] as const
+  },
   layers: {
     all: ["layers"] as const,
     list: (projectId: string) => ["layers", "list", projectId] as const

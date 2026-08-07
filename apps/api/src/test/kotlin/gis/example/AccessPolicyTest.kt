@@ -31,7 +31,8 @@ class AccessPolicyTest {
         Action.BUSINESS_READ,
         Action.JOB_READ,
         Action.TILE_READ,
-        Action.REVIEW_READ
+        Action.REVIEW_READ,
+        Action.REVIEW_COMMENT
     )
     private val writeActions = setOf(
         Action.LAYER_WRITE,

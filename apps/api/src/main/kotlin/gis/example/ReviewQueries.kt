@@ -424,8 +424,5 @@ private fun java.sql.ResultSet.toReviewSessionDto(): ReviewSessionDto = ReviewSe
     updatedAt = isoTimestamp("updated_at") ?: error("updated_at must not be null")
 )
 
-private fun java.sql.ResultSet.isoTimestamp(column: String): String? =
-    getObject(column, OffsetDateTime::class.java)?.toString()
-
 internal fun ReviewSessionDto.auditSnapshot(): JsonObject =
     auditSnapshot(ReviewSessionDto.serializer(), this)

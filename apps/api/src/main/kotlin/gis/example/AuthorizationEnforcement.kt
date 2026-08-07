@@ -27,7 +27,8 @@ enum class ProjectResourceType(
     PARTY("app.parties", false, "Party not found"),
     ZONE("app.zones", false, "Zone not found"),
     PARTY_RELATIONSHIP("app.party_relationships", true, "Relationship not found"),
-    REVIEW_SESSION("app.review_sessions", true, "Review session not found")
+    REVIEW_SESSION("app.review_sessions", true, "Review session not found"),
+    FEEDBACK_THREAD("app.feedback_threads", true, "Feedback thread not found")
 }
 
 fun ApplicationCall.appPrincipal(): AppPrincipal =

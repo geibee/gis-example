@@ -2099,3 +2099,123 @@ input[type="file"] {
 .review-scope-excluded {
   color: #94a3b8;
 }
+
+.feedback-launcher {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: #0f172a;
+  box-shadow: 0 6px 16px rgb(15 23 42 / 25%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* レビューモード中であることを常に見せる。証跡に写らないよう data-review-exclude を付ける */
+.feedback-picking-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #0f766e;
+  box-shadow: 0 6px 16px rgb(15 23 42 / 25%);
+  color: #fff;
+  font-size: 13px;
+}
+
+.feedback-picking-bar .subtle-button {
+  border-color: rgb(255 255 255 / 60%);
+  background: transparent;
+  color: #fff;
+}
+
+.feedback-composer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(420px, 100vw);
+  padding: 20px;
+  overflow: auto;
+  border-left: 1px solid #d3dae1;
+  background: #fff;
+  box-shadow: -8px 0 24px rgb(15 23 42 / 12%);
+}
+
+.feedback-target-summary {
+  margin: 0;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.feedback-target-summary code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+}
+
+.feedback-evidence img {
+  width: 100%;
+  border: 1px solid #d3dae1;
+  border-radius: 6px;
+}
+
+.feedback-evidence .review-guide-note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.feedback-perspectives {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d3dae1;
+  border-radius: 8px;
+}
+
+.feedback-perspectives legend {
+  padding: 0 4px;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.feedback-perspective-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #263238;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.feedback-body-field textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #cbd5f5;
+  border-radius: 6px;
+  font: inherit;
+  resize: vertical;
+}

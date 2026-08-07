@@ -13,6 +13,7 @@ import {
 import { useAuth } from "react-oidc-context";
 import { AppShellProvider, useAppShell } from "./appShell";
 import { MapStateProvider } from "./mapState";
+import { FeedbackOverlay } from "./components/FeedbackOverlay";
 import { MapPaneHost } from "./components/MapPaneHost";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
 import { Toaster } from "./ui/Toaster";
@@ -109,6 +110,9 @@ function AppLayout() {
         <MapPaneHost />
       </main>
 
+      {/* レビュー機能はどの画面からでも使えるよう、画面ではなくシェルに置く
+          (受付中のレビューセッションが無ければ何も描画しない) */}
+      <FeedbackOverlay />
       <Toaster />
       <ConfirmDialogHost />
     </div>

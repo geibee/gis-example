@@ -30,6 +30,7 @@ enum class Action {
     JOB_READ,
     TILE_READ,
     REVIEW_READ,
+    REVIEW_COMMENT,
     REVIEW_MANAGE,
     USER_ADMIN,
     MEMBER_ADMIN
@@ -53,6 +54,7 @@ enum class Permission(val key: String) {
     ANALYSIS_RUN("analysis.run"),
     JOBS_VIEW("jobs.view"),
     REVIEW_VIEW("review.view"),
+    REVIEW_COMMENT("review.comment"),
     REVIEW_MANAGE("review.manage"),
     ADMIN_USERS_MANAGE("admin.users.manage"),
     ADMIN_MEMBERS_MANAGE("admin.members.manage")
@@ -76,6 +78,7 @@ val Action.requiredPermission: Permission
         Action.JOB_READ -> Permission.JOBS_VIEW
         Action.TILE_READ -> Permission.MAP_VIEW
         Action.REVIEW_READ -> Permission.REVIEW_VIEW
+        Action.REVIEW_COMMENT -> Permission.REVIEW_COMMENT
         Action.REVIEW_MANAGE -> Permission.REVIEW_MANAGE
         Action.USER_ADMIN -> Permission.ADMIN_USERS_MANAGE
         Action.MEMBER_ADMIN -> Permission.ADMIN_MEMBERS_MANAGE
@@ -98,8 +101,9 @@ object BuiltinRoleDefinitions : RolePermissionResolver {
         Permission.MAP_VIEW,
         Permission.BUSINESS_DATA_VIEW,
         Permission.JOBS_VIEW,
-        // レビュー対象者 (docs/prototype-review.md の Reviewer) はガイドを読める必要がある
-        Permission.REVIEW_VIEW
+        // レビュー対象者 (docs/prototype-review.md の Reviewer) はガイドを読み、コメントできる
+        Permission.REVIEW_VIEW,
+        Permission.REVIEW_COMMENT
     )
     private val editorPermissions = viewerPermissions + setOf(
         Permission.LAYERS_MANAGE,

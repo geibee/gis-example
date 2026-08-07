@@ -1083,6 +1083,127 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/review-sessions/{id}/threads:
+    get:
+      tags: [review]
+      operationId: listFeedbackThreads
+      summary: フィードバックスレッド一覧
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, RESOLVED] } }
+        - { $ref: "#/components/parameters/ListLimit" }
+        - { $ref: "#/components/parameters/ListOffset" }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          headers:
+            X-Total-Count: { $ref: "#/components/headers/XTotalCount" }
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeedbackThread"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [review]
+      operationId: createFeedbackThread
+      summary: コメント投稿 (証跡つき)
+      description: |
+        メタデータ JSON とスクリーンショット PNG を multipart/form-data で同時に送る。
+        投稿できるのは受付中 (status=open) のセッションで、かつ観点が ACTIVE の場合のみ。
+        FUTURE / OUT_OF_SCOPE の観点や受付終了後の投稿はサーバ側でも拒否される。
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                metadata:
+                  $ref: "#/components/schemas/FeedbackThreadCreateMetadata"
+                screenshot:
+                  type: string
+                  format: binary
+                  description: 投稿時点のビューポート PNG (省略可。証跡なしの指摘も残せる)
+              required: [metadata]
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: 作成済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackThread"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 受付中でないセッションへの投稿
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: 証跡が上限サイズを超えている
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/threads/{threadId}:
+    get:
+      tags: [review]
+      operationId: getFeedbackThread
+      summary: フィードバックスレッド取得
+      parameters:
+        - $ref: "#/components/parameters/PathThreadId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackThread"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/threads/{threadId}/evidence:
+    get:
+      tags: [review]
+      operationId: getFeedbackEvidence
+      summary: 証跡スクリーンショットの取得
+      description: |
+        証跡は公開ストレージに置かず、この経路 (プロジェクトのメンバー検査つき) でのみ配信する。
+        個人情報・業務情報が写り得るため `Cache-Control: private, no-store` を付ける。
+      parameters:
+        - $ref: "#/components/parameters/PathThreadId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/import-jobs:
     post:
       tags: [jobs]
@@ -1255,6 +1376,11 @@ components:
       schema: { type: integer, minimum: 0, default: 0 }
     PathFeatureId:
       name: featureId
+      in: path
+      required: true
+      schema: { type: string }
+    PathThreadId:
+      name: threadId
       in: path
       required: true
       schema: { type: string }
@@ -1882,6 +2008,93 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReviewScopeWriteRequest"
+
+    ReviewEvidence:
+      type: object
+      description: |
+        コメント投稿時点の証跡メタデータ。画像本体は /api/threads/{threadId}/evidence でのみ取得でき、
+        保存先のパスは公開しない。
+      properties:
+        id: { type: string }
+        contentType: { type: string }
+        byteSize: { type: integer, format: int64 }
+        viewportWidth: { type: integer }
+        viewportHeight: { type: integer }
+        scrollX: { type: integer }
+        scrollY: { type: integer }
+        pixelRatio: { type: number }
+        frontendVersion: { type: string }
+        route: { type: string }
+        capturedAt: { type: string, format: date-time }
+      required:
+        [id, contentType, byteSize, viewportWidth, viewportHeight, scrollX, scrollY, pixelRatio,
+         frontendVersion, route, capturedAt]
+
+    FeedbackMessage:
+      type: object
+      properties:
+        id: { type: string }
+        threadId: { type: string }
+        authorId: { type: [string, "null"] }
+        authorName: { type: [string, "null"] }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
+        editedAt: { type: [string, "null"], format: date-time }
+      required: [id, threadId, body, createdAt]
+
+    FeedbackThread:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        reviewSessionId: { type: string }
+        reviewScopeId: { type: [string, "null"] }
+        perspectiveCode: { type: string }
+        perspectiveLabel: { type: string }
+        targetType: { type: string, enum: [UI_ELEMENT, SCREEN_POSITION, MAP_FEATURE, MAP_POSITION] }
+        targetMetadata:
+          type: object
+          additionalProperties: true
+          description: FeedbackTarget (apps/web/src/review/types.ts) をそのまま保持する
+        evidence:
+          oneOf:
+            - $ref: "#/components/schemas/ReviewEvidence"
+            - type: "null"
+        status: { type: string, enum: [OPEN, RESOLVED] }
+        createdBy: { type: [string, "null"] }
+        createdByName: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedbackMessage"
+      required:
+        [id, projectId, reviewSessionId, perspectiveCode, perspectiveLabel, targetType, targetMetadata,
+         status, createdAt, updatedAt, messages]
+
+    FeedbackThreadCreateMetadata:
+      type: object
+      description: |
+        投稿のメタデータ (multipart の metadata パートに JSON 文字列として載せる)。
+        viewport* / route はスクリーンショットを添付する場合に必須。
+      properties:
+        perspectiveCode: { type: string }
+        body: { type: string }
+        targetType: { type: string, enum: [UI_ELEMENT, SCREEN_POSITION, MAP_FEATURE, MAP_POSITION] }
+        target:
+          type: object
+          additionalProperties: true
+        pageId: { type: [string, "null"] }
+        route: { type: [string, "null"] }
+        viewportWidth: { type: [integer, "null"] }
+        viewportHeight: { type: [integer, "null"] }
+        scrollX: { type: [integer, "null"] }
+        scrollY: { type: [integer, "null"] }
+        pixelRatio: { type: [number, "null"] }
+        frontendVersion: { type: [string, "null"] }
+        capturedAt: { type: [string, "null"], format: date-time }
+      required: [perspectiveCode, body, targetType, target]
 
     ZoneLayerFromImportRequest:
       type: object

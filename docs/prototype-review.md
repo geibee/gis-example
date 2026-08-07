@@ -315,12 +315,18 @@ POST  /api/review-sessions                   # 観点・対象画面をまとめ
 PATCH /api/review-sessions/{id}              # 観点・対象画面はキー指定時のみ全置換 (REVIEW_MANAGE)
 ```
 
-今後 (Phase 2 以降):
+実装済み (Phase 2):
 
 ```http
-POST  /api/review-sessions/{id}/threads      # multipart/form-data (metadata JSON + screenshot)
-GET   /api/review-sessions/{id}/threads
-GET   /api/threads/{threadId}
+POST  /api/review-sessions/{id}/threads      # multipart/form-data (REVIEW_COMMENT)
+GET   /api/review-sessions/{id}/threads      # (REVIEW_READ)
+GET   /api/threads/{threadId}                # (REVIEW_READ)
+GET   /api/threads/{threadId}/evidence       # 証跡 PNG。private, no-store (REVIEW_READ)
+```
+
+今後 (Phase 4 以降):
+
+```http
 POST  /api/threads/{threadId}/messages
 PATCH /api/threads/{threadId}/status
 ```
@@ -345,7 +351,7 @@ PATCH /api/threads/{threadId}/status
 |---|---|---|
 | 0 | Screenshot スパイク (DOM + MapLibre 合成) | **完了** (第 4 章) |
 | 1 | ReviewSession / Perspective / ACTIVE・FUTURE・OUT_OF_SCOPE / ReviewGuide / ReviewScope | **完了** |
-| 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | 未着手 |
+| 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | **完了** |
 | 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | 未着手 |
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | 未着手 |
 | 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | 未着手 |
@@ -365,6 +371,10 @@ PATCH /api/threads/{threadId}/status
 | セッション API (一覧・詳細・作成・更新) | `ReviewQueries.kt` / `routes/ReviewRoutes.kt` | 1 |
 | 認可 (`REVIEW_READ` / `REVIEW_MANAGE`) | `Authorization.kt` ([authorization.md](authorization.md)) | 1 |
 | レビューガイド画面 | `apps/web/src/components/ReviewGuide.tsx` / `screens/ReviewScreen.tsx` | 1 |
+| スキーマ (スレッド・メッセージ・証跡) | `db/migration/V6__feedback_threads.sql` | 2 |
+| 投稿 API (multipart) と証跡配信 | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 2 |
+| 認可 (`REVIEW_COMMENT`) | `Authorization.kt` | 2 |
+| フィードバックオーバーレイ | `apps/web/src/components/FeedbackOverlay.tsx` | 2 |
 
 ### 11.1 Phase 1 の設計判断 (設計案からの変更点)
 
@@ -377,6 +387,12 @@ PATCH /api/threads/{threadId}/status
   顧客側メンバーを開発側と分離して管理する必要が出た時点で専用ロールを検討する。
 - **レビュー観点はマスタテーブル (`app.review_perspectives`) に置いた。** 組織ごとに観点を
   足す場合もコード変更を伴わない。組込みの 8 観点は V5 マイグレーションで投入する。
+- **投稿の可否はサーバでも判定する。** 観点のグレーアウトは UI の親切ではなく基盤の約束なので、
+  「受付中でないセッション (409)」「ACTIVE でない観点 (400)」はサーバ側でも拒否する。
+- **証跡は投稿ボタンではなく「対象をクリックした瞬間」に固定化する。** 入力パネルを開いてから
+  撮ると、パネルに隠れた画面が証跡に残らないため。
+- **証跡の取得失敗で投稿を止めない。** キャプチャに失敗しても指摘そのものは残せる方が価値が高い
+  (失敗理由は投稿前に画面へ出す)。
 - **期間はオフセット付き ISO-8601 のみ受け付ける。** 「いつまで受け付けるか」を機械的に
   比較する値なので、ローカル時刻の解釈揺れを持ち込まない。既存 API の `createdAt`
   (PostgreSQL 既定表記) とは表記が異なるが、同一 DTO 内では ISO-8601 に揃えている。

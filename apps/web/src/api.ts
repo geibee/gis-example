@@ -29,6 +29,8 @@ import type {
   PartyRelationshipWriteRequest,
   PartyWriteRequest,
   Project,
+  FeedbackThread,
+  FeedbackThreadCreateMetadata,
   ProjectMember,
   ReviewSession,
   UserAccount,
@@ -456,4 +458,35 @@ export async function getReviewSessions(projectId: string, status?: ReviewSessio
 
 export async function getReviewSession(id: string): Promise<ReviewSession> {
   return unwrap(await client.GET("/api/review-sessions/{id}", { params: { path: { id } } }));
+}
+
+export async function getFeedbackThreads(reviewSessionId: string): Promise<FeedbackThread[]> {
+  return unwrap(
+    await client.GET("/api/review-sessions/{id}/threads", { params: { path: { id: reviewSessionId } } })
+  );
+}
+
+/**
+ * コメント投稿。メタデータ JSON と証跡 PNG を multipart/form-data で同時に送る
+ * (契約は openapi.yaml の createFeedbackThread)。
+ */
+export async function createFeedbackThread(
+  reviewSessionId: string,
+  metadata: FeedbackThreadCreateMetadata,
+  screenshot: Blob | null
+): Promise<FeedbackThread> {
+  return unwrap(
+    await client.POST("/api/review-sessions/{id}/threads", {
+      params: { path: { id: reviewSessionId } },
+      // openapi-fetch の既定シリアライザは JSON なので、multipart は自前で組み立てる
+      // (Content-Type は boundary 付きでブラウザに決めさせる)
+      bodySerializer: () => {
+        const form = new FormData();
+        form.append("metadata", JSON.stringify(metadata));
+        if (screenshot) form.append("screenshot", screenshot, "evidence.png");
+        return form;
+      },
+      body: { metadata }
+    })
+  );
 }

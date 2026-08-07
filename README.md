@@ -193,7 +193,11 @@ web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-
 
 最大の技術的不確実性だった「業務 DOM と MapLibre の WebGL 描画を 1 枚の証跡 PNG に合成できるか」は Phase 0 の技術検証で解消済み (`apps/web/spike/review-capture/`)。**地図を証跡に写すには MapLibre の生成時に `canvasContextAttributes: { preserveDrawingBuffer: true }` が必須** で、外すとエラーなしに「地図だけ白紙の証跡」になる (`apps/web/src/review/capture.test.ts` が配線を固定)。
 
-Phase 1 として、レビューセッション (何を・どの画面を・どの観点で見てほしいか) の API (`/api/review-sessions`) と、レビュー画面 (`/review`) のガイド表示までを実装済み。観点は `ACTIVE` / `FUTURE` / `OUT_OF_SCOPE` の 3 状態を持ち、**今回選べない観点も消さずグレーアウトして表示する** (「今は見なくてよい」と「存在を忘れている」を顧客が区別できるようにするため)。権限は `review.view` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
+Phase 1 として、レビューセッション (何を・どの画面を・どの観点で見てほしいか) の API (`/api/review-sessions`) と、レビュー画面 (`/review`) のガイド表示までを実装済み。観点は `ACTIVE` / `FUTURE` / `OUT_OF_SCOPE` の 3 状態を持ち、**今回選べない観点も消さずグレーアウトして表示する** (「今は見なくてよい」と「存在を忘れている」を顧客が区別できるようにするため)。
+
+Phase 2 として、コメント投稿を実装済み。受付中のセッションがあると全画面の右下に「フィードバック」ボタンが出て、**対象箇所をクリック → 観点を選択 → コメント入力** でコンテキスト付きの指摘を残せる。証跡 PNG は対象クリックの瞬間に固定化され、`multipart/form-data` でメタデータと同時に送られる。証跡は公開ストレージに置かず `GET /api/threads/{id}/evidence` (認可つき・`private, no-store`) でのみ配信する。「受付中でないセッション」「ACTIVE でない観点」への投稿は UI だけでなくサーバ側でも拒否する。
+
+権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 
 ## Notes
 

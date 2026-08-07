@@ -539,6 +539,67 @@ export interface paths {
         patch: operations["updateReviewSession"];
         trace?: never;
     };
+    "/api/review-sessions/{id}/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** フィードバックスレッド一覧 */
+        get: operations["listFeedbackThreads"];
+        put?: never;
+        /**
+         * コメント投稿 (証跡つき)
+         * @description メタデータ JSON とスクリーンショット PNG を multipart/form-data で同時に送る。
+         *     投稿できるのは受付中 (status=open) のセッションで、かつ観点が ACTIVE の場合のみ。
+         *     FUTURE / OUT_OF_SCOPE の観点や受付終了後の投稿はサーバ側でも拒否される。
+         */
+        post: operations["createFeedbackThread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{threadId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** フィードバックスレッド取得 */
+        get: operations["getFeedbackThread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{threadId}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 証跡スクリーンショットの取得
+         * @description 証跡は公開ストレージに置かず、この経路 (プロジェクトのメンバー検査つき) でのみ配信する。
+         *     個人情報・業務情報が写り得るため `Cache-Control: private, no-store` を付ける。
+         */
+        get: operations["getFeedbackEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/import-jobs": {
         parameters: {
             query?: never;
@@ -1068,6 +1129,83 @@ export interface components {
             perspectives?: components["schemas"]["ReviewPerspectiveWriteRequest"][];
             scopes?: components["schemas"]["ReviewScopeWriteRequest"][];
         };
+        /**
+         * @description コメント投稿時点の証跡メタデータ。画像本体は /api/threads/{threadId}/evidence でのみ取得でき、
+         *     保存先のパスは公開しない。
+         */
+        ReviewEvidence: {
+            id: string;
+            contentType: string;
+            /** Format: int64 */
+            byteSize: number;
+            viewportWidth: number;
+            viewportHeight: number;
+            scrollX: number;
+            scrollY: number;
+            pixelRatio: number;
+            frontendVersion: string;
+            route: string;
+            /** Format: date-time */
+            capturedAt: string;
+        };
+        FeedbackMessage: {
+            id: string;
+            threadId: string;
+            authorId?: string | null;
+            authorName?: string | null;
+            body: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            editedAt?: string | null;
+        };
+        FeedbackThread: {
+            id: string;
+            projectId: string;
+            reviewSessionId: string;
+            reviewScopeId?: string | null;
+            perspectiveCode: string;
+            perspectiveLabel: string;
+            /** @enum {string} */
+            targetType: "UI_ELEMENT" | "SCREEN_POSITION" | "MAP_FEATURE" | "MAP_POSITION";
+            /** @description FeedbackTarget (apps/web/src/review/types.ts) をそのまま保持する */
+            targetMetadata: {
+                [key: string]: unknown;
+            };
+            evidence?: components["schemas"]["ReviewEvidence"] | null;
+            /** @enum {string} */
+            status: "OPEN" | "RESOLVED";
+            createdBy?: string | null;
+            createdByName?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            messages: components["schemas"]["FeedbackMessage"][];
+        };
+        /**
+         * @description 投稿のメタデータ (multipart の metadata パートに JSON 文字列として載せる)。
+         *     viewport* / route はスクリーンショットを添付する場合に必須。
+         */
+        FeedbackThreadCreateMetadata: {
+            perspectiveCode: string;
+            body: string;
+            /** @enum {string} */
+            targetType: "UI_ELEMENT" | "SCREEN_POSITION" | "MAP_FEATURE" | "MAP_POSITION";
+            target: {
+                [key: string]: unknown;
+            };
+            pageId?: string | null;
+            route?: string | null;
+            viewportWidth?: number | null;
+            viewportHeight?: number | null;
+            scrollX?: number | null;
+            scrollY?: number | null;
+            pixelRatio?: number | null;
+            frontendVersion?: string | null;
+            /** Format: date-time */
+            capturedAt?: string | null;
+        };
         ZoneLayerFromImportRequest: {
             projectId?: string | null;
             layerId: string;
@@ -1199,6 +1337,7 @@ export interface components {
         /** @description 読み飛ばす件数 */
         ListOffset: number;
         PathFeatureId: string;
+        PathThreadId: string;
     };
     requestBodies: never;
     headers: {
@@ -2485,6 +2624,146 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listFeedbackThreads: {
+        parameters: {
+            query?: {
+                status?: "OPEN" | "RESOLVED";
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description 読み飛ばす件数 */
+                offset?: components["parameters"]["ListOffset"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "X-Total-Count": components["headers"]["XTotalCount"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackThread"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createFeedbackThread: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PathId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    metadata: components["schemas"]["FeedbackThreadCreateMetadata"];
+                    /**
+                     * Format: binary
+                     * @description 投稿時点のビューポート PNG (省略可。証跡なしの指摘も残せる)
+                     */
+                    screenshot?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 作成済み */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackThread"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 受付中でないセッションへの投稿 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 証跡が上限サイズを超えている */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getFeedbackThread: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                threadId: components["parameters"]["PathThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackThread"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getFeedbackEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                threadId: components["parameters"]["PathThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
                 };
             };
             400: components["responses"]["BadRequest"];

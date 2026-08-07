@@ -433,3 +433,51 @@ data class ReviewSessionDto(
     val perspectives: List<ReviewPerspectiveDto> = emptyList(),
     val scopes: List<ReviewScopeDto> = emptyList()
 )
+
+/** コメント投稿時点の証跡。画像本体は API 経由でのみ取得できる (パスは公開しない) */
+@Serializable
+data class ReviewEvidenceDto(
+    val id: String,
+    val contentType: String,
+    val byteSize: Long,
+    val viewportWidth: Int,
+    val viewportHeight: Int,
+    val scrollX: Int,
+    val scrollY: Int,
+    val pixelRatio: Double,
+    val frontendVersion: String,
+    val route: String,
+    val capturedAt: String
+)
+
+@Serializable
+data class FeedbackMessageDto(
+    val id: String,
+    val threadId: String,
+    val authorId: String? = null,
+    val authorName: String? = null,
+    val body: String,
+    val createdAt: String,
+    val editedAt: String? = null
+)
+
+@Serializable
+data class FeedbackThreadDto(
+    val id: String,
+    val projectId: String,
+    val reviewSessionId: String,
+    val reviewScopeId: String? = null,
+    val perspectiveCode: String,
+    val perspectiveLabel: String,
+    /** UI_ELEMENT / SCREEN_POSITION / MAP_FEATURE / MAP_POSITION */
+    val targetType: String,
+    /** FeedbackTarget (apps/web/src/review/types.ts) をそのまま保持する */
+    val targetMetadata: JsonObject,
+    val evidence: ReviewEvidenceDto? = null,
+    val status: String,
+    val createdBy: String? = null,
+    val createdByName: String? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    val messages: List<FeedbackMessageDto> = emptyList()
+)

@@ -7,6 +7,7 @@ import gis.example.routes.TOTAL_COUNT_HEADER
 import gis.example.routes.adminRoutes
 import gis.example.routes.buildingRoutes
 import gis.example.routes.featureRoutes
+import gis.example.routes.feedbackRoutes
 import gis.example.routes.healthRoutes
 import gis.example.routes.jobRoutes
 import gis.example.routes.landRoutes
@@ -177,6 +178,7 @@ fun Route.authenticatedApiRoutes(deps: AppDependencies) {
     partyRoutes(deps)
     zoneRoutes(deps)
     reviewRoutes(deps)
+    feedbackRoutes(deps)
     jobRoutes(deps)
     tileRoutes(deps)
 }
