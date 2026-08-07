@@ -2219,3 +2219,109 @@ input[type="file"] {
   font: inherit;
   resize: vertical;
 }
+
+/* 既存コメントは証跡そのものへ焼き込まず、現在 UI の上へレビュー UI として重ねる。 */
+.feedback-screen-pins {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  pointer-events: none;
+}
+
+.feedback-pin,
+.feedback-map-pin {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #ffffff;
+  border-radius: 50% 50% 50% 4px;
+  background: #dc2626;
+  box-shadow: 0 3px 9px rgb(15 23 42 / 35%);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.feedback-pin {
+  position: fixed;
+  transform: translate(-4px, -22px) rotate(-45deg);
+  pointer-events: auto;
+}
+
+.feedback-pin > span,
+.feedback-map-pin > span {
+  display: inline-block;
+  transform: rotate(45deg);
+}
+
+.feedback-pin.resolved,
+.feedback-map-pin.resolved {
+  background: #64748b;
+}
+
+.feedback-pin[aria-pressed="true"] {
+  outline: 3px solid rgb(15 118 110 / 35%);
+  outline-offset: 2px;
+}
+
+.feedback-pin-popover {
+  position: fixed;
+  z-index: 36;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 6px 10px;
+  width: 280px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+  box-shadow: 0 8px 22px rgb(15 23 42 / 20%);
+  color: #334155;
+  pointer-events: auto;
+}
+
+.feedback-pin-popover > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedback-pin-popover strong,
+.feedback-map-popover strong {
+  color: #0f766e;
+  font-size: 12px;
+}
+
+.feedback-pin-popover span {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.feedback-pin-popover p,
+.feedback-map-popover p {
+  grid-column: 1 / -1;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.feedback-pin-popover .icon-button {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+}
+
+.feedback-map-pin {
+  transform: rotate(-45deg);
+}
+
+.feedback-map-popover {
+  display: grid;
+  gap: 5px;
+  max-width: 260px;
+  color: #334155;
+}

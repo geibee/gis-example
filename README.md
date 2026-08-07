@@ -197,6 +197,8 @@ Phase 1 として、レビューセッション (何を・どの画面を・ど�
 
 Phase 2 として、コメント投稿を実装済み。受付中のセッションがあると全画面の右下に「フィードバック」ボタンが出て、**対象箇所をクリック → 観点を選択 → コメント入力** でコンテキスト付きの指摘を残せる。証跡 PNG は対象クリックの瞬間に固定化され、`multipart/form-data` でメタデータと同時に送られる。証跡は公開ストレージに置かず `GET /api/threads/{id}/evidence` (認可つき・`private, no-store`) でのみ配信する。「受付中でないセッション」「ACTIVE でない観点」への投稿は UI だけでなくサーバ側でも拒否する。
 
+Phase 3 として、主要なナビゲーション・一覧行・詳細ヘッダ・入力項目へ `data-feedback-id` の安定 ID を付与し、既存コメントを現在 UI 上のピンとして再表示する。地図クリックは `FeedbackMapAdapter` が表示中の MapLibre レイヤを問い合わせ、レイヤごとの feature ID 列を使って `MAP_FEATURE` / `MAP_POSITION` を解決する。地図コメントは経緯度に追従する Marker、画面コメントは同じ route の相対座標または安定 ID の現在位置へ表示する。
+
 権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 
 ## Notes

@@ -10,9 +10,10 @@ import {
   syncConditionSearchHighlight,
   syncMapLayerOrder
 } from "../mapUtils";
-import type { FeatureSearchResult, Layer } from "../contracts";
+import type { FeedbackThread, FeatureSearchResult, Layer } from "../contracts";
 import type { MapPaneApi } from "../appTypes";
-import { captureReadyCanvasContextAttributes } from "../review/types";
+import { captureReadyCanvasContextAttributes, useReview } from "../review";
+import { FeedbackMapAdapter } from "./FeedbackMapAdapter";
 import { MapSupportPane } from "./MapSupportPane";
 
 type SupportPaneProps = Omit<ComponentProps<typeof MapSupportPane>, "mapContainerRef">;
@@ -27,6 +28,7 @@ type MapPaneProps = SupportPaneProps & {
   layerById: Map<string, Layer>;
   onPickFeature: (layer: Layer, featureId: string) => void;
   onNotice: (message: string) => void;
+  reviewThreads: FeedbackThread[];
 };
 
 export default function MapPane({
@@ -37,6 +39,7 @@ export default function MapPane({
   layerById,
   onPickFeature,
   onNotice,
+  reviewThreads,
   ...supportPaneProps
 }: MapPaneProps) {
   const { open, baseMapVisible, visibleLayerIds } = supportPaneProps;
@@ -47,6 +50,7 @@ export default function MapPane({
   const initializedLayerBounds = useRef(false);
   const seenLayerIds = useRef<Set<string>>(new Set());
   const [mapReady, setMapReady] = useState(false);
+  const { mode: reviewMode } = useReview();
 
   useEffect(() => {
     apiRef.current = {
@@ -209,6 +213,7 @@ export default function MapPane({
     if (!mapReady || !map) return;
 
     const handleClick = (event: MapLayerMouseEvent) => {
+      if (reviewMode === "picking" || reviewMode === "capturing") return;
       const queryLayerIds = Object.values(styleLayersByLayerId.current)
         .flat()
         .filter((id) => map.getLayer(id));
@@ -232,12 +237,24 @@ export default function MapPane({
     return () => {
       map.off("click", handleClick);
     };
-  }, [layerById, mapReady, onNotice, onPickFeature]);
+  }, [layerById, mapReady, onNotice, onPickFeature, reviewMode]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => mapRef.current?.resize(), 0);
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  return <MapSupportPane mapContainerRef={mapContainerRef} {...supportPaneProps} />;
+  return (
+    <>
+      <MapSupportPane mapContainerRef={mapContainerRef} {...supportPaneProps} />
+      {mapReady && mapRef.current ? (
+        <FeedbackMapAdapter
+          map={mapRef.current}
+          layers={layers}
+          styleLayersByLayerId={styleLayersByLayerId.current}
+          threads={reviewThreads}
+        />
+      ) : null}
+    </>
+  );
 }

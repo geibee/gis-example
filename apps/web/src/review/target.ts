@@ -77,6 +77,8 @@ export type ResolveMapTargetOptions = {
    * 未指定・値なしの場合は MapLibre の feature.id にフォールバックする。
    */
   featureIdProperty?: string;
+  /** ソースごとに feature ID の属性名が異なる動的レイヤ向けの対応表。 */
+  featureIdPropertyBySource?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -100,7 +102,10 @@ export function resolveMapTarget(
   const [feature] = map.queryRenderedFeatures([event.point.x, event.point.y], layers ? { layers } : undefined);
   if (!feature) return position;
 
-  const featureId = readFeatureId(feature, options.featureIdProperty);
+  const featureId = readFeatureId(
+    feature,
+    options.featureIdPropertyBySource?.[feature.source] ?? options.featureIdProperty
+  );
   if (featureId === null) return position;
 
   return {
@@ -111,6 +116,83 @@ export function resolveMapTarget(
     ...(feature.sourceLayer ? { sourceLayer: feature.sourceLayer } : {}),
     featureId
   };
+}
+
+/** API の JSON から、描画に使える妥当な FeedbackTarget だけを復元する。 */
+export function parseFeedbackTarget(value: unknown): FeedbackTarget | null {
+  if (!isRecord(value) || typeof value.type !== "string") return null;
+  switch (value.type) {
+    case "UI_ELEMENT":
+      return typeof value.feedbackTargetId === "string" && value.feedbackTargetId.trim() !== "" && isRelativePoint(value)
+        ? {
+            type: value.type,
+            feedbackTargetId: value.feedbackTargetId.trim(),
+            relativeX: value.relativeX,
+            relativeY: value.relativeY
+          }
+        : null;
+    case "SCREEN_POSITION":
+      return isRelativePoint(value)
+        ? { type: value.type, relativeX: value.relativeX, relativeY: value.relativeY }
+        : null;
+    case "MAP_FEATURE":
+      return isCoordinate(value) && isNonBlankString(value.source) && isNonBlankString(value.featureId)
+        ? {
+            type: value.type,
+            longitude: value.longitude,
+            latitude: value.latitude,
+            source: value.source.trim(),
+            ...(isNonBlankString(value.sourceLayer) ? { sourceLayer: value.sourceLayer.trim() } : {}),
+            featureId: value.featureId.trim()
+          }
+        : null;
+    case "MAP_POSITION":
+      return isCoordinate(value)
+        ? { type: value.type, longitude: value.longitude, latitude: value.latitude }
+        : null;
+    default:
+      return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function isRelativePoint(value: Record<string, unknown>): value is Record<string, unknown> & {
+  relativeX: number;
+  relativeY: number;
+} {
+  return (
+    isFiniteNumber(value.relativeX) &&
+    isFiniteNumber(value.relativeY) &&
+    value.relativeX >= 0 &&
+    value.relativeX <= 1 &&
+    value.relativeY >= 0 &&
+    value.relativeY <= 1
+  );
+}
+
+function isCoordinate(value: Record<string, unknown>): value is Record<string, unknown> & {
+  longitude: number;
+  latitude: number;
+} {
+  return (
+    isFiniteNumber(value.longitude) &&
+    isFiniteNumber(value.latitude) &&
+    value.longitude >= -180 &&
+    value.longitude <= 180 &&
+    value.latitude >= -90 &&
+    value.latitude <= 90
+  );
 }
 
 function readFeatureId(feature: FeedbackQueriedFeature, featureIdProperty?: string): string | null {

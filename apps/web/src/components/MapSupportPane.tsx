@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { BusinessLinks, Feature, Layer } from "../contracts";
 import type { LayerListItem } from "../appTypes";
+import { feedbackMapAttribute } from "../review";
 import { formatValue } from "../utils";
 import { BusinessLinksPanel } from "./BusinessLinksPanel";
 import { FeatureEditor } from "./FeatureEditor";
@@ -97,7 +98,7 @@ export function MapSupportPane({
       </header>
 
       <div className="support-map-panel">
-        <div ref={mapContainerRef} className="map-container" />
+        <div ref={mapContainerRef} className="map-container" {...{ [feedbackMapAttribute]: "" }} />
       </div>
 
       <div className="map-support-scroll">

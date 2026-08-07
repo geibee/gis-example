@@ -299,6 +299,25 @@ FeedbackMapAdapter / FeedbackDrawer / FeedbackThread / ScreenshotCapture
 
 Overlay 自身の DOM には `data-review-exclude` を付ける (証跡に自分が写り込まないようにする)。
 
+### 8.3 Phase 3 の対象 ID とピン表示
+
+`data-feedback-id` は表示文言や DOM の連番から作らず、英語のドット区切りで機能上の意味を固定する。
+例: `navigation.lands` / `lands.field.address` / `zones.row.Z-1`。一覧行の末尾だけは業務 ID を使い、
+ソート・ページング後も同じ対象を指すようにする。
+
+既存コメントのピンは次の規則で現在 UI へ投影する。
+
+- `UI_ELEMENT`: 同じ `data-feedback-id` の現在位置を優先する。保存座標がまだ要素内なら元のクリック位置を使い、
+  レイアウト変更で外れた場合は要素の左上付近へ寄せる
+- `SCREEN_POSITION`: 証跡の route が現在の pathname と一致する場合だけ、ビューポート相対座標へ表示する。
+  証跡がなく画面を特定できないコメントは誤表示を避けてピンを出さない
+- `MAP_FEATURE` / `MAP_POSITION`: 保存した経緯度へ MapLibre Marker を表示する。地物 ID はレイヤの
+  `featureIdColumn` を source ごとに解決し、全レイヤが `fid` であるとは仮定しない
+
+ピンと概要ポップアップもレビュー UI なので `data-review-exclude` を付け、後続の証跡へ写り込ませない。
+地図ポップアップは `closeOnClick: false` とし、コメント対象を選ぶクリックで既存コメントの概要が
+意図せず閉じる挙動を避ける。
+
 ---
 
 ## 9. API 案
@@ -352,7 +371,7 @@ PATCH /api/threads/{threadId}/status
 | 0 | Screenshot スパイク (DOM + MapLibre 合成) | **完了** (第 4 章) |
 | 1 | ReviewSession / Perspective / ACTIVE・FUTURE・OUT_OF_SCOPE / ReviewGuide / ReviewScope | **完了** |
 | 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | **完了** |
-| 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | 未着手 |
+| 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | **完了** |
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | 未着手 |
 | 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | 未着手 |
 | 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | 未着手 |
@@ -375,6 +394,8 @@ PATCH /api/threads/{threadId}/status
 | 投稿 API (multipart) と証跡配信 | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 2 |
 | 認可 (`REVIEW_COMMENT`) | `Authorization.kt` | 2 |
 | フィードバックオーバーレイ | `apps/web/src/components/FeedbackOverlay.tsx` | 2 |
+| 安定 ID と画面コメントピン | `FeedbackPins.tsx` / 各業務 Workspace | 3 |
+| 地図対象解決と地図コメントピン | `FeedbackMapAdapter.tsx` / `MapPane.tsx` | 3 |
 
 ### 11.1 Phase 1 の設計判断 (設計案からの変更点)
 
@@ -396,8 +417,14 @@ PATCH /api/threads/{threadId}/status
 - **期間はオフセット付き ISO-8601 のみ受け付ける。** 「いつまで受け付けるか」を機械的に
   比較する値なので、ローカル時刻の解釈揺れを持ち込まない。既存 API の `createdAt`
   (PostgreSQL 既定表記) とは表記が異なるが、同一 DTO 内では ISO-8601 に揃えている。
+- **地図と DOM のクリック経路を分離した。** MapLibre の Canvas には `data-feedback-map` を付け、
+  document の capture listener は地図クリックを横取りしない。`FeedbackMapAdapter` が同じ
+  `ReviewProvider` へ対象を渡すため、証跡取得・キャンセル・Composer は DOM と地図で共通になる。
+- **画面座標ピンは route が一致するときだけ表示する。** 相対座標だけでは別画面へ誤表示できるため、
+  証跡なしの `SCREEN_POSITION` は表示しない。一方 `UI_ELEMENT` は安定 ID が現在 DOM に存在すれば
+  route をまたいで共通ナビゲーション等へ正しく再接続できる。
 
-### 11.1 実装難易度の見立て
+### 11.2 実装難易度の見立て
 
 | 項目 | 難易度 | 備考 |
 |---|---|---|

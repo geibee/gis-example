@@ -7,6 +7,9 @@
 /** UI 部品にコメント対象としての安定 ID を与える属性 (`data-feedback-id="..."`)。 */
 export const feedbackTargetAttribute = "data-feedback-id";
 
+/** MapLibre の描画領域を DOM の画面座標対象と区別する属性。 */
+export const feedbackMapAttribute = "data-feedback-map";
+
 /** レビュー用オーバーレイ自身を証跡から除外する属性 (`data-review-exclude`)。 */
 export const captureExcludeAttribute = "data-review-exclude";
 

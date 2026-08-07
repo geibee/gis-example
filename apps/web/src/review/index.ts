@@ -10,6 +10,7 @@ export {
   type ViewportEvidence
 } from "./capture";
 export {
+  parseFeedbackTarget,
   resolveMapTarget,
   resolveScreenTarget,
   type FeedbackMapClick,
@@ -22,8 +23,15 @@ export {
 export {
   captureExcludeAttribute,
   captureReadyCanvasContextAttributes,
+  feedbackMapAttribute,
   feedbackTargetAttribute,
   type FeedbackTarget,
   type FeedbackTargetType,
   type RelativePoint
 } from "./types";
+export {
+  ReviewProvider,
+  useReview,
+  type PickedFeedbackTarget,
+  type ReviewMode
+} from "./ReviewProvider";

@@ -2,6 +2,8 @@ import { lazy, Suspense } from "react";
 import { useAppShell } from "../appShell";
 import { useMapState } from "../mapState";
 import { notifyError } from "../notifications";
+import { useFeedbackThreadsQuery } from "../queries/feedbackThreads";
+import { useReviewSessionsQuery } from "../queries/reviewSessions";
 
 // 地図ペイン (maplibre-gl を含む) はメインチャンクとは別チャンクとして遅延ロードする
 const MapPane = lazy(() => import("./MapPane"));
@@ -9,8 +11,10 @@ const MapPane = lazy(() => import("./MapPane"));
 // MapPane への配線を App から切り出したホスト。props はすべて AppShell / MapState
 // コンテキストから供給し、App 側のバケツリレーをなくす。
 export function MapPaneHost() {
-  const { mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const { mapSupportOpen, selectedProject, setMapSupportOpen } = useAppShell();
   const map = useMapState();
+  const sessionsQuery = useReviewSessionsQuery(selectedProject, "open");
+  const feedbackThreadsQuery = useFeedbackThreadsQuery(sessionsQuery.data?.[0]?.id ?? null);
 
   return (
     <Suspense fallback={<aside className={`map-support-pane${mapSupportOpen ? "" : " closed"}`} />}>
@@ -22,6 +26,7 @@ export function MapPaneHost() {
         layerById={map.layerById}
         onPickFeature={map.handleMapFeatureClick}
         onNotice={notifyError}
+        reviewThreads={feedbackThreadsQuery.data ?? []}
         open={mapSupportOpen}
         onToggle={() => setMapSupportOpen((open) => !open)}
         baseMapVisible={map.baseMapVisible}

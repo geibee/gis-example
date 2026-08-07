@@ -1,72 +1,59 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Camera, MessageSquarePlus, X } from "lucide-react";
 import { useAppShell } from "../appShell";
 import { notifyError, notifySuccess } from "../notifications";
-import { useCreateFeedbackThreadMutation } from "../queries/feedbackThreads";
+import { useCreateFeedbackThreadMutation, useFeedbackThreadsQuery } from "../queries/feedbackThreads";
 import { useReviewSessionsQuery } from "../queries/reviewSessions";
-import { captureExcludeAttribute, captureViewport, resolveScreenTarget } from "../review";
-import type { FeedbackTarget, ViewportEvidence } from "../review";
+import {
+  captureExcludeAttribute,
+  feedbackMapAttribute,
+  resolveScreenTarget,
+  useReview,
+  type FeedbackTarget,
+  type PickedFeedbackTarget
+} from "../review";
 import type { ReviewSession } from "../contracts";
 import { errorMessage } from "../utils";
+import { FeedbackPins } from "./FeedbackPins";
 
-// フィードバックオーバーレイ (docs/prototype-review.md Phase 2)。
+// フィードバックオーバーレイ (docs/prototype-review.md Phase 2〜3)。
 //
 // 業務画面側に個別実装を入れず、どの画面からでも「対象箇所をクリック → 観点を選ぶ →
 // コメントを書く」でコンテキスト付きの指摘を残せるようにする。
 // 証跡は投稿ボタンを押した時点ではなく「対象をクリックした瞬間」に固定化する
 // (入力パネルを開いてから撮ると、パネルに隠れた画面が証跡に残らないため)。
 
-type Mode = "idle" | "picking" | "composing";
-
-type PickedTarget = {
-  target: FeedbackTarget;
-  evidence: ViewportEvidence | null;
-  /** 証跡の生成に失敗した場合の理由 (指摘自体は残せるので投稿は止めない) */
-  captureError: string | null;
-};
-
 export function FeedbackOverlay() {
   const { selectedProject } = useAppShell();
   // 受付中のセッションがないときはレビュー機能自体を出さない
   const sessionsQuery = useReviewSessionsQuery(selectedProject, "open");
   const session = sessionsQuery.data?.[0] ?? null;
+  const threadsQuery = useFeedbackThreadsQuery(session?.id ?? null);
+  const { mode, picked, startPicking, selectTarget, reset } = useReview();
 
-  const [mode, setMode] = useState<Mode>("idle");
-  const [picked, setPicked] = useState<PickedTarget | null>(null);
-
-  const reset = useCallback(() => {
-    setMode("idle");
-    setPicked(null);
-  }, []);
-
-  const pick = useCallback(async (element: Element | null, clientX: number, clientY: number) => {
-    const target = resolveScreenTarget(
-      { clientX, clientY },
-      element,
-      { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }
-    );
-    let evidence: ViewportEvidence | null = null;
-    let captureError: string | null = null;
-    try {
-      evidence = await captureViewport();
-    } catch (error) {
-      // 証跡がなくても指摘は残せる。失敗を黙って捨てず、投稿前に見せる
-      captureError = errorMessage(error);
-    }
-    setPicked({ target, evidence, captureError });
-    setMode("composing");
-  }, []);
+  useEffect(() => {
+    if (!session && mode !== "idle") reset();
+  }, [mode, reset, session]);
 
   // レビューモード中の最初のクリックをコメント対象の指定として横取りする。
   // capture フェーズで止めるので、業務画面側のハンドラは実行されない
   useEffect(() => {
-    if (mode !== "picking") return;
+    if (mode !== "picking" && mode !== "capturing") return;
     const onClick = (event: MouseEvent) => {
+      if (mode !== "picking") return;
       const element = event.target instanceof Element ? event.target : null;
       if (element?.closest(`[${captureExcludeAttribute}]`)) return;
+      // MapLibre は Canvas 1 枚なので、地図アダプタ側で地物 / 地点として解決する。
+      if (element?.closest(`[${feedbackMapAttribute}]`)) return;
       event.preventDefault();
       event.stopPropagation();
-      void pick(element, event.clientX, event.clientY);
+      void selectTarget(
+        resolveScreenTarget(
+          { clientX: event.clientX, clientY: event.clientY },
+          element,
+          { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }
+        )
+      );
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") reset();
@@ -77,27 +64,34 @@ export function FeedbackOverlay() {
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [mode, pick, reset]);
+  }, [mode, reset, selectTarget]);
 
   if (!session) return null;
 
   return (
     <>
       {mode === "idle" ? (
-        <button
-          type="button"
-          className="feedback-launcher"
-          {...{ [captureExcludeAttribute]: "" }}
-          onClick={() => setMode("picking")}
-        >
-          <MessageSquarePlus size={16} />
-          フィードバック
-        </button>
+        <>
+          <FeedbackPins threads={threadsQuery.data ?? []} />
+          <button
+            type="button"
+            className="feedback-launcher"
+            {...{ [captureExcludeAttribute]: "" }}
+            onClick={startPicking}
+          >
+            <MessageSquarePlus size={16} />
+            フィードバック
+          </button>
+        </>
       ) : null}
 
-      {mode === "picking" ? (
+      {mode === "picking" || mode === "capturing" ? (
         <div className="feedback-picking-bar" role="status" {...{ [captureExcludeAttribute]: "" }}>
-          <span>コメントしたい箇所をクリックしてください</span>
+          <span>
+            {mode === "capturing"
+              ? "投稿時点の画面を取得しています…"
+              : "コメントしたい箇所をクリックしてください"}
+          </span>
           <button type="button" className="subtle-button" onClick={reset}>
             <X size={14} />
             キャンセル
@@ -114,7 +108,7 @@ export function FeedbackOverlay() {
 
 type FeedbackComposerProps = {
   session: ReviewSession;
-  picked: PickedTarget;
+  picked: PickedFeedbackTarget;
   onClose: () => void;
 };
 

@@ -7,6 +7,8 @@
 import { http, HttpResponse } from "msw";
 import type {
   Building,
+  FeedbackThread,
+  Feature,
   FeatureSearchResult,
   Land,
   Layer,
@@ -39,6 +41,7 @@ export const defaultHandlers = [
   http.get("*/api/projects", () => HttpResponse.json<Project[]>([makeProject()])),
   http.get("*/api/layers", () => HttpResponse.json<Layer[]>([])),
   http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([makeReviewSession()])),
+  http.get("*/api/review-sessions/:id/threads", () => HttpResponse.json<FeedbackThread[]>([])),
 
   http.get("*/api/zones", () => HttpResponse.json<Zone[]>(defaultZones)),
   http.get("*/api/zones/:id", ({ params }) => {
@@ -53,6 +56,13 @@ export const defaultHandlers = [
   http.get("*/api/buildings", () => HttpResponse.json<Building[]>([])),
   http.get("*/api/parties", () => HttpResponse.json<Party[]>([])),
   http.get("*/api/features/search", () => HttpResponse.json<FeatureSearchResult[]>([])),
+  http.get("*/api/layers/:layerId/features/:featureId", ({ params }) =>
+    HttpResponse.json<Feature>({
+      layerId: String(params.layerId),
+      featureId: String(params.featureId),
+      properties: {}
+    })
+  ),
 
   // 管理画面 (system admin)
   http.get("*/api/users", () =>

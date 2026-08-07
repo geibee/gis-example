@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseFeedbackTarget,
   resolveMapTarget,
   resolveScreenTarget,
   type FeedbackMapLike,
@@ -123,5 +124,44 @@ describe("resolveMapTarget", () => {
 
     expect(resolveMapTarget(map, click, { layers: [] }).type).toBe("MAP_POSITION");
     expect(queried).toBe(false);
+  });
+
+  it("ソースごとの ID 属性名を使い分ける", () => {
+    const map = mapWith([{ source: "building-layer", properties: { building_id: "B-42", fid: "wrong" } }]);
+
+    expect(
+      resolveMapTarget(map, click, { featureIdPropertyBySource: { "building-layer": "building_id" } })
+    ).toMatchObject({ type: "MAP_FEATURE", featureId: "B-42" });
+  });
+});
+
+describe("parseFeedbackTarget", () => {
+  it("API の JSON を FeedbackTarget に復元する", () => {
+    expect(
+      parseFeedbackTarget({
+        type: "MAP_FEATURE",
+        longitude: 139.7,
+        latitude: 35.6,
+        source: "parcel",
+        sourceLayer: "parcel",
+        featureId: "10"
+      })
+    ).toEqual({
+      type: "MAP_FEATURE",
+      longitude: 139.7,
+      latitude: 35.6,
+      source: "parcel",
+      sourceLayer: "parcel",
+      featureId: "10"
+    });
+  });
+
+  it("範囲外座標や欠損値を描画対象にしない", () => {
+    expect(parseFeedbackTarget({ type: "SCREEN_POSITION", relativeX: 2, relativeY: 0.5 })).toBeNull();
+    expect(parseFeedbackTarget({ type: "MAP_POSITION", longitude: 200, latitude: 35 })).toBeNull();
+    expect(parseFeedbackTarget({ type: "UI_ELEMENT", feedbackTargetId: "field" })).toBeNull();
+    expect(
+      parseFeedbackTarget({ type: "UI_ELEMENT", feedbackTargetId: "  ", relativeX: 0.2, relativeY: 0.3 })
+    ).toBeNull();
   });
 });

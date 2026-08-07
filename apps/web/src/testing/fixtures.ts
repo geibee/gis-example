@@ -3,6 +3,7 @@
 // あればここが型エラーになり、テストデータのドリフトを検知できる。
 import type {
   Building,
+  FeedbackThread,
   Land,
   Layer,
   Me,
@@ -184,6 +185,42 @@ export function makeReviewSession(overrides: Partial<ReviewSession> = {}): Revie
     scopes: [
       { id: "sc-1", pageId: "/lands", description: "案件一覧", reviewable: true, displayOrder: 10 },
       { id: "sc-2", pageId: "/admin", description: "管理画面", reviewable: false, displayOrder: 20 }
+    ],
+    ...overrides
+  };
+}
+
+export function makeFeedbackThread(overrides: Partial<FeedbackThread> = {}): FeedbackThread {
+  return {
+    id: "ft-1",
+    projectId: "p1",
+    reviewSessionId: "rs-1",
+    reviewScopeId: "sc-1",
+    perspectiveCode: "BUSINESS_FLOW",
+    perspectiveLabel: "業務フロー",
+    targetType: "UI_ELEMENT",
+    targetMetadata: {
+      type: "UI_ELEMENT",
+      feedbackTargetId: "navigation.lands",
+      relativeX: 0.2,
+      relativeY: 0.05
+    },
+    evidence: null,
+    status: "OPEN",
+    createdBy: "u1",
+    createdByName: "一般ユーザー",
+    createdAt: "2026-08-12T10:15:00+09:00",
+    updatedAt: "2026-08-12T10:15:00+09:00",
+    messages: [
+      {
+        id: "fm-1",
+        threadId: "ft-1",
+        authorId: "u1",
+        authorName: "一般ユーザー",
+        body: "土地タブの名称を確認してください",
+        createdAt: "2026-08-12T10:15:00+09:00",
+        editedAt: null
+      }
     ],
     ...overrides
   };

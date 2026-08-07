@@ -15,6 +15,7 @@ import { AppShellProvider, useAppShell } from "./appShell";
 import { MapStateProvider } from "./mapState";
 import { FeedbackOverlay } from "./components/FeedbackOverlay";
 import { MapPaneHost } from "./components/MapPaneHost";
+import { ReviewProvider } from "./review";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
 import { Toaster } from "./ui/Toaster";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
@@ -27,9 +28,11 @@ import type { Me } from "./contracts";
 export default function App() {
   return (
     <AppShellProvider>
-      <MapStateProvider>
-        <AppLayout />
-      </MapStateProvider>
+      <ReviewProvider>
+        <MapStateProvider>
+          <AppLayout />
+        </MapStateProvider>
+      </ReviewProvider>
     </AppShellProvider>
   );
 }
@@ -59,34 +62,34 @@ function AppLayout() {
           </div>
         </div>
         <nav className="top-tabs" aria-label="業務タブ">
-          <button className={activeTab === "zone" ? "active" : ""} type="button" onClick={() => navigateTab("zone")}>
+          <button data-feedback-id="navigation.zones" className={activeTab === "zone" ? "active" : ""} type="button" onClick={() => navigateTab("zone")}>
             <MapIcon size={17} />
             区域
           </button>
-          <button className={activeTab === "lands" ? "active" : ""} type="button" onClick={() => navigateTab("lands")}>
+          <button data-feedback-id="navigation.lands" className={activeTab === "lands" ? "active" : ""} type="button" onClick={() => navigateTab("lands")}>
             <MapIcon size={17} />
             土地
           </button>
-          <button className={activeTab === "buildings" ? "active" : ""} type="button" onClick={() => navigateTab("buildings")}>
+          <button data-feedback-id="navigation.buildings" className={activeTab === "buildings" ? "active" : ""} type="button" onClick={() => navigateTab("buildings")}>
             <Building2 size={17} />
             建物
           </button>
-          <button className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
+          <button data-feedback-id="navigation.parties" className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
             <Users size={17} />
             関係者
           </button>
-          <button className={activeTab === "review" ? "active" : ""} type="button" onClick={() => navigateTab("review")}>
+          <button data-feedback-id="navigation.review" className={activeTab === "review" ? "active" : ""} type="button" onClick={() => navigateTab("review")}>
             <ClipboardCheck size={17} />
             レビュー
           </button>
           {me?.systemRole === "admin" ? (
-            <button className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
+            <button data-feedback-id="navigation.admin" className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
               <ShieldCheck size={17} />
               管理
             </button>
           ) : null}
         </nav>
-        <button className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
+        <button data-feedback-id="map.visibility" className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
           {mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
           {mapSupportOpen ? "地図を隠す" : "地図を表示"}
         </button>

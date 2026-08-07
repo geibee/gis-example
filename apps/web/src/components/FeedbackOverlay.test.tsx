@@ -1,53 +1,50 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeedbackThread, ReviewSession } from "../contracts";
-import { makeReviewSession } from "../testing/fixtures";
+import { makeFeedbackThread, makeReviewSession } from "../testing/fixtures";
 import { renderWithProviders } from "../testing/renderWithProviders";
 import { server } from "../testing/server";
 
 // html-to-image は jsdom では動かないため PNG 生成だけ差し替え、
 // captureViewport 本体 (ビューポート寸法・スクロール補正・メタデータ) は実物を動かす
 const toBlob = vi.hoisted(() => vi.fn());
+const createFeedbackThread = vi.hoisted(() => vi.fn());
 vi.mock("html-to-image", () => ({ toBlob }));
+vi.mock("../api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api")>()),
+  createFeedbackThread
+}));
 
 // フィードバックオーバーレイ (docs/prototype-review.md Phase 2) の完成条件:
 // 顧客が任意の画面からコンテキスト付きコメントを投稿できる
 describe("FeedbackOverlay", () => {
-  /** 投稿を受け取り、multipart の中身を検証できるようにする */
+  /** 投稿 API へ渡すメタデータと証跡を検証できるようにする。 */
   function captureSubmission() {
     const received: { metadata: unknown; screenshotBytes: number | null }[] = [];
-    server.use(
-      http.post("*/api/review-sessions/:id/threads", async ({ request, params }) => {
-        const form = await request.formData();
-        const screenshot = form.get("screenshot");
-        received.push({
-          metadata: JSON.parse(String(form.get("metadata"))),
-          // Node と jsdom で Blob の実体が異なり instanceof が当てにならないため size で判定する
-          screenshotBytes: screenshot && typeof screenshot !== "string" ? screenshot.size : null
-        });
-        return HttpResponse.json<FeedbackThread>(
-          {
-            id: "ft-1",
-            projectId: "p1",
-            reviewSessionId: String(params.id),
-            perspectiveCode: "BUSINESS_FLOW",
-            perspectiveLabel: "業務フロー",
-            targetType: "UI_ELEMENT",
-            targetMetadata: {},
-            status: "OPEN",
-            createdAt: "2026-08-12T10:15:00+09:00",
-            updatedAt: "2026-08-12T10:15:00+09:00",
-            messages: []
-          },
-          { status: 201 }
-        );
-      })
+    createFeedbackThread.mockImplementation(
+      async (reviewSessionId: string, metadata: unknown, screenshot: Blob | null): Promise<FeedbackThread> => {
+        received.push({ metadata, screenshotBytes: screenshot?.size ?? null });
+        return {
+          id: "ft-1",
+          projectId: "p1",
+          reviewSessionId,
+          perspectiveCode: "BUSINESS_FLOW",
+          perspectiveLabel: "業務フロー",
+          targetType: "UI_ELEMENT",
+          targetMetadata: {},
+          status: "OPEN",
+          createdAt: "2026-08-12T10:15:00+09:00",
+          updatedAt: "2026-08-12T10:15:00+09:00",
+          messages: []
+        };
+      }
     );
     return received;
   }
 
   beforeEach(() => {
+    createFeedbackThread.mockReset();
     toBlob.mockResolvedValue(new Blob(["fake-png-bytes"], { type: "image/png" }));
   });
 
@@ -68,6 +65,82 @@ describe("FeedbackOverlay", () => {
     expect(screen.queryByRole("button", { name: /フィードバック/ })).not.toBeInTheDocument();
   });
 
+  it("安定 ID に紐づく既存コメントを現在画面へピン表示する", async () => {
+    server.use(
+      http.get("*/api/review-sessions/:id/threads", () =>
+        HttpResponse.json<FeedbackThread[]>([makeFeedbackThread()])
+      )
+    );
+    const { user } = renderWithProviders({ path: "/zones" });
+
+    const pin = await screen.findByRole("button", {
+      name: "業務フロー: 土地タブの名称を確認してください"
+    });
+    await user.click(pin);
+
+    expect(screen.getByRole("complementary", { name: "コメントの概要" })).toHaveTextContent(
+      "土地タブの名称を確認してください"
+    );
+  });
+
+  it("画面座標コメントは証跡 route が現在画面と一致するときだけ表示する", async () => {
+    const evidence = (route: string) => ({
+      id: `ev-${route}`,
+      contentType: "image/png",
+      byteSize: 128,
+      viewportWidth: 1024,
+      viewportHeight: 768,
+      scrollX: 0,
+      scrollY: 0,
+      pixelRatio: 1,
+      frontendVersion: "test",
+      route,
+      capturedAt: "2026-08-12T10:15:00+09:00"
+    });
+    server.use(
+      http.get("*/api/review-sessions/:id/threads", () =>
+        HttpResponse.json<FeedbackThread[]>([
+          makeFeedbackThread({
+            id: "ft-zones",
+            targetType: "SCREEN_POSITION",
+            targetMetadata: { type: "SCREEN_POSITION", relativeX: 0.4, relativeY: 0.5 },
+            evidence: evidence("/zones?status=open"),
+            messages: [
+              {
+                id: "fm-zones",
+                threadId: "ft-zones",
+                body: "区域画面の座標コメント",
+                createdAt: "2026-08-12T10:15:00+09:00"
+              }
+            ]
+          }),
+          makeFeedbackThread({
+            id: "ft-lands",
+            targetType: "SCREEN_POSITION",
+            targetMetadata: { type: "SCREEN_POSITION", relativeX: 0.6, relativeY: 0.5 },
+            evidence: evidence("/lands"),
+            messages: [
+              {
+                id: "fm-lands",
+                threadId: "ft-lands",
+                body: "土地画面だけの座標コメント",
+                createdAt: "2026-08-12T10:15:00+09:00"
+              }
+            ]
+          })
+        ])
+      )
+    );
+    renderWithProviders({ path: "/zones" });
+
+    expect(
+      await screen.findByRole("button", { name: "業務フロー: 区域画面の座標コメント" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "業務フロー: 土地画面だけの座標コメント" })
+    ).not.toBeInTheDocument();
+  });
+
   it("どの画面からでも対象をクリックしてコメントを投稿できる", async () => {
     const received = captureSubmission();
     const { user } = renderWithProviders({ path: "/zones" });
@@ -85,12 +158,13 @@ describe("FeedbackOverlay", () => {
     await user.type(within(composer).getByRole("textbox"), "この境界をクリックしたい");
     await user.click(within(composer).getByRole("button", { name: "投稿する" }));
 
+    await waitFor(() => expect(received).toHaveLength(1));
     expect(await screen.findByText("フィードバックを投稿しました")).toBeInTheDocument();
-    expect(received).toHaveLength(1);
     expect(received[0].metadata).toMatchObject({
       perspectiveCode: "MAP_OPERATION",
       body: "この境界をクリックしたい",
-      targetType: "SCREEN_POSITION",
+      targetType: "UI_ELEMENT",
+      target: { feedbackTargetId: "navigation.lands" },
       viewportWidth: 1024,
       viewportHeight: 768
     });
@@ -115,7 +189,7 @@ describe("FeedbackOverlay", () => {
     const marked = document.createElement("button");
     marked.setAttribute("data-feedback-id", "contract-expiration-date");
     marked.textContent = "契約満了日";
-    document.body.append(marked);
+    document.querySelector(".business-app")?.append(marked);
     await user.click(marked);
 
     const composer = await screen.findByRole("dialog", { name: "フィードバックの投稿" });
@@ -170,11 +244,7 @@ describe("FeedbackOverlay", () => {
   });
 
   it("投稿に失敗したらエラーを見せ、入力を保持する", async () => {
-    server.use(
-      http.post("*/api/review-sessions/:id/threads", () =>
-        HttpResponse.json({ error: "このレビューセッションは受付中ではありません" }, { status: 409 })
-      )
-    );
+    createFeedbackThread.mockRejectedValueOnce(new Error("このレビューセッションは受付中ではありません"));
     const { user } = renderWithProviders({ path: "/zones" });
     await enterFeedbackMode(user);
     await user.click(screen.getByRole("button", { name: "土地" }));
