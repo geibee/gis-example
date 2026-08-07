@@ -23,6 +23,7 @@ import type {
 } from "../contracts";
 import {
   makeMe,
+  makeFeedbackThread,
   makeProject,
   makeProjectMember,
   makeReviewSession,
@@ -42,6 +43,9 @@ export const defaultHandlers = [
   http.get("*/api/layers", () => HttpResponse.json<Layer[]>([])),
   http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([makeReviewSession()])),
   http.get("*/api/review-sessions/:id/threads", () => HttpResponse.json<FeedbackThread[]>([])),
+  http.get("*/api/threads/:threadId", ({ params }) =>
+    HttpResponse.json<FeedbackThread>(makeFeedbackThread({ id: String(params.threadId) }))
+  ),
 
   http.get("*/api/zones", () => HttpResponse.json<Zone[]>(defaultZones)),
   http.get("*/api/zones/:id", ({ params }) => {

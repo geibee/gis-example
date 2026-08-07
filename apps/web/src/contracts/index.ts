@@ -55,6 +55,8 @@ export type ReviewPerspective = Schemas["ReviewPerspective"];
 export type ReviewScope = Schemas["ReviewScope"];
 export type FeedbackThread = Schemas["FeedbackThread"];
 export type FeedbackMessage = Schemas["FeedbackMessage"];
+export type FeedbackMessageCreateRequest = Schemas["FeedbackMessageCreateRequest"];
+export type FeedbackThreadStatusPatchRequest = Schemas["FeedbackThreadStatusPatchRequest"];
 export type ReviewEvidence = Schemas["ReviewEvidence"];
 export type FeedbackThreadCreateMetadata = Schemas["FeedbackThreadCreateMetadata"];
 

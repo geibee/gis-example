@@ -199,6 +199,8 @@ Phase 2 として、コメント投稿を実装済み。受付中のセッショ
 
 Phase 3 として、主要なナビゲーション・一覧行・詳細ヘッダ・入力項目へ `data-feedback-id` の安定 ID を付与し、既存コメントを現在 UI 上のピンとして再表示する。地図クリックは `FeedbackMapAdapter` が表示中の MapLibre レイヤを問い合わせ、レイヤごとの feature ID 列を使って `MAP_FEATURE` / `MAP_POSITION` を解決する。地図コメントは経緯度に追従する Marker、画面コメントは同じ route の相対座標または安定 ID の現在位置へ表示する。
 
+Phase 4 として、ピンから開く Thread Drawer、メッセージ一覧・返信、`OPEN` / `RESOLVED` の解決・再開を実装済み。viewer は返信でき、状態変更は editor 以上に限定する。解決済みスレッドへの返信は暗黙に再開せず 409 で拒否し、editor が明示的に Reopen してから会話を続ける。返信と状態変更は既存の監査ログへ変更内容を記録する。
+
 権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 
 ## Notes

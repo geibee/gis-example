@@ -29,8 +29,11 @@ import type {
   PartyRelationshipWriteRequest,
   PartyWriteRequest,
   Project,
+  FeedbackMessage,
+  FeedbackMessageCreateRequest,
   FeedbackThread,
   FeedbackThreadCreateMetadata,
+  FeedbackThreadStatusPatchRequest,
   ProjectMember,
   ReviewSession,
   UserAccount,
@@ -466,6 +469,10 @@ export async function getFeedbackThreads(reviewSessionId: string): Promise<Feedb
   );
 }
 
+export async function getFeedbackThread(threadId: string): Promise<FeedbackThread> {
+  return unwrap(await client.GET("/api/threads/{threadId}", { params: { path: { threadId } } }));
+}
+
 /**
  * コメント投稿。メタデータ JSON と証跡 PNG を multipart/form-data で同時に送る
  * (契約は openapi.yaml の createFeedbackThread)。
@@ -487,6 +494,30 @@ export async function createFeedbackThread(
         return form;
       },
       body: { metadata }
+    })
+  );
+}
+
+export async function createFeedbackMessage(
+  threadId: string,
+  request: FeedbackMessageCreateRequest
+): Promise<FeedbackMessage> {
+  return unwrap(
+    await client.POST("/api/threads/{threadId}/messages", {
+      params: { path: { threadId } },
+      body: request
+    })
+  );
+}
+
+export async function updateFeedbackThreadStatus(
+  threadId: string,
+  request: FeedbackThreadStatusPatchRequest
+): Promise<FeedbackThread> {
+  return unwrap(
+    await client.PATCH("/api/threads/{threadId}/status", {
+      params: { path: { threadId } },
+      body: request
     })
   );
 }

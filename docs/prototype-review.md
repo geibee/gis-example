@@ -343,12 +343,16 @@ GET   /api/threads/{threadId}                # (REVIEW_READ)
 GET   /api/threads/{threadId}/evidence       # 証跡 PNG。private, no-store (REVIEW_READ)
 ```
 
-今後 (Phase 4 以降):
+実装済み (Phase 4):
 
 ```http
-POST  /api/threads/{threadId}/messages
-PATCH /api/threads/{threadId}/status
+POST  /api/threads/{threadId}/messages       # OPEN のスレッドへ返信 (REVIEW_COMMENT)
+PATCH /api/threads/{threadId}/status         # Resolve / Reopen (REVIEW_MANAGE)
 ```
+
+解決済みスレッドへの返信は 409 とし、暗黙には再開しない。返信は viewer 以上、状態変更は editor
+以上に限定する。いずれも既存 `AuditTrail` へ変更内容を渡し、Message 投稿と Resolve / Reopen の
+履歴を `app.audit_logs.detail` から追跡できるようにする。
 
 ---
 
@@ -372,7 +376,7 @@ PATCH /api/threads/{threadId}/status
 | 1 | ReviewSession / Perspective / ACTIVE・FUTURE・OUT_OF_SCOPE / ReviewGuide / ReviewScope | **完了** |
 | 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | **完了** |
 | 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | **完了** |
-| 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | 未着手 |
+| 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | **完了** |
 | 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | 未着手 |
 | 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | 未着手 |
 | 7 | 通知・外部連携 (Email / Teams / Issue 生成)。初期は双方向同期を避ける | 未着手 |
@@ -396,8 +400,10 @@ PATCH /api/threads/{threadId}/status
 | フィードバックオーバーレイ | `apps/web/src/components/FeedbackOverlay.tsx` | 2 |
 | 安定 ID と画面コメントピン | `FeedbackPins.tsx` / 各業務 Workspace | 3 |
 | 地図対象解決と地図コメントピン | `FeedbackMapAdapter.tsx` / `MapPane.tsx` | 3 |
+| スレッド返信・解決・再開 API | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 4 |
+| Thread Drawer / Message 一覧 / Reply / Status | `FeedbackThreadDrawer.tsx` | 4 |
 
-### 11.1 Phase 1 の設計判断 (設計案からの変更点)
+### 11.1 実装時の設計判断 (設計案からの変更点)
 
 - **観点・対象画面の専用エンドポイントは作らなかった。** `POST /api/review-sessions/{id}/perspectives`
   等に分けず、`ReviewSession` の一部として作成・更新する。「今回のレビューで何を見てもらうか」は
@@ -423,6 +429,10 @@ PATCH /api/threads/{threadId}/status
 - **画面座標ピンは route が一致するときだけ表示する。** 相対座標だけでは別画面へ誤表示できるため、
   証跡なしの `SCREEN_POSITION` は表示しない。一方 `UI_ELEMENT` は安定 ID が現在 DOM に存在すれば
   route をまたいで共通ナビゲーション等へ正しく再接続できる。
+- **解決済みスレッドへの返信で暗黙に Reopen しない。** 状態変更の主体と時点を監査ログで明確に
+  追えるよう、返信は 409 で拒否し、editor が明示的に再開してから投稿する。
+- **返信と状態変更で権限を分けた。** レビュー対象者である viewer は `REVIEW_COMMENT` で返信できるが、
+  Resolve / Reopen は `REVIEW_MANAGE` を持つ editor 以上だけに許可する。
 
 ### 11.2 実装難易度の見立て
 

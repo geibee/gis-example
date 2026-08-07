@@ -1181,6 +1181,69 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/threads/{threadId}/messages:
+    post:
+      tags: [review]
+      operationId: createFeedbackMessage
+      summary: フィードバックスレッドへ返信
+      description: |
+        OPEN のスレッドへ返信する。RESOLVED のスレッドは明示的に再開してから返信する。
+      parameters:
+        - $ref: "#/components/parameters/PathThreadId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackMessageCreateRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: 返信済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackMessage"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 解決済みスレッドへの返信
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/threads/{threadId}/status:
+    patch:
+      tags: [review]
+      operationId: updateFeedbackThreadStatus
+      summary: フィードバックスレッドの解決・再開
+      description: editor 以上が OPEN / RESOLVED を明示的に切り替える。
+      parameters:
+        - $ref: "#/components/parameters/PathThreadId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackThreadStatusPatchRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 更新済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackThread"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/threads/{threadId}/evidence:
     get:
       tags: [review]
@@ -2041,6 +2104,18 @@ components:
         createdAt: { type: string, format: date-time }
         editedAt: { type: [string, "null"], format: date-time }
       required: [id, threadId, body, createdAt]
+
+    FeedbackMessageCreateRequest:
+      type: object
+      properties:
+        body: { type: string, minLength: 1 }
+      required: [body]
+
+    FeedbackThreadStatusPatchRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [OPEN, RESOLVED] }
+      required: [status]
 
     FeedbackThread:
       type: object

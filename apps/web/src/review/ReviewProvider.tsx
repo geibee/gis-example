@@ -15,8 +15,11 @@ export type PickedFeedbackTarget = {
 type ReviewContextValue = {
   mode: ReviewMode;
   picked: PickedFeedbackTarget | null;
+  activeThreadId: string | null;
   startPicking: () => void;
   selectTarget: (target: FeedbackTarget) => Promise<void>;
+  openThread: (threadId: string) => void;
+  closeThread: () => void;
   reset: () => void;
 };
 
@@ -29,6 +32,7 @@ const ReviewContext = createContext<ReviewContextValue | null>(null);
 export function ReviewProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<ReviewMode>("idle");
   const [picked, setPicked] = useState<PickedFeedbackTarget | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const modeRef = useRef<ReviewMode>("idle");
   const generation = useRef(0);
 
@@ -46,8 +50,21 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
   const startPicking = useCallback(() => {
     generation.current += 1;
     setPicked(null);
+    setActiveThreadId(null);
     transition("picking");
   }, [transition]);
+
+  const openThread = useCallback(
+    (threadId: string) => {
+      generation.current += 1;
+      setPicked(null);
+      setActiveThreadId(threadId);
+      transition("idle");
+    },
+    [transition]
+  );
+
+  const closeThread = useCallback(() => setActiveThreadId(null), []);
 
   const selectTarget = useCallback(
     async (target: FeedbackTarget) => {
@@ -69,8 +86,8 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ mode, picked, startPicking, selectTarget, reset }),
-    [mode, picked, reset, selectTarget, startPicking]
+    () => ({ mode, picked, activeThreadId, startPicking, selectTarget, openThread, closeThread, reset }),
+    [activeThreadId, closeThread, mode, openThread, picked, reset, selectTarget, startPicking]
   );
   return <ReviewContext.Provider value={value}>{children}</ReviewContext.Provider>;
 }

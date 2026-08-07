@@ -579,6 +579,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/threads/{threadId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * フィードバックスレッドへ返信
+         * @description OPEN のスレッドへ返信する。RESOLVED のスレッドは明示的に再開してから返信する。
+         */
+        post: operations["createFeedbackMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{threadId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * フィードバックスレッドの解決・再開
+         * @description editor 以上が OPEN / RESOLVED を明示的に切り替える。
+         */
+        patch: operations["updateFeedbackThreadStatus"];
+        trace?: never;
+    };
     "/api/threads/{threadId}/evidence": {
         parameters: {
             query?: never;
@@ -1158,6 +1198,13 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             editedAt?: string | null;
+        };
+        FeedbackMessageCreateRequest: {
+            body: string;
+        };
+        FeedbackThreadStatusPatchRequest: {
+            /** @enum {string} */
+            status: "OPEN" | "RESOLVED";
         };
         FeedbackThread: {
             id: string;
@@ -2732,6 +2779,75 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackThread"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createFeedbackMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                threadId: components["parameters"]["PathThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackMessageCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 返信済み */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackMessage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 解決済みスレッドへの返信 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateFeedbackThreadStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                threadId: components["parameters"]["PathThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackThreadStatusPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新済み */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -48,8 +48,8 @@ issue #25 の設計ドキュメント。数百画面規模を見据え、認可�
 | `analysis.run` | 空間分析の実行 | `ANALYSIS_EXECUTE` |
 | `jobs.view` | 取込・分析ジョブの進捗閲覧 | `JOB_READ` |
 | `review.view` | レビューセッションのガイド閲覧・スレッド閲覧・証跡取得 | `REVIEW_READ` |
-| `review.comment` | フィードバックの投稿 (証跡つきコメント) | `REVIEW_COMMENT` |
-| `review.manage` | レビューセッションの開設・観点/対象画面の設定 | `REVIEW_MANAGE` |
+| `review.comment` | フィードバックの投稿 (証跡つきコメント)・スレッド返信 | `REVIEW_COMMENT` |
+| `review.manage` | レビューセッションの開設・観点/対象画面の設定・スレッドの解決/再開 | `REVIEW_MANAGE` |
 | `admin.users.manage` | ユーザー管理 (system 管理画面) | `USER_ADMIN` |
 | `admin.members.manage` | プロジェクトメンバー管理 (system 管理画面) | `MEMBER_ADMIN` |
 

@@ -83,7 +83,7 @@ function makeMap(features: unknown[] = []) {
 }
 
 function ReviewProbe() {
-  const { mode, picked, startPicking } = useReview();
+  const { mode, picked, activeThreadId, startPicking } = useReview();
   return (
     <>
       <button type="button" onClick={startPicking}>
@@ -91,6 +91,7 @@ function ReviewProbe() {
       </button>
       <output aria-label="レビューモード">{mode}</output>
       <output aria-label="選択対象">{picked ? JSON.stringify(picked.target) : ""}</output>
+      <output aria-label="選択スレッド">{activeThreadId ?? ""}</output>
     </>
   );
 }
@@ -116,6 +117,7 @@ describe("FeedbackMapAdapter", () => {
     });
     const view = render(
       <ReviewProvider>
+        <ReviewProbe />
         <FeedbackMapAdapter map={map} layers={[]} styleLayersByLayerId={{}} threads={[thread]} />
       </ReviewProvider>
     );
@@ -127,6 +129,10 @@ describe("FeedbackMapAdapter", () => {
     });
     expect(maplibreState.popups[0].options).toMatchObject({ closeOnClick: false });
     expect(maplibreState.popups[0].content).toHaveTextContent("土地タブの名称を確認してください");
+    act(() => {
+      (maplibreState.popups[0].content as HTMLElement).querySelector("button")?.click();
+    });
+    expect(screen.getByLabelText("選択スレッド")).toHaveTextContent(thread.id);
 
     view.unmount();
     expect(maplibreState.markers[0].removed).toBe(true);

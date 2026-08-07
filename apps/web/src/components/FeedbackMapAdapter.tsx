@@ -12,7 +12,7 @@ type FeedbackMapAdapterProps = {
 
 /** MapLibre の WebGL クリック対象解決と、経緯度ベースのコメントピン描画を受け持つ。 */
 export function FeedbackMapAdapter({ map, layers, styleLayersByLayerId, threads }: FeedbackMapAdapterProps) {
-  const { mode, selectTarget } = useReview();
+  const { mode, selectTarget, openThread } = useReview();
 
   useEffect(() => {
     if (mode !== "picking") return;
@@ -60,7 +60,15 @@ export function FeedbackMapAdapter({ map, layers, styleLayersByLayerId, threads 
       heading.textContent = thread.perspectiveLabel;
       const body = document.createElement("p");
       body.textContent = thread.messages[0]?.body ?? "コメント本文はありません";
-      content.append(heading, body);
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "subtle-button feedback-thread-open";
+      openButton.textContent = "スレッドを開く";
+      openButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openThread(thread.id);
+      });
+      content.append(heading, body, openButton);
 
       const popup = new maplibregl.Popup({ closeOnClick: false, offset: 18 }).setDOMContent(content);
       const marker = new maplibregl.Marker({ element, anchor: "bottom" })
@@ -72,7 +80,7 @@ export function FeedbackMapAdapter({ map, layers, styleLayersByLayerId, threads 
     return () => {
       markers.forEach((marker) => marker.remove());
     };
-  }, [map, threads]);
+  }, [map, openThread, threads]);
 
   return null;
 }

@@ -1,5 +1,5 @@
-// フィードバックスレッド (コメント投稿・証跡) のルート (openapi.yaml tag: review)。
-// 設計は docs/prototype-review.md Phase 2。
+// フィードバックスレッド (投稿・返信・状態管理・証跡) のルート (openapi.yaml tag: review)。
+// 設計は docs/prototype-review.md Phase 2〜4。
 //
 // 投稿は multipart/form-data で「メタデータ JSON + スクリーンショット PNG」を同時に送る。
 // 証跡は公開ストレージに置かず、取得も必ずこの API の認可を通す。
@@ -17,6 +17,7 @@ import gis.example.auditTrail
 import gis.example.authorizedResourceId
 import gis.example.authorizedRoutes
 import gis.example.createFeedbackThread
+import gis.example.createFeedbackMessage
 import gis.example.databaseJson
 import gis.example.feedbackTargetTypes
 import gis.example.getEvidenceReference
@@ -28,6 +29,7 @@ import gis.example.readOptionalText
 import gis.example.readOptionalTimestamp
 import gis.example.readRequiredText
 import gis.example.requirePostableSession
+import gis.example.updateFeedbackThreadStatus
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -38,6 +40,7 @@ import io.ktor.server.application.call
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.routing.Route
 import io.ktor.utils.io.core.readAvailable
@@ -163,6 +166,48 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
             val id = call.authorizedResourceId()
             call.respond(
                 db.getFeedbackThread(id) ?: throw ApiException(HttpStatusCode.NotFound, "Feedback thread not found")
+            )
+        }
+
+        // viewer も会話へ参加できる。解決済みスレッドへの返信はクエリ層が fail-closed で拒否する
+        post(
+            "/api/threads/{threadId}/messages",
+            ResourceFromPath(
+                Action.REVIEW_COMMENT,
+                ProjectResourceType.FEEDBACK_THREAD,
+                param = "threadId",
+                uuidLabel = "threadId"
+            )
+        ) {
+            val request = call.receive<JsonObject>()
+            call.respond(
+                HttpStatusCode.Created,
+                db.createFeedbackMessage(
+                    threadId = call.authorizedResourceId(),
+                    body = readRequiredText(request, "body"),
+                    authorId = call.appPrincipal().userId,
+                    audit = call.auditTrail()
+                )
+            )
+        }
+
+        // Resolve / Reopen はレビュー管理者相当 (現行ロールでは editor) のみ
+        patch(
+            "/api/threads/{threadId}/status",
+            ResourceFromPath(
+                Action.REVIEW_MANAGE,
+                ProjectResourceType.FEEDBACK_THREAD,
+                param = "threadId",
+                uuidLabel = "threadId"
+            )
+        ) {
+            val request = call.receive<JsonObject>()
+            call.respond(
+                db.updateFeedbackThreadStatus(
+                    id = call.authorizedResourceId(),
+                    status = readRequiredText(request, "status"),
+                    audit = call.auditTrail()
+                )
             )
         }
 

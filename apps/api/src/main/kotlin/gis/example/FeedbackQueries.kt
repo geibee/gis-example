@@ -1,5 +1,5 @@
-// フィードバックスレッド (app.feedback_threads) と証跡 (app.review_evidence) のクエリ。
-// 設計は docs/prototype-review.md Phase 2。
+// フィードバックスレッド・メッセージ・証跡のクエリ。
+// 設計は docs/prototype-review.md Phase 2〜4。
 //
 // 投稿は「セッションが受付中で、その観点が今回 ACTIVE であること」を前提とする。
 // 観点の出し分け (FUTURE / OUT_OF_SCOPE のグレーアウト) は UI の親切ではなく
@@ -217,6 +217,99 @@ fun Database.getFeedbackThread(id: String): FeedbackThreadDto? = dataSource.conn
     thread.copy(messages = listMessagesForThreads(connection, listOf(id))[id].orEmpty())
 }
 
+/**
+ * OPEN のスレッドへ返信する。解決済みへの暗黙の返信は状態の意味を曖昧にするため、
+ * editor が明示的に Reopen してから返信する。
+ */
+fun Database.createFeedbackMessage(
+    threadId: String,
+    body: String,
+    authorId: String?,
+    audit: AuditTrail
+): FeedbackMessageDto = try {
+    val messageId = withTransaction { connection ->
+        val status = connection.prepareStatement(
+            "SELECT status FROM app.feedback_threads WHERE id = ?::uuid FOR UPDATE"
+        ).use { stmt ->
+            stmt.setString(1, threadId)
+            stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        } ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback thread not found")
+        if (status != "OPEN") {
+            throw ApiException(
+                io.ktor.http.HttpStatusCode.Conflict,
+                "解決済みのスレッドへ返信するには、先にスレッドを再開してください"
+            )
+        }
+
+        val id = connection.prepareStatement(
+            """
+            INSERT INTO app.feedback_messages (thread_id, author_id, body)
+            VALUES (?::uuid, ?::uuid, ?)
+            RETURNING id::text
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, threadId)
+            setNullableUuidString(stmt, 2, authorId)
+            stmt.setString(3, body)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getString(1)
+            }
+        }
+        connection.prepareStatement(
+            "UPDATE app.feedback_threads SET updated_at = now() WHERE id = ?::uuid"
+        ).use { stmt ->
+            stmt.setString(1, threadId)
+            stmt.executeUpdate()
+        }
+        id
+    }
+    val created = getFeedbackMessage(messageId) ?: error("Created feedback message disappeared")
+    audit.recordCreate("feedback_message", created.id, created.auditSnapshot())
+    created
+} catch (exc: SQLException) {
+    throw ApiException(
+        io.ktor.http.HttpStatusCode.BadRequest,
+        "Feedback message create failed: ${exc.message ?: "invalid feedback message"}"
+    )
+}
+
+/** OPEN / RESOLVED を明示的に遷移させ、監査差分から Resolve / Reopen の履歴を追えるようにする。 */
+fun Database.updateFeedbackThreadStatus(
+    id: String,
+    status: String,
+    audit: AuditTrail
+): FeedbackThreadDto = try {
+    if (status !in feedbackThreadStatuses) {
+        throw ApiException(
+            io.ktor.http.HttpStatusCode.BadRequest,
+            "status must be one of ${feedbackThreadStatuses.sorted()}"
+        )
+    }
+    val before = getFeedbackThread(id)
+        ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback thread not found")
+    withTransaction { connection ->
+        connection.prepareStatement(
+            "UPDATE app.feedback_threads SET status = ?, updated_at = now() WHERE id = ?::uuid"
+        ).use { stmt ->
+            stmt.setString(1, status)
+            stmt.setString(2, id)
+            if (stmt.executeUpdate() == 0) {
+                throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback thread not found")
+            }
+        }
+    }
+    val after = getFeedbackThread(id)
+        ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback thread not found")
+    audit.recordUpdate("feedback_thread", id, before.auditSnapshot(), after.auditSnapshot())
+    after
+} catch (exc: SQLException) {
+    throw ApiException(
+        io.ktor.http.HttpStatusCode.BadRequest,
+        "Feedback thread status update failed: ${exc.message ?: "invalid feedback thread status"}"
+    )
+}
+
 /** 証跡画像の実体参照 (UploadStorage 用)。存在しない・証跡なしの場合は null */
 fun Database.getEvidenceReference(threadId: String): Pair<String, String>? =
     dataSource.connection.use { connection ->
@@ -311,6 +404,33 @@ private fun listMessagesForThreads(
     }
 }
 
+private fun Database.getFeedbackMessage(id: String): FeedbackMessageDto? =
+    dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            """
+            SELECT m.id::text, m.thread_id::text, m.author_id::text, u.display_name, m.body,
+                   m.created_at, m.edited_at
+            FROM app.feedback_messages AS m
+            LEFT JOIN app.users AS u ON u.id = m.author_id
+            WHERE m.id = ?::uuid
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs ->
+                if (!rs.next()) return@use null
+                FeedbackMessageDto(
+                    id = rs.getString(1),
+                    threadId = rs.getString(2),
+                    authorId = rs.getString(3),
+                    authorName = rs.getString(4),
+                    body = rs.getString(5),
+                    createdAt = rs.isoTimestamp("created_at") ?: error("created_at must not be null"),
+                    editedAt = rs.isoTimestamp("edited_at")
+                )
+            }
+        }
+    }
+
 private fun feedbackThreadColumns(): String = """
     t.id::text AS id,
     t.project_id::text AS project_id,
@@ -374,3 +494,6 @@ internal fun ResultSet.isoTimestamp(column: String): String? =
 
 internal fun FeedbackThreadDto.auditSnapshot(): JsonObject =
     auditSnapshot(FeedbackThreadDto.serializer(), this, exclude = setOf("messages", "perspectiveLabel", "createdByName"))
+
+internal fun FeedbackMessageDto.auditSnapshot(): JsonObject =
+    auditSnapshot(FeedbackMessageDto.serializer(), this, exclude = setOf("authorName"))

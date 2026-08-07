@@ -5,6 +5,7 @@ import {
   captureExcludeAttribute,
   feedbackTargetAttribute,
   parseFeedbackTarget,
+  useReview,
   type FeedbackTarget
 } from "../review";
 
@@ -17,6 +18,7 @@ type PinPosition = {
 /** 現在の画面に属する UI / 画面座標コメントを、業務 UI の上へピンとして重ねる。 */
 export function FeedbackPins({ threads }: { threads: FeedbackThread[] }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const { openThread } = useReview();
   const [layoutVersion, setLayoutVersion] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -60,12 +62,21 @@ export function FeedbackPins({ threads }: { threads: FeedbackThread[] }) {
           <span>{index + 1}</span>
         </button>
       ))}
-      {selected ? <FeedbackPinPopover pin={selected} onClose={() => setSelectedId(null)} /> : null}
+      {selected ? (
+        <FeedbackPinPopover
+          pin={selected}
+          onOpen={() => {
+            setSelectedId(null);
+            openThread(selected.thread.id);
+          }}
+          onClose={() => setSelectedId(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function FeedbackPinPopover({ pin, onClose }: { pin: PinPosition; onClose: () => void }) {
+function FeedbackPinPopover({ pin, onOpen, onClose }: { pin: PinPosition; onOpen: () => void; onClose: () => void }) {
   const message = pin.thread.messages[0];
   const left = Math.max(8, Math.min(window.innerWidth - 288, pin.x + 18));
   const top = Math.max(8, Math.min(window.innerHeight - 150, pin.y - 12));
@@ -76,6 +87,9 @@ function FeedbackPinPopover({ pin, onClose }: { pin: PinPosition; onClose: () =>
         <span>{pin.thread.status === "RESOLVED" ? "解決済み" : "未解決"}</span>
       </div>
       <p>{message?.body ?? "コメント本文はありません"}</p>
+      <button type="button" className="subtle-button feedback-thread-open" onClick={onOpen}>
+        スレッドを開く
+      </button>
       <button type="button" className="icon-button" aria-label="コメント概要を閉じる" onClick={onClose}>
         ×
       </button>

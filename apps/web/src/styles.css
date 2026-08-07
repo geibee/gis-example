@@ -2325,3 +2325,126 @@ input[type="file"] {
   max-width: 260px;
   color: #334155;
 }
+
+.feedback-thread-open {
+  justify-self: start;
+  font-size: 12px;
+}
+
+.feedback-pin-popover .feedback-thread-open {
+  grid-column: 1 / -1;
+}
+
+.feedback-thread-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 46;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(440px, 100vw);
+  padding: 20px;
+  overflow: auto;
+  border-left: 1px solid #d3dae1;
+  background: #f8fafc;
+  box-shadow: -8px 0 24px rgb(15 23 42 / 14%);
+}
+
+.feedback-thread-header {
+  flex: 0 0 auto;
+}
+
+.feedback-thread-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.feedback-thread-status {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.feedback-thread-status.resolved {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.feedback-message-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feedback-message-list li {
+  padding: 12px;
+  border: 1px solid #dbe3eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.feedback-message-list li > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.feedback-message-list strong {
+  color: #334155;
+  font-size: 12px;
+}
+
+.feedback-message-list p {
+  margin: 8px 0 0;
+  color: #1e293b;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.feedback-reply-form {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feedback-reply-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.feedback-reply-form textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  font: inherit;
+  resize: vertical;
+}
+
+.feedback-reply-form .command-button,
+.feedback-status-button {
+  align-self: flex-end;
+}

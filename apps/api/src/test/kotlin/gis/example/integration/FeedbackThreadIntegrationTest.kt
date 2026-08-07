@@ -7,6 +7,7 @@ import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -37,7 +38,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
-// コメント投稿と証跡 (docs/prototype-review.md Phase 2) を HTTP 層で検証する:
+// コメント投稿・返信・状態管理と証跡 (docs/prototype-review.md Phase 2〜4) を HTTP 層で検証する:
 // - レビュー対象者 (viewer) が投稿でき、コンテキスト (対象・観点・証跡) が保存される
 // - 「今回選べない観点」「受付中でないセッション」への投稿はサーバ側でも拒否される
 // - 証跡画像は公開されず、認可を通した経路でのみ取得できる
@@ -161,6 +162,28 @@ class FeedbackThreadIntegrationTest {
                 }
             )
         )
+    }
+
+    private suspend fun postMessage(
+        client: HttpClient,
+        threadId: String,
+        bearer: String,
+        text: String
+    ): HttpResponse = client.post("/api/threads/$threadId/messages") {
+        header(HttpHeaders.Authorization, bearer)
+        contentType(ContentType.Application.Json)
+        setBody("""{"body":"$text"}""")
+    }
+
+    private suspend fun patchStatus(
+        client: HttpClient,
+        threadId: String,
+        bearer: String,
+        status: String
+    ): HttpResponse = client.patch("/api/threads/$threadId/status") {
+        header(HttpHeaders.Authorization, bearer)
+        contentType(ContentType.Application.Json)
+        setBody("""{"status":"$status"}""")
     }
 
     private val uiTargetMetadata = """
@@ -352,6 +375,73 @@ class FeedbackThreadIntegrationTest {
         assertEquals(
             HttpStatusCode.OK,
             client.get("/api/threads/$threadId") { header(HttpHeaders.Authorization, viewerBearer) }.status
+        )
+    }
+
+    @Test
+    fun `レビュー対象者が OPEN のスレッドへ返信できる`() = withApp { client ->
+        val sessionId = createSession(client)
+        val threadId = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata).bodyAsText())
+            .getValue("id").jsonPrimitive.content
+
+        val reply = postMessage(client, threadId, viewerBearer, "確認結果を追記します")
+        assertEquals(HttpStatusCode.Created, reply.status, reply.bodyAsText())
+        val message = body(reply.bodyAsText())
+        assertEquals(threadId, message.getValue("threadId").jsonPrimitive.content)
+        assertEquals("顧客レビュアー", message.getValue("authorName").jsonPrimitive.content)
+        assertEquals("確認結果を追記します", message.getValue("body").jsonPrimitive.content)
+
+        val detail = client.get("/api/threads/$threadId") {
+            header(HttpHeaders.Authorization, viewerBearer)
+        }
+        val messages = body(detail.bodyAsText()).getValue("messages").jsonArray.map { it.jsonObject }
+        assertEquals(2, messages.size)
+        assertEquals("確認結果を追記します", messages.last().getValue("body").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `editor が Resolve と Reopen を行い viewer の状態変更を拒否する`() = withApp { client ->
+        val sessionId = createSession(client)
+        val threadId = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata).bodyAsText())
+            .getValue("id").jsonPrimitive.content
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            patchStatus(client, threadId, viewerBearer, "RESOLVED").status,
+            "メンバーでも viewer は状態を変更できない"
+        )
+        val resolved = patchStatus(client, threadId, editorBearer, "RESOLVED")
+        assertEquals(HttpStatusCode.OK, resolved.status, resolved.bodyAsText())
+        assertEquals("RESOLVED", body(resolved.bodyAsText()).getValue("status").jsonPrimitive.content)
+
+        val replyToResolved = postMessage(client, threadId, viewerBearer, "解決後の追記")
+        assertEquals(HttpStatusCode.Conflict, replyToResolved.status, replyToResolved.bodyAsText())
+
+        val reopened = patchStatus(client, threadId, editorBearer, "OPEN")
+        assertEquals(HttpStatusCode.OK, reopened.status, reopened.bodyAsText())
+        assertEquals("OPEN", body(reopened.bodyAsText()).getValue("status").jsonPrimitive.content)
+        assertEquals(
+            HttpStatusCode.Created,
+            postMessage(client, threadId, viewerBearer, "再開後の追記").status
+        )
+    }
+
+    @Test
+    fun `返信と状態変更の不正入力および非メンバーを拒否する`() = withApp { client ->
+        val sessionId = createSession(client)
+        val threadId = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata).bodyAsText())
+            .getValue("id").jsonPrimitive.content
+
+        assertEquals(HttpStatusCode.BadRequest, postMessage(client, threadId, viewerBearer, " ").status)
+        assertEquals(HttpStatusCode.BadRequest, patchStatus(client, threadId, editorBearer, "CLOSED").status)
+        assertEquals(
+            HttpStatusCode.NotFound,
+            postMessage(client, threadId, outsiderBearer, "閲覧できない返信").status,
+            "非メンバーにはスレッドの存在自体を隠す"
+        )
+        assertEquals(
+            HttpStatusCode.NotFound,
+            patchStatus(client, threadId, outsiderBearer, "RESOLVED").status
         )
     }
 

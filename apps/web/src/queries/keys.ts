@@ -17,7 +17,8 @@ export const keys = {
   },
   feedbackThreads: {
     all: ["feedback-threads"] as const,
-    list: (reviewSessionId: string) => ["feedback-threads", "list", reviewSessionId] as const
+    list: (reviewSessionId: string) => ["feedback-threads", "list", reviewSessionId] as const,
+    detail: (threadId: string) => ["feedback-threads", "detail", threadId] as const
   },
   layers: {
     all: ["layers"] as const,

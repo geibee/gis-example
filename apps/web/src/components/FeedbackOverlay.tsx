@@ -15,6 +15,7 @@ import {
 import type { ReviewSession } from "../contracts";
 import { errorMessage } from "../utils";
 import { FeedbackPins } from "./FeedbackPins";
+import { FeedbackThreadDrawer } from "./FeedbackThreadDrawer";
 
 // フィードバックオーバーレイ (docs/prototype-review.md Phase 2〜3)。
 //
@@ -29,11 +30,14 @@ export function FeedbackOverlay() {
   const sessionsQuery = useReviewSessionsQuery(selectedProject, "open");
   const session = sessionsQuery.data?.[0] ?? null;
   const threadsQuery = useFeedbackThreadsQuery(session?.id ?? null);
-  const { mode, picked, startPicking, selectTarget, reset } = useReview();
+  const { mode, picked, activeThreadId, startPicking, selectTarget, closeThread, reset } = useReview();
 
   useEffect(() => {
-    if (!session && mode !== "idle") reset();
-  }, [mode, reset, session]);
+    if (!session) {
+      if (mode !== "idle") reset();
+      if (activeThreadId) closeThread();
+    }
+  }, [activeThreadId, closeThread, mode, reset, session]);
 
   // レビューモード中の最初のクリックをコメント対象の指定として横取りする。
   // capture フェーズで止めるので、業務画面側のハンドラは実行されない
@@ -101,6 +105,10 @@ export function FeedbackOverlay() {
 
       {mode === "composing" && picked ? (
         <FeedbackComposer session={session} picked={picked} onClose={reset} />
+      ) : null}
+
+      {mode === "idle" && activeThreadId ? (
+        <FeedbackThreadDrawer threadId={activeThreadId} onClose={closeThread} />
       ) : null}
     </>
   );
