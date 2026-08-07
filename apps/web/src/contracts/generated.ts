@@ -639,6 +639,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * フィードバックメッセージ編集
+         * @description 投稿者本人だけが編集でき、変更後の本文も版履歴へ追記する。
+         */
+        patch: operations["updateFeedbackMessage"];
+        trace?: never;
+    };
+    "/api/messages/{messageId}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** フィードバックメッセージの版履歴 */
+        get: operations["getFeedbackMessageHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{threadId}/status": {
         parameters: {
             query?: never;
@@ -674,6 +711,44 @@ export interface paths {
         get: operations["getFeedbackEvidence"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review-retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** レビュー証跡の保存方針 */
+        get: operations["getReviewRetentionPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** プロジェクト既定の証跡保存期間を更新 */
+        patch: operations["updateReviewRetentionPolicy"];
+        trace?: never;
+    };
+    "/api/review-retention/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 期限切れレビュー証跡を削除
+         * @description 期限切れ証跡を最大 limit 件、非公開ストレージと DB の双方から冪等に削除する。
+         */
+        post: operations["purgeExpiredReviewEvidence"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1161,6 +1236,10 @@ export interface components {
             startAt?: string | null;
             /** Format: date-time */
             endAt?: string | null;
+            /** @description セッション上書き。null はプロジェクト既定を継承する。 */
+            evidenceRetentionDays: number | null;
+            /** @description プロジェクト既定を解決した実効値。null は自動削除なし。 */
+            readonly effectiveEvidenceRetentionDays: number | null;
             createdBy?: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -1194,6 +1273,7 @@ export interface components {
             startAt?: string | null;
             /** Format: date-time */
             endAt?: string | null;
+            evidenceRetentionDays?: number | null;
             perspectives?: components["schemas"]["ReviewPerspectiveWriteRequest"][];
             scopes?: components["schemas"]["ReviewScopeWriteRequest"][];
         };
@@ -1206,6 +1286,7 @@ export interface components {
             startAt?: string | null;
             /** Format: date-time */
             endAt?: string | null;
+            evidenceRetentionDays?: number | null;
             perspectives?: components["schemas"]["ReviewPerspectiveWriteRequest"][];
             scopes?: components["schemas"]["ReviewScopeWriteRequest"][];
         };
@@ -1227,6 +1308,8 @@ export interface components {
             route: string;
             /** Format: date-time */
             capturedAt: string;
+            /** Format: date-time */
+            expiresAt: string | null;
         };
         FeedbackMessage: {
             id: string;
@@ -1241,6 +1324,19 @@ export interface components {
         };
         FeedbackMessageCreateRequest: {
             body: string;
+        };
+        FeedbackMessageUpdateRequest: {
+            body: string;
+        };
+        FeedbackMessageVersion: {
+            messageId: string;
+            version: number;
+            body: string;
+            editedBy: string | null;
+            editedByName: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            current: boolean;
         };
         FeedbackThreadStatusPatchRequest: {
             /** @enum {string} */
@@ -1279,6 +1375,26 @@ export interface components {
             withEvidenceCount: number;
             sessions: components["schemas"]["FeedbackSessionSummary"][];
             perspectives: components["schemas"]["FeedbackPerspectiveSummary"][];
+        };
+        ReviewRetentionPolicy: {
+            projectId: string;
+            /** @description null は自動削除なし。 */
+            defaultEvidenceRetentionDays: number | null;
+            /** Format: int64 */
+            expiredEvidenceCount: number;
+            /** Format: int64 */
+            expiredEvidenceBytes: number;
+        };
+        ReviewRetentionPolicyPatchRequest: {
+            defaultEvidenceRetentionDays: number | null;
+        };
+        ReviewRetentionPurgeResult: {
+            purgedEvidenceCount: number;
+            /** Format: int64 */
+            purgedEvidenceBytes: number;
+            failedEvidenceCount: number;
+            /** Format: int64 */
+            remainingExpiredEvidenceCount: number;
         };
         FeedbackThread: {
             id: string;
@@ -2966,6 +3082,62 @@ export interface operations {
             };
         };
     };
+    updateFeedbackMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackMessageUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新済み */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackMessage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getFeedbackMessageHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 新しい版から順に返す */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackMessageVersion"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateFeedbackThreadStatus: {
         parameters: {
             query?: never;
@@ -3020,6 +3192,89 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getReviewRetentionPolicy: {
+        parameters: {
+            query: {
+                projectId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRetentionPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateReviewRetentionPolicy: {
+        parameters: {
+            query: {
+                projectId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewRetentionPolicyPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新済み */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRetentionPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    purgeExpiredReviewEvidence: {
+        parameters: {
+            query: {
+                projectId: string;
+                /** @description 1 ページの最大件数 */
+                limit?: components["parameters"]["ListLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 削除実行結果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewRetentionPurgeResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createImportJob: {

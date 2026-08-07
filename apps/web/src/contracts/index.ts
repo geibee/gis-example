@@ -51,11 +51,14 @@ export type ZoneLayerOperation = Schemas["ZoneLayerOperation"];
 
 // ---------------------------------------------------------------- レビュー (docs/prototype-review.md)
 export type ReviewSession = Schemas["ReviewSession"];
+export type ReviewSessionPatchRequest = Schemas["ReviewSessionPatchRequest"];
 export type ReviewPerspective = Schemas["ReviewPerspective"];
 export type ReviewScope = Schemas["ReviewScope"];
 export type FeedbackThread = Schemas["FeedbackThread"];
 export type FeedbackMessage = Schemas["FeedbackMessage"];
 export type FeedbackMessageCreateRequest = Schemas["FeedbackMessageCreateRequest"];
+export type FeedbackMessageUpdateRequest = Schemas["FeedbackMessageUpdateRequest"];
+export type FeedbackMessageVersion = Schemas["FeedbackMessageVersion"];
 export type FeedbackThreadStatusPatchRequest = Schemas["FeedbackThreadStatusPatchRequest"];
 export type FeedbackSummary = Schemas["FeedbackSummary"];
 export type FeedbackSessionSummary = Schemas["FeedbackSessionSummary"];
@@ -63,6 +66,9 @@ export type FeedbackPerspectiveSummary = Schemas["FeedbackPerspectiveSummary"];
 export type FeedbackThreadSearchQuery = OperationMap["searchFeedbackThreads"]["parameters"]["query"];
 export type ReviewEvidence = Schemas["ReviewEvidence"];
 export type FeedbackThreadCreateMetadata = Schemas["FeedbackThreadCreateMetadata"];
+export type ReviewRetentionPolicy = Schemas["ReviewRetentionPolicy"];
+export type ReviewRetentionPolicyPatchRequest = Schemas["ReviewRetentionPolicyPatchRequest"];
+export type ReviewRetentionPurgeResult = Schemas["ReviewRetentionPurgeResult"];
 
 // ---------------------------------------------------------------- ジョブ
 export type ImportJob = Schemas["ImportJob"];

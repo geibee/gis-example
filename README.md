@@ -184,7 +184,7 @@ web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-
 - メンバーでないプロジェクトのリソースへの個別アクセスは 404 (ID の存在自体を隠す)。メンバーだがロール不足の場合と、projectId を明示した操作の拒否は 403
 - 一覧 API (`/api/layers` `/api/lands` `/api/buildings` `/api/parties` `/api/zones` `/api/features/search`) は `projectId` が必須
 - `/api/projects` はメンバーであるプロジェクトのみ返す (admin は全件)
-- 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。閲覧成功は記録しない。書込みはベストエフォートで、失敗してもリクエストは落とさない
+- 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。通常の閲覧成功は記録しないが、機微なレビュー証跡の取得成功は例外として記録する。書込みはベストエフォートで、失敗してもリクエストは落とさない
 - 管理 API: `GET /api/me`(自分のロールとメンバーシップ)、admin 専用の `GET /api/users`・`PATCH /api/users/{id}`(system_role / is_active。自分自身は変更不可)・`GET/PUT/DELETE /api/projects/{id}/members/{userId}`。メンバーシップの変更は次のリクエストから即時反映される
 
 ## Prototype Review
@@ -202,6 +202,8 @@ Phase 3 として、主要なナビゲーション・一覧行・詳細ヘッダ
 Phase 4 として、ピンから開く Thread Drawer、メッセージ一覧・返信、`OPEN` / `RESOLVED` の解決・再開を実装済み。viewer は返信でき、状態変更は editor 以上に限定する。解決済みスレッドへの返信は暗黙に再開せず 409 で拒否し、editor が明示的に Reopen してから会話を続ける。返信と状態変更は既存の監査ログへ変更内容を記録する。
 
 Phase 5 として、レビュー画面に管理パネルを実装済み。プロジェクト全体の未解決・解決済み・証跡あり件数と、セッション別・観点別の内訳を確認できる。選択中セッションのスレッドは状態・観点・証跡有無・コメント本文でサーバ側検索でき、一覧から Thread Drawer と認可付き証跡ビューアを開ける。
+
+Phase 6 として、コメントの本人編集と全版履歴、証跡閲覧成功の監査、証跡の保存期間管理を実装済み。保存期間はプロジェクト既定をセッション単位で上書きでき、未設定は自動削除なし。期限切れ証跡は物理削除前でも API・一覧・集計から遮断され、editor が管理画面または外部スケジューラ向け API から小分けに完全削除できる。
 
 権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 

@@ -1,7 +1,13 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
-import type { FeedbackSummary, FeedbackThread, ReviewSession } from "../contracts";
+import { describe, expect, it, vi } from "vitest";
+import type {
+  FeedbackSummary,
+  FeedbackThread,
+  ReviewRetentionPolicy,
+  ReviewRetentionPurgeResult,
+  ReviewSession
+} from "../contracts";
 import { makeFeedbackThread, makeReviewSession } from "../testing/fixtures";
 import { renderWithProviders } from "../testing/renderWithProviders";
 import { server } from "../testing/server";
@@ -129,7 +135,8 @@ describe("ReviewScreen", () => {
         pixelRatio: 1,
         frontendVersion: "test",
         route: "/lands?status=open",
-        capturedAt: "2026-08-12T10:15:00+09:00"
+        capturedAt: "2026-08-12T10:15:00+09:00",
+        expiresAt: null
       }
     });
     const requestedQueries: string[] = [];
@@ -181,5 +188,60 @@ describe("ReviewScreen", () => {
 
     await user.click(await within(management).findByRole("button", { name: /スレッドを開く/ }));
     expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
+  });
+
+  it("editor がプロジェクトとセッションの証跡保存期間を設定し期限切れ証跡を削除できる", async () => {
+    let session = makeReviewSession({ evidenceRetentionDays: null, effectiveEvidenceRetentionDays: 90 });
+    let policy: ReviewRetentionPolicy = {
+      projectId: "p1",
+      defaultEvidenceRetentionDays: 90,
+      expiredEvidenceCount: 2,
+      expiredEvidenceBytes: 4096
+    };
+    let projectPatch: unknown = null;
+    let sessionPatch: unknown = null;
+    let purgeRequests = 0;
+    server.use(
+      http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([session])),
+      http.get("*/api/review-retention", () => HttpResponse.json<ReviewRetentionPolicy>(policy)),
+      http.patch("*/api/review-retention", async ({ request }) => {
+        projectPatch = await request.json();
+        policy = { ...policy, defaultEvidenceRetentionDays: 120 };
+        return HttpResponse.json<ReviewRetentionPolicy>(policy);
+      }),
+      http.patch("*/api/review-sessions/:id", async ({ request }) => {
+        sessionPatch = await request.json();
+        session = { ...session, evidenceRetentionDays: 30, effectiveEvidenceRetentionDays: 30 };
+        return HttpResponse.json<ReviewSession>(session);
+      }),
+      http.post("*/api/review-retention/purge", () => {
+        purgeRequests += 1;
+        const result: ReviewRetentionPurgeResult = {
+          purgedEvidenceCount: 2,
+          purgedEvidenceBytes: 4096,
+          failedEvidenceCount: 0,
+          remainingExpiredEvidenceCount: 0
+        };
+        return HttpResponse.json<ReviewRetentionPurgeResult>(result);
+      })
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { user } = renderWithProviders({ path: "/review" });
+    const retention = await screen.findByRole("region", { name: "証跡の保存期間" });
+
+    const projectInput = within(retention).getByRole("spinbutton", { name: "プロジェクト既定（日）" });
+    await waitFor(() => expect(projectInput).toHaveValue(90));
+    await user.clear(projectInput);
+    await user.type(projectInput, "120");
+    const sessionInput = within(retention).getByRole("spinbutton", { name: "このセッションの上書き（日）" });
+    await user.type(sessionInput, "30");
+    await user.click(within(retention).getByRole("button", { name: "保存期間を更新" }));
+
+    await waitFor(() => expect(projectPatch).toEqual({ defaultEvidenceRetentionDays: 120 }));
+    await waitFor(() => expect(sessionPatch).toEqual({ evidenceRetentionDays: 30 }));
+    await user.click(within(retention).getByRole("button", { name: "期限切れ証跡を削除" }));
+    await waitFor(() => expect(purgeRequests).toBe(1));
+    expect(confirm).toHaveBeenCalledOnce();
+    confirm.mockRestore();
   });
 });

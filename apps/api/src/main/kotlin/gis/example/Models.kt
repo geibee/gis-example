@@ -427,6 +427,10 @@ data class ReviewSessionDto(
     val status: String,
     val startAt: String? = null,
     val endAt: String? = null,
+    /** NULL はプロジェクト既定を継承する */
+    val evidenceRetentionDays: Int? = null,
+    /** セッション上書きとプロジェクト既定を解決した実効値。NULL は自動削除なし */
+    val effectiveEvidenceRetentionDays: Int? = null,
     val createdBy: String? = null,
     val createdAt: String,
     val updatedAt: String,
@@ -447,7 +451,8 @@ data class ReviewEvidenceDto(
     val pixelRatio: Double,
     val frontendVersion: String,
     val route: String,
-    val capturedAt: String
+    val capturedAt: String,
+    val expiresAt: String? = null
 )
 
 @Serializable
@@ -459,6 +464,18 @@ data class FeedbackMessageDto(
     val body: String,
     val createdAt: String,
     val editedAt: String? = null
+)
+
+/** コメントの改訂版。version=1 を初版とし、最大 version が現在版になる。 */
+@Serializable
+data class FeedbackMessageVersionDto(
+    val messageId: String,
+    val version: Int,
+    val body: String,
+    val editedBy: String? = null,
+    val editedByName: String? = null,
+    val createdAt: String,
+    val current: Boolean
 )
 
 @Serializable
@@ -510,4 +527,22 @@ data class FeedbackSummaryDto(
     val withEvidenceCount: Long,
     val sessions: List<FeedbackSessionSummaryDto> = emptyList(),
     val perspectives: List<FeedbackPerspectiveSummaryDto> = emptyList()
+)
+
+/** プロジェクトの証跡保存方針と、現在期限切れになっている証跡の規模。 */
+@Serializable
+data class ReviewRetentionPolicyDto(
+    val projectId: String,
+    val defaultEvidenceRetentionDays: Int? = null,
+    val expiredEvidenceCount: Long,
+    val expiredEvidenceBytes: Long
+)
+
+/** 1 回の削除実行結果。失敗分は DB 参照を残し、次回再試行できる。 */
+@Serializable
+data class ReviewRetentionPurgeResultDto(
+    val purgedEvidenceCount: Int,
+    val purgedEvidenceBytes: Long,
+    val failedEvidenceCount: Int,
+    val remainingExpiredEvidenceCount: Long
 )

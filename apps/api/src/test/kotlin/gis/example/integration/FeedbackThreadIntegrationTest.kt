@@ -253,8 +253,10 @@ class FeedbackThreadIntegrationTest {
         val threadId = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata, pngBytes).bodyAsText())
             .getValue("id").jsonPrimitive.content
 
+        val evidenceCallId = "feedback-evidence-${System.nanoTime()}"
         val evidence = client.get("/api/threads/$threadId/evidence") {
             header(HttpHeaders.Authorization, editorBearer)
+            header(HttpHeaders.XRequestId, evidenceCallId)
         }
         assertEquals(HttpStatusCode.OK, evidence.status)
         assertEquals(ContentType.Image.PNG, evidence.contentType()?.withoutParameters())
@@ -264,6 +266,18 @@ class FeedbackThreadIntegrationTest {
             evidence.headers[HttpHeaders.CacheControl],
             "証跡には個人情報が写り得るため共有キャッシュに残さない"
         )
+        rawConnection().use { connection ->
+            connection.prepareStatement(
+                "SELECT action, decision FROM app.audit_logs WHERE call_id = ?"
+            ).use { stmt ->
+                stmt.setString(1, evidenceCallId)
+                stmt.executeQuery().use { rs ->
+                    assertTrue(rs.next(), "機微な証跡閲覧成功は監査ログへ残るはず")
+                    assertEquals("REVIEW_READ", rs.getString(1))
+                    assertEquals("allow", rs.getString(2))
+                }
+            }
+        }
 
         assertEquals(
             HttpStatusCode.NotFound,
@@ -447,6 +461,158 @@ class FeedbackThreadIntegrationTest {
             HttpStatusCode.NotFound,
             patchStatus(client, threadId, outsiderBearer, "RESOLVED").status
         )
+    }
+
+    @Test
+    fun `投稿者本人だけがコメントを編集でき全版を履歴で確認できる`() = withApp { client ->
+        val sessionId = createSession(client)
+        val createdThread = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata).bodyAsText())
+        val messageId = createdThread.getValue("messages").jsonArray.single().jsonObject
+            .getValue("id").jsonPrimitive.content
+
+        val updateCallId = "feedback-message-update-${System.nanoTime()}"
+        val updated = client.patch("/api/messages/$messageId") {
+            header(HttpHeaders.Authorization, viewerBearer)
+            header(HttpHeaders.XRequestId, updateCallId)
+            contentType(ContentType.Application.Json)
+            setBody("""{"body":"項目名を契約終了日に変更してください"}""")
+        }
+        assertEquals(HttpStatusCode.OK, updated.status, updated.bodyAsText())
+        assertEquals(
+            "項目名を契約終了日に変更してください",
+            body(updated.bodyAsText()).getValue("body").jsonPrimitive.content
+        )
+        assertNotNull(body(updated.bodyAsText())["editedAt"]?.jsonPrimitive?.contentOrNull())
+
+        val historyResponse = client.get("/api/messages/$messageId/history") {
+            header(HttpHeaders.Authorization, viewerBearer)
+        }
+        assertEquals(HttpStatusCode.OK, historyResponse.status, historyResponse.bodyAsText())
+        val history = Json.parseToJsonElement(historyResponse.bodyAsText()).jsonArray.map { it.jsonObject }
+        assertEquals(listOf(2, 1), history.map { it.getValue("version").jsonPrimitive.content.toInt() })
+        assertEquals(true, history[0].getValue("current").jsonPrimitive.content.toBoolean())
+        assertEquals("この項目は必要ですか？", history[1].getValue("body").jsonPrimitive.content)
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.patch("/api/messages/$messageId") {
+                header(HttpHeaders.Authorization, editorBearer)
+                contentType(ContentType.Application.Json)
+                setBody("""{"body":"他人による上書き"}""")
+            }.status,
+            "同じプロジェクトの editor でも投稿者本人でなければ編集できない"
+        )
+        assertEquals(
+            HttpStatusCode.NotFound,
+            client.get("/api/messages/$messageId/history") {
+                header(HttpHeaders.Authorization, outsiderBearer)
+            }.status,
+            "非メンバーにはメッセージの存在自体を隠す"
+        )
+
+        rawConnection().use { connection ->
+            connection.prepareStatement("SELECT detail::text FROM app.audit_logs WHERE call_id = ?").use { stmt ->
+                stmt.setString(1, updateCallId)
+                stmt.executeQuery().use { rs ->
+                    assertTrue(rs.next(), "コメント編集の監査差分が残るはず")
+                    val detail = rs.getString(1)
+                    assertTrue("この項目は必要ですか？" in detail, detail)
+                    assertTrue("項目名を契約終了日に変更してください" in detail, detail)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `証跡保存期間を継承上書きし期限切れを遮断して削除できる`() = withApp { client ->
+        val sessionId = createSession(client)
+        val expiredMetadata = uiTargetMetadata.replace(
+            "2026-08-12T10:15:00+09:00",
+            "2020-01-01T10:15:00+09:00"
+        )
+        val threadId = body(
+            postThread(client, sessionId, viewerBearer, expiredMetadata, pngBytes).bodyAsText()
+        ).getValue("id").jsonPrimitive.content
+        assertEquals(
+            HttpStatusCode.OK,
+            client.get("/api/threads/$threadId/evidence") {
+                header(HttpHeaders.Authorization, viewerBearer)
+            }.status,
+            "保存方針未設定では従来どおり保持する"
+        )
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.patch("/api/review-retention?projectId=$defaultProject") {
+                header(HttpHeaders.Authorization, viewerBearer)
+                contentType(ContentType.Application.Json)
+                setBody("""{"defaultEvidenceRetentionDays":1}""")
+            }.status
+        )
+        val policyUpdate = client.patch("/api/review-retention?projectId=$defaultProject") {
+            header(HttpHeaders.Authorization, editorBearer)
+            contentType(ContentType.Application.Json)
+            setBody("""{"defaultEvidenceRetentionDays":1}""")
+        }
+        assertEquals(HttpStatusCode.OK, policyUpdate.status, policyUpdate.bodyAsText())
+        assertEquals(
+            1,
+            body(policyUpdate.bodyAsText()).getValue("defaultEvidenceRetentionDays").jsonPrimitive.content.toInt()
+        )
+
+        val sessionUpdate = client.patch("/api/review-sessions/$sessionId") {
+            header(HttpHeaders.Authorization, editorBearer)
+            contentType(ContentType.Application.Json)
+            setBody("""{"evidenceRetentionDays":2}""")
+        }
+        assertEquals(HttpStatusCode.OK, sessionUpdate.status, sessionUpdate.bodyAsText())
+        val updatedSession = body(sessionUpdate.bodyAsText())
+        assertEquals(2, updatedSession.getValue("evidenceRetentionDays").jsonPrimitive.content.toInt())
+        assertEquals(2, updatedSession.getValue("effectiveEvidenceRetentionDays").jsonPrimitive.content.toInt())
+
+        assertEquals(
+            HttpStatusCode.NotFound,
+            client.get("/api/threads/$threadId/evidence") {
+                header(HttpHeaders.Authorization, viewerBearer)
+            }.status,
+            "期限切れ証跡は物理削除前でも配信しない"
+        )
+        val threadAfterExpiry = body(
+            client.get("/api/threads/$threadId") {
+                header(HttpHeaders.Authorization, viewerBearer)
+            }.bodyAsText()
+        )
+        assertNull(threadAfterExpiry["evidence"]?.jsonPrimitive?.contentOrNull())
+
+        val policy = body(
+            client.get("/api/review-retention?projectId=$defaultProject") {
+                header(HttpHeaders.Authorization, viewerBearer)
+            }.bodyAsText()
+        )
+        assertTrue(policy.getValue("expiredEvidenceCount").jsonPrimitive.content.toLong() >= 1)
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.post("/api/review-retention/purge?projectId=$defaultProject&limit=10") {
+                header(HttpHeaders.Authorization, viewerBearer)
+            }.status
+        )
+
+        val purge = client.post("/api/review-retention/purge?projectId=$defaultProject&limit=10") {
+            header(HttpHeaders.Authorization, editorBearer)
+        }
+        assertEquals(HttpStatusCode.OK, purge.status, purge.bodyAsText())
+        assertTrue(body(purge.bodyAsText()).getValue("purgedEvidenceCount").jsonPrimitive.content.toInt() >= 1)
+        rawConnection().use { connection ->
+            connection.prepareStatement(
+                "SELECT evidence_id FROM app.feedback_threads WHERE id = ?::uuid"
+            ).use { stmt ->
+                stmt.setString(1, threadId)
+                stmt.executeQuery().use { rs ->
+                    assertTrue(rs.next())
+                    assertNull(rs.getString(1), "物理削除後はスレッドの証跡参照も外れる")
+                }
+            }
+        }
     }
 
     @Test

@@ -367,6 +367,16 @@ GET   /api/threads?projectId=...             # 状態・観点・証跡・本文
 GET   /api/threads/summary?projectId=...     # 全体・セッション別・観点別集計 (REVIEW_READ)
 ```
 
+実装済み (Phase 6):
+
+```http
+PATCH /api/messages/{messageId}              # 投稿者本人による編集。全版を追記 (REVIEW_COMMENT)
+GET   /api/messages/{messageId}/history      # 新しい版から順に取得 (REVIEW_READ)
+GET   /api/review-retention?projectId=...    # 保存方針と期限切れ件数 (REVIEW_READ)
+PATCH /api/review-retention?projectId=...    # プロジェクト既定を設定 (REVIEW_MANAGE)
+POST  /api/review-retention/purge?projectId=... # 期限切れ証跡を小分け削除 (REVIEW_MANAGE)
+```
+
 解決済みスレッドへの返信は 409 とし、暗黙には再開しない。返信は viewer 以上、状態変更は editor
 以上に限定する。いずれも既存 `AuditTrail` へ変更内容を渡し、Message 投稿と Resolve / Reopen の
 履歴を `app.audit_logs.detail` から追跡できるようにする。
@@ -375,11 +385,12 @@ GET   /api/threads/summary?projectId=...     # 全体・セッション別・観
 
 ## 10. 非機能要件 (公共部門向け)
 
-- **監査**: 操作ログ / コメント履歴 / 状態変更履歴 / 権限変更履歴 / ReviewScope 変更履歴
+- **監査**: 操作ログ / コメント全版 / 状態変更履歴 / 権限変更履歴 / ReviewScope 変更履歴。
+  通常の GET 成功は記録しないが、機微な証跡画像の取得成功は `app.audit_logs` へ記録する
 - **データ保護**: スクリーンショットには個人情報・地理情報・業務情報が含まれうる。
   保存時暗号化 / 転送時暗号化 / 非公開ストレージ / アクセス制御 / 保存期間 / 削除方針を設計する
-- **保存期間**: Project / ReviewSession 単位で設定できる余地を残す
-  (プロトタイプ期間のみ / 本番稼働まで / 契約終了後 X 年)
+- **保存期間**: Project 既定 / ReviewSession 上書きの `1..3650` 日。未設定は自動削除なし。
+  期限切れ時点で配信・一覧・集計から遮断し、物理削除は冪等な小分け API で行う
 - **閉域**: 外部 SaaS へスクリーンショットを送らない。組織内クラウド・閉域構成に
   配置できる独立コンポーネントとする
 
@@ -395,7 +406,7 @@ GET   /api/threads/summary?projectId=...     # 全体・セッション別・観
 | 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | **完了** |
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | **完了** |
 | 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | **完了** |
-| 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | 未着手 |
+| 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | **完了** |
 | 7 | 通知・外部連携 (Email / Teams / Issue 生成)。初期は双方向同期を避ける | 未着手 |
 
 公共部門で本格利用する場合、**Phase 6 までを正式リリース条件**とする。
@@ -421,6 +432,10 @@ GET   /api/threads/summary?projectId=...     # 全体・セッション別・観
 | Thread Drawer / Message 一覧 / Reply / Status | `FeedbackThreadDrawer.tsx` | 4 |
 | プロジェクト横断検索・セッション別/観点別集計 API | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 5 |
 | 管理パネル / フィルタ / 証跡ビューア | `FeedbackManagementPanel.tsx` / `screens/ReviewScreen.tsx` | 5 |
+| コメント全版・証跡期限スキーマ | `db/migration/V7__review_governance.sql` | 6 |
+| コメント本人編集・版履歴 API / UI | `FeedbackQueries.kt` / `FeedbackThreadDrawer.tsx` | 6 |
+| 証跡保存方針・期限切れ削除 API / UI | `ReviewGovernanceQueries.kt` / `FeedbackManagementPanel.tsx` | 6 |
+| 証跡閲覧成功の監査 | `AuditLog.kt` / `routes/FeedbackRoutes.kt` | 6 |
 
 ### 11.1 実装時の設計判断 (設計案からの変更点)
 
@@ -452,6 +467,14 @@ GET   /api/threads/summary?projectId=...     # 全体・セッション別・観
   追えるよう、返信は 409 で拒否し、editor が明示的に再開してから投稿する。
 - **返信と状態変更で権限を分けた。** レビュー対象者である viewer は `REVIEW_COMMENT` で返信できるが、
   Resolve / Reopen は `REVIEW_MANAGE` を持つ editor 以上だけに許可する。
+- **コメント編集は投稿者本人だけに限定し、現在版だけを上書きしない。** 初版を含む全本文を
+  `app.feedback_message_versions` へ追記し、現在版は従来の `app.feedback_messages` から高速に読む。
+  同じプロジェクトの editor でも他人の発言本文は変更できない。
+- **保存期間の未設定を「自動削除なし」とした。** V7 適用だけで既存証跡へ暗黙の削除期限を
+  導入しないため。プロジェクト既定とセッション上書きの変更時は既存証跡の `expires_at` も再計算する。
+- **期限切れと物理削除を分離した。** `expires_at` 到達時点で配信・一覧・検索・集計から即座に隠し、
+  Blob と DB 行の物理削除は `limit` 付きの冪等 API で行う。行ロック中に期限を再検査し、保存期間の
+  延長と競合して有効な証跡を削除しない。ストレージ削除失敗時は DB 参照を残して再試行できる。
 
 ### 11.2 実装難易度の見立て
 

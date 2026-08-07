@@ -126,4 +126,22 @@ class ReviewSessionRequestTest {
             readOptionalTimestamp(json("""{"startAt": "2026-08-10"}"""), "startAt")
         }
     }
+
+    @Test
+    fun `証跡保存期間は1日から3650日または継承を受け付ける`() {
+        assertEquals(1, readEvidenceRetentionDays(json("""{"evidenceRetentionDays":1}"""), "evidenceRetentionDays"))
+        assertEquals(
+            3650,
+            readEvidenceRetentionDays(json("""{"evidenceRetentionDays":3650}"""), "evidenceRetentionDays")
+        )
+        assertNull(
+            readEvidenceRetentionDays(json("""{"evidenceRetentionDays":null}"""), "evidenceRetentionDays")
+        )
+        assertFailsWith<ApiException> {
+            readEvidenceRetentionDays(json("""{"evidenceRetentionDays":0}"""), "evidenceRetentionDays")
+        }
+        assertFailsWith<ApiException> {
+            readEvidenceRetentionDays(json("""{"evidenceRetentionDays":3651}"""), "evidenceRetentionDays")
+        }
+    }
 }

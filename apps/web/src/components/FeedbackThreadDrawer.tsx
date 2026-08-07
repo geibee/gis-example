@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { CheckCircle2, RotateCcw, Send, X } from "lucide-react";
+import { CheckCircle2, History, Pencil, RotateCcw, Save, Send, X } from "lucide-react";
 import { useAppShell } from "../appShell";
-import type { FeedbackThread } from "../contracts";
+import type { FeedbackMessage, FeedbackThread } from "../contracts";
 import { notifyError, notifySuccess } from "../notifications";
 import {
   useCreateFeedbackMessageMutation,
+  useFeedbackMessageHistoryQuery,
   useFeedbackThreadQuery,
+  useUpdateFeedbackMessageMutation,
   useUpdateFeedbackThreadStatusMutation
 } from "../queries/feedbackThreads";
 import { captureExcludeAttribute } from "../review";
@@ -96,13 +98,7 @@ function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; on
 
       <ol className="feedback-message-list" aria-label="メッセージ一覧">
         {thread.messages.map((message) => (
-          <li key={message.id}>
-            <div>
-              <strong>{message.authorName ?? "退職済みユーザー"}</strong>
-              <time dateTime={message.createdAt}>{formatTimestamp(message.createdAt)}</time>
-            </div>
-            <p>{message.body}</p>
-          </li>
+          <FeedbackMessageItem key={message.id} message={message} canEdit={message.authorId === me?.userId} />
         ))}
       </ol>
 
@@ -138,6 +134,101 @@ function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; on
         </button>
       ) : null}
     </>
+  );
+}
+
+function FeedbackMessageItem({ message, canEdit }: { message: FeedbackMessage; canEdit: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.body);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const updateMessage = useUpdateFeedbackMessageMutation();
+  const historyQuery = useFeedbackMessageHistoryQuery(historyOpen ? message.id : null);
+
+  useEffect(() => {
+    if (!editing) setDraft(message.body);
+  }, [editing, message.body]);
+
+  const save = async () => {
+    const body = draft.trim();
+    if (!body || body === message.body) {
+      setEditing(false);
+      setDraft(message.body);
+      return;
+    }
+    try {
+      await updateMessage.mutateAsync({ messageId: message.id, request: { body } });
+      setEditing(false);
+      notifySuccess("コメントを編集しました");
+    } catch (error) {
+      notifyError(errorMessage(error));
+    }
+  };
+
+  return (
+    <li>
+      <div>
+        <strong>{message.authorName ?? "退職済みユーザー"}</strong>
+        <time dateTime={message.createdAt}>{formatTimestamp(message.createdAt)}</time>
+      </div>
+      {editing ? (
+        <div className="feedback-message-editor">
+          <label>
+            コメントを編集
+            <textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} />
+          </label>
+          <div>
+            <button type="button" className="subtle-button" onClick={() => setEditing(false)}>
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className="command-button"
+              disabled={!draft.trim() || updateMessage.isPending}
+              onClick={() => void save()}
+            >
+              <Save size={14} />
+              {updateMessage.isPending ? "保存中..." : "編集を保存"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p>{message.body}</p>
+      )}
+      <div className="feedback-message-actions">
+        {message.editedAt ? (
+          <button type="button" className="text-button" onClick={() => setHistoryOpen((open) => !open)}>
+            <History size={13} />
+            編集履歴
+          </button>
+        ) : null}
+        {canEdit && !editing ? (
+          <button type="button" className="text-button" onClick={() => setEditing(true)}>
+            <Pencil size={13} />
+            編集
+          </button>
+        ) : null}
+      </div>
+      {historyOpen ? (
+        <div className="feedback-message-history" role="region" aria-label="コメントの編集履歴">
+          {historyQuery.isPending ? <p>履歴を読み込んでいます...</p> : null}
+          {historyQuery.isError ? (
+            <p className="notice error" role="alert">
+              {errorMessage(historyQuery.error)}
+            </p>
+          ) : null}
+          {historyQuery.data?.map((version) => (
+            <article key={version.version}>
+              <div>
+                <strong>版 {version.version}</strong>
+                {version.current ? <span>現在</span> : null}
+                <time dateTime={version.createdAt}>{formatTimestamp(version.createdAt)}</time>
+              </div>
+              <p>{version.body}</p>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </li>
   );
 }
 

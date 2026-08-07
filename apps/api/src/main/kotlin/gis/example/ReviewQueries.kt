@@ -80,6 +80,7 @@ fun Database.createReviewSession(request: JsonObject, createdBy: String?, audit:
     val status = readReviewSessionStatus(request) ?: "draft"
     val startAt = readOptionalTimestamp(request, "startAt")
     val endAt = readOptionalTimestamp(request, "endAt")
+    val evidenceRetentionDays = readEvidenceRetentionDays(request, "evidenceRetentionDays")
     requireValidPeriod(startAt, endAt)
     val perspectives = readPerspectiveInputs(request)
     val scopes = readScopeInputs(request)
@@ -87,8 +88,10 @@ fun Database.createReviewSession(request: JsonObject, createdBy: String?, audit:
     val id = withTransaction { connection ->
         val newId = connection.prepareStatement(
             """
-            INSERT INTO app.review_sessions (project_id, title, description, status, start_at, end_at, created_by)
-            VALUES (?::uuid, ?, ?, ?, ?::timestamptz, ?::timestamptz, ?::uuid)
+            INSERT INTO app.review_sessions (
+                project_id, title, description, status, start_at, end_at, evidence_retention_days, created_by
+            )
+            VALUES (?::uuid, ?, ?, ?, ?::timestamptz, ?::timestamptz, ?, ?::uuid)
             RETURNING id::text
             """.trimIndent()
         ).use { stmt ->
@@ -98,7 +101,9 @@ fun Database.createReviewSession(request: JsonObject, createdBy: String?, audit:
             stmt.setString(4, status)
             setNullableString(stmt, 5, startAt)
             setNullableString(stmt, 6, endAt)
-            setNullableUuidString(stmt, 7, createdBy)
+            if (evidenceRetentionDays == null) stmt.setNull(7, java.sql.Types.INTEGER)
+            else stmt.setInt(7, evidenceRetentionDays)
+            setNullableUuidString(stmt, 8, createdBy)
             stmt.executeQuery().use { rs ->
                 rs.next()
                 rs.getString(1)
@@ -142,6 +147,15 @@ fun Database.updateReviewSession(id: String, request: JsonObject, audit: AuditTr
         setters.add("end_at = ?::timestamptz")
         binders.add { stmt, index -> setNullableString(stmt, index, endAt) }
     }
+    val retentionChanged = "evidenceRetentionDays" in request
+    if (retentionChanged) {
+        val retentionDays = readEvidenceRetentionDays(request, "evidenceRetentionDays")
+        setters.add("evidence_retention_days = ?")
+        binders.add { stmt, index ->
+            if (retentionDays == null) stmt.setNull(index, java.sql.Types.INTEGER)
+            else stmt.setInt(index, retentionDays)
+        }
+    }
     // 観点・対象画面はキーがある場合のみ全置換する (部分更新は「何を外したか」が曖昧になる)
     val perspectives = if ("perspectives" in request) readPerspectiveInputs(request) else null
     val scopes = if ("scopes" in request) readScopeInputs(request) else null
@@ -164,6 +178,7 @@ fun Database.updateReviewSession(id: String, request: JsonObject, audit: AuditTr
         }
         if (perspectives != null) replacePerspectives(connection, id, perspectives)
         if (scopes != null) replaceScopes(connection, id, scopes)
+        if (retentionChanged) refreshEvidenceExpirationsForSession(connection, id)
     }
 
     val after = getReviewSession(id)
@@ -406,6 +421,11 @@ private fun reviewSessionColumns(alias: String): String = """
     $alias.status,
     $alias.start_at,
     $alias.end_at,
+    $alias.evidence_retention_days,
+    coalesce(
+        $alias.evidence_retention_days,
+        (SELECT p.review_evidence_retention_days FROM app.projects AS p WHERE p.id = $alias.project_id)
+    ) AS effective_evidence_retention_days,
     $alias.created_by::text AS created_by,
     $alias.created_at,
     $alias.updated_at
@@ -419,6 +439,8 @@ private fun java.sql.ResultSet.toReviewSessionDto(): ReviewSessionDto = ReviewSe
     status = getString("status"),
     startAt = isoTimestamp("start_at"),
     endAt = isoTimestamp("end_at"),
+    evidenceRetentionDays = (getObject("evidence_retention_days") as? Number)?.toInt(),
+    effectiveEvidenceRetentionDays = (getObject("effective_evidence_retention_days") as? Number)?.toInt(),
     createdBy = getString("created_by"),
     createdAt = isoTimestamp("created_at") ?: error("created_at must not be null"),
     updatedAt = isoTimestamp("updated_at") ?: error("updated_at must not be null")

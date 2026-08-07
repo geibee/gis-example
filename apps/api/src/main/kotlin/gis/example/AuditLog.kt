@@ -3,6 +3,7 @@
 package gis.example
 
 import io.ktor.server.application.ApplicationPlugin
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.hooks.ResponseSent
 import io.ktor.server.auth.principal
@@ -13,6 +14,12 @@ import io.ktor.server.request.path
 // PEP (AuthorizationEnforcement) が判定時に格納し、監査ログが読み出す
 internal val AuditedAction = io.ktor.util.AttributeKey<Action>("audit.action")
 internal val AuditedProjectId = io.ktor.util.AttributeKey<String>("audit.projectId")
+private val AuditedSuccessfulRead = io.ktor.util.AttributeKey<Unit>("audit.successfulRead")
+
+/** 証跡画像など機微な GET だけ、通常の閲覧成功ログ抑制を上書きして監査対象にする。 */
+fun ApplicationCall.auditSuccessfulRead() {
+    attributes.put(AuditedSuccessfulRead, Unit)
+}
 
 // PUT はプロジェクトメンバー upsert (AdminRoutes) が使う。変更系はすべて記録対象にする
 private val mutationMethods = setOf("POST", "PUT", "PATCH", "DELETE")
@@ -26,7 +33,8 @@ fun auditLogPlugin(db: Database): ApplicationPlugin<Unit> =
             val method = call.request.httpMethod.value
             val denied = status == 401 || status == 403
             val mutationSucceeded = method in mutationMethods && status < 400
-            if (!denied && !mutationSucceeded) return@on
+            val markedReadSucceeded = call.attributes.getOrNull(AuditedSuccessfulRead) != null && status < 400
+            if (!denied && !mutationSucceeded && !markedReadSucceeded) return@on
 
             val principal = call.principal<AppPrincipal>()
             runCatching {

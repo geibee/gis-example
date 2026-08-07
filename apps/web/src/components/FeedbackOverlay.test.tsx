@@ -95,7 +95,8 @@ describe("FeedbackOverlay", () => {
       pixelRatio: 1,
       frontendVersion: "test",
       route,
-      capturedAt: "2026-08-12T10:15:00+09:00"
+      capturedAt: "2026-08-12T10:15:00+09:00",
+      expiresAt: null
     });
     server.use(
       http.get("*/api/review-sessions/:id/threads", () =>

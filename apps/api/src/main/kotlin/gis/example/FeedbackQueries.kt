@@ -117,7 +117,7 @@ fun Database.createFeedbackThread(
     audit: AuditTrail
 ): FeedbackThreadDto = try {
     val id = withTransaction { connection ->
-        val evidenceId = input.evidence?.let { insertEvidence(connection, it) }
+        val evidenceId = input.evidence?.let { insertEvidence(connection, input.reviewSessionId, it) }
         // 投稿時の画面に対応する ReviewScope を引き当てる (対象外の画面からの投稿もあるので任意)
         val scopeId = input.pageId?.let { pageId -> findScopeId(connection, input.reviewSessionId, pageId) }
         val threadId = connection.prepareStatement(
@@ -144,14 +144,22 @@ fun Database.createFeedbackThread(
                 rs.getString(1)
             }
         }
-        connection.prepareStatement(
-            "INSERT INTO app.feedback_messages (thread_id, author_id, body) VALUES (?::uuid, ?::uuid, ?)"
+        val messageId = connection.prepareStatement(
+            """
+            INSERT INTO app.feedback_messages (thread_id, author_id, body)
+            VALUES (?::uuid, ?::uuid, ?)
+            RETURNING id::text
+            """.trimIndent()
         ).use { stmt ->
             stmt.setString(1, threadId)
             setNullableUuidString(stmt, 2, createdBy)
             stmt.setString(3, input.body)
-            stmt.executeUpdate()
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getString(1)
+            }
         }
+        insertFeedbackMessageVersion(connection, messageId, 1, input.body, createdBy)
         threadId
     }
     val created = getFeedbackThread(id) ?: error("Created feedback thread disappeared")
@@ -190,7 +198,8 @@ fun Database.listFeedbackThreads(query: FeedbackThreadListQuery): PagedList<Feed
             SELECT ${feedbackThreadColumns()}
             FROM app.feedback_threads AS t
             JOIN app.review_perspectives AS p ON p.code = t.perspective_code
-            LEFT JOIN app.review_evidence AS e ON e.id = t.evidence_id
+            LEFT JOIN app.review_evidence AS e
+              ON e.id = t.evidence_id AND (e.expires_at IS NULL OR e.expires_at > now())
             LEFT JOIN app.users AS u ON u.id = t.created_by
             ${whereClause(filters)}
             ORDER BY t.created_at DESC, t.id${pagingClause(query.limit, query.offset)}
@@ -237,7 +246,14 @@ fun Database.searchFeedbackThreads(query: FeedbackThreadSearchQuery): PagedList<
             binders.add { stmt, index -> stmt.setString(index, perspectiveCode) }
         }
         query.hasEvidence?.let { hasEvidence ->
-            filters.add(if (hasEvidence) "t.evidence_id IS NOT NULL" else "t.evidence_id IS NULL")
+            val activeEvidence = """
+                EXISTS (
+                    SELECT 1 FROM app.review_evidence AS filter_evidence
+                    WHERE filter_evidence.id = t.evidence_id
+                      AND (filter_evidence.expires_at IS NULL OR filter_evidence.expires_at > now())
+                )
+            """.trimIndent()
+            filters.add(if (hasEvidence) activeEvidence else "NOT ($activeEvidence)")
         }
         query.query?.trim()?.takeIf { it.isNotEmpty() }?.let { text ->
             filters.add(
@@ -262,7 +278,8 @@ fun Database.searchFeedbackThreads(query: FeedbackThreadSearchQuery): PagedList<
             SELECT ${feedbackThreadColumns()}
             FROM app.feedback_threads AS t
             JOIN app.review_perspectives AS p ON p.code = t.perspective_code
-            LEFT JOIN app.review_evidence AS e ON e.id = t.evidence_id
+            LEFT JOIN app.review_evidence AS e
+              ON e.id = t.evidence_id AND (e.expires_at IS NULL OR e.expires_at > now())
             LEFT JOIN app.users AS u ON u.id = t.created_by
             ${whereClause(filters)}
             ORDER BY t.updated_at DESC, t.id${pagingClause(query.limit, query.offset)}
@@ -290,9 +307,15 @@ fun Database.summarizeFeedbackThreads(projectId: String): FeedbackSummaryDto =
             SELECT count(*) AS total_count,
                    count(*) FILTER (WHERE status = 'OPEN') AS open_count,
                    count(*) FILTER (WHERE status = 'RESOLVED') AS resolved_count,
-                   count(*) FILTER (WHERE evidence_id IS NOT NULL) AS with_evidence_count
-            FROM app.feedback_threads
-            WHERE project_id = ?::uuid
+                   count(*) FILTER (
+                       WHERE EXISTS (
+                           SELECT 1 FROM app.review_evidence AS summary_evidence
+                           WHERE summary_evidence.id = t.evidence_id
+                             AND (summary_evidence.expires_at IS NULL OR summary_evidence.expires_at > now())
+                       )
+                   ) AS with_evidence_count
+            FROM app.feedback_threads AS t
+            WHERE t.project_id = ?::uuid
             """.trimIndent()
         ).use { stmt ->
             stmt.setString(1, projectId)
@@ -383,7 +406,8 @@ fun Database.getFeedbackThread(id: String): FeedbackThreadDto? = dataSource.conn
         SELECT ${feedbackThreadColumns()}
         FROM app.feedback_threads AS t
         JOIN app.review_perspectives AS p ON p.code = t.perspective_code
-        LEFT JOIN app.review_evidence AS e ON e.id = t.evidence_id
+        LEFT JOIN app.review_evidence AS e
+          ON e.id = t.evidence_id AND (e.expires_at IS NULL OR e.expires_at > now())
         LEFT JOIN app.users AS u ON u.id = t.created_by
         WHERE t.id = ?::uuid
         """.trimIndent()
@@ -433,6 +457,7 @@ fun Database.createFeedbackMessage(
                 rs.getString(1)
             }
         }
+        insertFeedbackMessageVersion(connection, id, 1, body, authorId)
         connection.prepareStatement(
             "UPDATE app.feedback_threads SET updated_at = now() WHERE id = ?::uuid"
         ).use { stmt ->
@@ -450,6 +475,92 @@ fun Database.createFeedbackMessage(
         "Feedback message create failed: ${exc.message ?: "invalid feedback message"}"
     )
 }
+
+/** 投稿者本人だけが本文を編集できる。新しい本文も含め全版を追記し、上書き前の内容を失わない。 */
+fun Database.updateFeedbackMessage(
+    id: String,
+    body: String,
+    editorId: String,
+    audit: AuditTrail
+): FeedbackMessageDto = try {
+    val (before, after) = withTransaction { connection ->
+        val current = getFeedbackMessage(connection, id, forUpdate = true)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback message not found")
+        if (current.authorId != editorId) {
+            throw ApiException(io.ktor.http.HttpStatusCode.Forbidden, "投稿者本人だけがコメントを編集できます")
+        }
+        if (current.body == body) return@withTransaction current to current
+
+        val nextVersion = connection.prepareStatement(
+            "SELECT coalesce(max(version), 0) + 1 FROM app.feedback_message_versions WHERE message_id = ?::uuid"
+        ).use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
+        connection.prepareStatement(
+            "UPDATE app.feedback_messages SET body = ?, edited_at = now() WHERE id = ?::uuid"
+        ).use { stmt ->
+            stmt.setString(1, body)
+            stmt.setString(2, id)
+            if (stmt.executeUpdate() == 0) {
+                throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback message not found")
+            }
+        }
+        insertFeedbackMessageVersion(connection, id, nextVersion, body, editorId)
+        connection.prepareStatement(
+            "UPDATE app.feedback_threads SET updated_at = now() WHERE id = ?::uuid"
+        ).use { stmt ->
+            stmt.setString(1, current.threadId)
+            stmt.executeUpdate()
+        }
+        val updated = getFeedbackMessage(connection, id)
+            ?: throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback message not found")
+        current to updated
+    }
+    audit.recordUpdate("feedback_message", id, before.auditSnapshot(), after.auditSnapshot())
+    after
+} catch (exc: SQLException) {
+    throw ApiException(
+        io.ktor.http.HttpStatusCode.BadRequest,
+        "Feedback message update failed: ${exc.message ?: "invalid feedback message"}"
+    )
+}
+
+fun Database.getFeedbackMessageHistory(id: String): List<FeedbackMessageVersionDto> =
+    dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            """
+            SELECT v.message_id::text, v.version, v.body, v.edited_by::text, u.display_name,
+                   v.created_at, v.version = max(v.version) OVER () AS current
+            FROM app.feedback_message_versions AS v
+            LEFT JOIN app.users AS u ON u.id = v.edited_by
+            WHERE v.message_id = ?::uuid
+            ORDER BY v.version DESC
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            FeedbackMessageVersionDto(
+                                messageId = rs.getString(1),
+                                version = rs.getInt(2),
+                                body = rs.getString(3),
+                                editedBy = rs.getString(4),
+                                editedByName = rs.getString(5),
+                                createdAt = rs.isoTimestamp("created_at") ?: error("created_at must not be null"),
+                                current = rs.getBoolean("current")
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
 
 /** OPEN / RESOLVED を明示的に遷移させ、監査差分から Resolve / Reopen の履歴を追えるようにする。 */
 fun Database.updateFeedbackThreadStatus(
@@ -494,7 +605,8 @@ fun Database.getEvidenceReference(threadId: String): Pair<String, String>? =
             """
             SELECT e.screenshot_path, e.content_type
             FROM app.feedback_threads AS t
-            JOIN app.review_evidence AS e ON e.id = t.evidence_id
+            JOIN app.review_evidence AS e
+              ON e.id = t.evidence_id AND (e.expires_at IS NULL OR e.expires_at > now())
             WHERE t.id = ?::uuid
             """.trimIndent()
         ).use { stmt ->
@@ -507,14 +619,35 @@ fun Database.getEvidenceReference(threadId: String): Pair<String, String>? =
 
 // ---------------------------------------------------------------- 内部
 
-private fun insertEvidence(connection: Connection, evidence: ReviewEvidenceInput): String =
-    connection.prepareStatement(
+private fun insertEvidence(
+    connection: Connection,
+    reviewSessionId: String,
+    evidence: ReviewEvidenceInput
+): String {
+    val retentionDays = connection.prepareStatement(
+        """
+        SELECT coalesce(s.evidence_retention_days, p.review_evidence_retention_days)
+        FROM app.review_sessions AS s
+        JOIN app.projects AS p ON p.id = s.project_id
+        WHERE s.id = ?::uuid
+        """.trimIndent()
+    ).use { stmt ->
+        stmt.setString(1, reviewSessionId)
+        stmt.executeQuery().use { rs ->
+            if (!rs.next()) throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Review session not found")
+            (rs.getObject(1) as? Number)?.toInt()
+        }
+    }
+    val expiresAt = retentionDays?.let { days ->
+        OffsetDateTime.parse(evidence.capturedAt).plusDays(days.toLong()).toString()
+    }
+    return connection.prepareStatement(
         """
         INSERT INTO app.review_evidence (
             screenshot_path, content_type, byte_size, viewport_width, viewport_height,
-            scroll_x, scroll_y, pixel_ratio, frontend_version, route, captured_at
+            scroll_x, scroll_y, pixel_ratio, frontend_version, route, captured_at, expires_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz)
         RETURNING id::text
         """.trimIndent()
     ).use { stmt ->
@@ -529,11 +662,34 @@ private fun insertEvidence(connection: Connection, evidence: ReviewEvidenceInput
         stmt.setString(9, evidence.frontendVersion)
         stmt.setString(10, evidence.route)
         stmt.setString(11, evidence.capturedAt)
+        setNullableString(stmt, 12, expiresAt)
         stmt.executeQuery().use { rs ->
             rs.next()
             rs.getString(1)
         }
     }
+}
+
+private fun insertFeedbackMessageVersion(
+    connection: Connection,
+    messageId: String,
+    version: Int,
+    body: String,
+    editedBy: String?
+) {
+    connection.prepareStatement(
+        """
+        INSERT INTO app.feedback_message_versions (message_id, version, body, edited_by)
+        VALUES (?::uuid, ?, ?, ?::uuid)
+        """.trimIndent()
+    ).use { stmt ->
+        stmt.setString(1, messageId)
+        stmt.setInt(2, version)
+        stmt.setString(3, body)
+        setNullableUuidString(stmt, 4, editedBy)
+        stmt.executeUpdate()
+    }
+}
 
 private fun findScopeId(connection: Connection, reviewSessionId: String, pageId: String): String? =
     connection.prepareStatement(
@@ -582,31 +738,36 @@ private fun listMessagesForThreads(
 }
 
 private fun Database.getFeedbackMessage(id: String): FeedbackMessageDto? =
-    dataSource.connection.use { connection ->
-        connection.prepareStatement(
-            """
-            SELECT m.id::text, m.thread_id::text, m.author_id::text, u.display_name, m.body,
-                   m.created_at, m.edited_at
-            FROM app.feedback_messages AS m
-            LEFT JOIN app.users AS u ON u.id = m.author_id
-            WHERE m.id = ?::uuid
-            """.trimIndent()
-        ).use { stmt ->
-            stmt.setString(1, id)
-            stmt.executeQuery().use { rs ->
-                if (!rs.next()) return@use null
-                FeedbackMessageDto(
-                    id = rs.getString(1),
-                    threadId = rs.getString(2),
-                    authorId = rs.getString(3),
-                    authorName = rs.getString(4),
-                    body = rs.getString(5),
-                    createdAt = rs.isoTimestamp("created_at") ?: error("created_at must not be null"),
-                    editedAt = rs.isoTimestamp("edited_at")
-                )
-            }
-        }
+    dataSource.connection.use { connection -> getFeedbackMessage(connection, id) }
+
+private fun getFeedbackMessage(
+    connection: Connection,
+    id: String,
+    forUpdate: Boolean = false
+): FeedbackMessageDto? = connection.prepareStatement(
+    """
+    SELECT m.id::text, m.thread_id::text, m.author_id::text, u.display_name, m.body,
+           m.created_at, m.edited_at
+    FROM app.feedback_messages AS m
+    LEFT JOIN app.users AS u ON u.id = m.author_id
+    WHERE m.id = ?::uuid
+    ${if (forUpdate) "FOR UPDATE OF m" else ""}
+    """.trimIndent()
+).use { stmt ->
+    stmt.setString(1, id)
+    stmt.executeQuery().use { rs ->
+        if (!rs.next()) return@use null
+        FeedbackMessageDto(
+            id = rs.getString(1),
+            threadId = rs.getString(2),
+            authorId = rs.getString(3),
+            authorName = rs.getString(4),
+            body = rs.getString(5),
+            createdAt = rs.isoTimestamp("created_at") ?: error("created_at must not be null"),
+            editedAt = rs.isoTimestamp("edited_at")
+        )
     }
+}
 
 private fun feedbackThreadColumns(): String = """
     t.id::text AS id,
@@ -632,7 +793,8 @@ private fun feedbackThreadColumns(): String = """
     e.pixel_ratio,
     e.frontend_version,
     e.route,
-    e.captured_at
+    e.captured_at,
+    e.expires_at
 """.trimIndent()
 
 private fun ResultSet.toFeedbackThreadDto(): FeedbackThreadDto = FeedbackThreadDto(
@@ -656,7 +818,8 @@ private fun ResultSet.toFeedbackThreadDto(): FeedbackThreadDto = FeedbackThreadD
             pixelRatio = getDouble("pixel_ratio"),
             frontendVersion = getString("frontend_version"),
             route = getString("route"),
-            capturedAt = isoTimestamp("captured_at") ?: error("captured_at must not be null")
+            capturedAt = isoTimestamp("captured_at") ?: error("captured_at must not be null"),
+            expiresAt = isoTimestamp("expires_at")
         )
     },
     status = getString("status"),

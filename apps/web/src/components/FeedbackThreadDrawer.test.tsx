@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
-import type { FeedbackMessage, FeedbackThread, Me } from "../contracts";
+import type { FeedbackMessage, FeedbackMessageVersion, FeedbackThread, Me } from "../contracts";
 import { makeFeedbackThread, makeMe } from "../testing/fixtures";
 import { renderWithProviders } from "../testing/renderWithProviders";
 import { server } from "../testing/server";
@@ -83,5 +83,62 @@ describe("FeedbackThreadDrawer", () => {
 
     expect(within(drawer).getByRole("textbox", { name: "返信" })).toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: "解決済みにする" })).not.toBeInTheDocument();
+  });
+
+  it("投稿者本人がコメントを編集し、上書き前を含む版履歴を確認できる", async () => {
+    let thread = makeFeedbackThread();
+    let receivedBody: unknown = null;
+    server.use(
+      http.get("*/api/review-sessions/:id/threads", () => HttpResponse.json<FeedbackThread[]>([thread])),
+      http.get("*/api/threads/:threadId", () => HttpResponse.json<FeedbackThread>(thread)),
+      http.patch("*/api/messages/:messageId", async ({ request }) => {
+        receivedBody = await request.json();
+        const current = thread.messages[0];
+        const updated: FeedbackMessage = {
+          ...current,
+          body: "土地一覧の名称に統一してください",
+          editedAt: "2026-08-12T12:30:00+09:00"
+        };
+        thread = { ...thread, messages: [updated], updatedAt: updated.editedAt! };
+        return HttpResponse.json<FeedbackMessage>(updated);
+      }),
+      http.get("*/api/messages/:messageId/history", () =>
+        HttpResponse.json<FeedbackMessageVersion[]>([
+          {
+            messageId: "fm-1",
+            version: 2,
+            body: "土地一覧の名称に統一してください",
+            editedBy: "u1",
+            editedByName: "一般ユーザー",
+            createdAt: "2026-08-12T12:30:00+09:00",
+            current: true
+          },
+          {
+            messageId: "fm-1",
+            version: 1,
+            body: "土地タブの名称を確認してください",
+            editedBy: "u1",
+            editedByName: "一般ユーザー",
+            createdAt: "2026-08-12T10:15:00+09:00",
+            current: false
+          }
+        ])
+      )
+    );
+    const { user } = renderWithProviders({ path: "/zones" });
+    const drawer = await openThreadDrawer(user);
+
+    await user.click(within(drawer).getByRole("button", { name: "編集" }));
+    const editor = within(drawer).getByRole("textbox", { name: "コメントを編集" });
+    await user.clear(editor);
+    await user.type(editor, "土地一覧の名称に統一してください");
+    await user.click(within(drawer).getByRole("button", { name: "編集を保存" }));
+
+    await waitFor(() => expect(receivedBody).toEqual({ body: "土地一覧の名称に統一してください" }));
+    expect(await within(drawer).findByText("土地一覧の名称に統一してください")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "編集履歴" }));
+    const history = await within(drawer).findByRole("region", { name: "コメントの編集履歴" });
+    expect(within(history).getByText("版 2")).toBeInTheDocument();
+    expect(within(history).getByText("土地タブの名称を確認してください")).toBeInTheDocument();
   });
 });

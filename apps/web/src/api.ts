@@ -31,6 +31,8 @@ import type {
   Project,
   FeedbackMessage,
   FeedbackMessageCreateRequest,
+  FeedbackMessageUpdateRequest,
+  FeedbackMessageVersion,
   FeedbackSummary,
   FeedbackThread,
   FeedbackThreadCreateMetadata,
@@ -38,6 +40,10 @@ import type {
   FeedbackThreadStatusPatchRequest,
   ProjectMember,
   ReviewSession,
+  ReviewSessionPatchRequest,
+  ReviewRetentionPolicy,
+  ReviewRetentionPolicyPatchRequest,
+  ReviewRetentionPurgeResult,
   UserAccount,
   UserPatchRequest,
   Zone,
@@ -465,6 +471,15 @@ export async function getReviewSession(id: string): Promise<ReviewSession> {
   return unwrap(await client.GET("/api/review-sessions/{id}", { params: { path: { id } } }));
 }
 
+export async function updateReviewSession(id: string, request: ReviewSessionPatchRequest): Promise<ReviewSession> {
+  return unwrap(
+    await client.PATCH("/api/review-sessions/{id}", {
+      params: { path: { id } },
+      body: request
+    })
+  );
+}
+
 export async function getFeedbackThreads(reviewSessionId: string): Promise<FeedbackThread[]> {
   return unwrap(
     await client.GET("/api/review-sessions/{id}/threads", { params: { path: { id: reviewSessionId } } })
@@ -538,6 +553,26 @@ export async function createFeedbackMessage(
   );
 }
 
+export async function updateFeedbackMessage(
+  messageId: string,
+  request: FeedbackMessageUpdateRequest
+): Promise<FeedbackMessage> {
+  return unwrap(
+    await client.PATCH("/api/messages/{messageId}", {
+      params: { path: { messageId } },
+      body: request
+    })
+  );
+}
+
+export async function getFeedbackMessageHistory(messageId: string): Promise<FeedbackMessageVersion[]> {
+  return unwrap(
+    await client.GET("/api/messages/{messageId}/history", {
+      params: { path: { messageId } }
+    })
+  );
+}
+
 export async function updateFeedbackThreadStatus(
   threadId: string,
   request: FeedbackThreadStatusPatchRequest
@@ -546,6 +581,33 @@ export async function updateFeedbackThreadStatus(
     await client.PATCH("/api/threads/{threadId}/status", {
       params: { path: { threadId } },
       body: request
+    })
+  );
+}
+
+export async function getReviewRetentionPolicy(projectId: string): Promise<ReviewRetentionPolicy> {
+  return unwrap(await client.GET("/api/review-retention", { params: { query: { projectId } } }));
+}
+
+export async function updateReviewRetentionPolicy(
+  projectId: string,
+  request: ReviewRetentionPolicyPatchRequest
+): Promise<ReviewRetentionPolicy> {
+  return unwrap(
+    await client.PATCH("/api/review-retention", {
+      params: { query: { projectId } },
+      body: request
+    })
+  );
+}
+
+export async function purgeExpiredReviewEvidence(
+  projectId: string,
+  limit = 200
+): Promise<ReviewRetentionPurgeResult> {
+  return unwrap(
+    await client.POST("/api/review-retention/purge", {
+      params: { query: { projectId, limit } }
     })
   );
 }

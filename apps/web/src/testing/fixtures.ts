@@ -159,6 +159,8 @@ export function makeReviewSession(overrides: Partial<ReviewSession> = {}): Revie
     status: "open",
     startAt: "2026-08-10T09:00:00+09:00",
     endAt: "2026-08-20T18:00:00+09:00",
+    evidenceRetentionDays: null,
+    effectiveEvidenceRetentionDays: null,
     createdBy: "u1",
     createdAt: "2026-08-01T09:00:00+09:00",
     updatedAt: "2026-08-01T09:00:00+09:00",

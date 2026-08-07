@@ -1269,6 +1269,57 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/messages/{messageId}:
+    patch:
+      tags: [review]
+      operationId: updateFeedbackMessage
+      summary: フィードバックメッセージ編集
+      description: 投稿者本人だけが編集でき、変更後の本文も版履歴へ追記する。
+      parameters:
+        - { name: messageId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackMessageUpdateRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 更新済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackMessage"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/messages/{messageId}/history:
+    get:
+      tags: [review]
+      operationId: getFeedbackMessageHistory
+      summary: フィードバックメッセージの版履歴
+      parameters:
+        - { name: messageId, in: path, required: true, schema: { type: string } }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 新しい版から順に返す
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeedbackMessageVersion"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/threads/{threadId}/status:
     patch:
       tags: [review]
@@ -1319,6 +1370,74 @@ paths:
               schema: { type: string, format: binary }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/review-retention:
+    get:
+      tags: [review]
+      operationId: getReviewRetentionPolicy
+      summary: レビュー証跡の保存方針
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRetentionPolicy"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [review]
+      operationId: updateReviewRetentionPolicy
+      summary: プロジェクト既定の証跡保存期間を更新
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewRetentionPolicyPatchRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 更新済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRetentionPolicy"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/review-retention/purge:
+    post:
+      tags: [review]
+      operationId: purgeExpiredReviewEvidence
+      summary: 期限切れレビュー証跡を削除
+      description: 期限切れ証跡を最大 limit 件、非公開ストレージと DB の双方から冪等に削除する。
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/ListLimit" }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: 削除実行結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRetentionPurgeResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
 
   /api/import-jobs:
     post:
@@ -2059,6 +2178,17 @@ components:
         status: { type: string, enum: [draft, open, closed] }
         startAt: { type: [string, "null"], format: date-time }
         endAt: { type: [string, "null"], format: date-time }
+        evidenceRetentionDays:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 3650
+          description: セッション上書き。null はプロジェクト既定を継承する。
+        effectiveEvidenceRetentionDays:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 3650
+          readOnly: true
+          description: プロジェクト既定を解決した実効値。null は自動削除なし。
         createdBy: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -2071,7 +2201,9 @@ components:
           items:
             $ref: "#/components/schemas/ReviewScope"
       # perspectives / scopes は常に出力される (空配列を含む)
-      required: [id, projectId, title, status, createdAt, updatedAt, perspectives, scopes]
+      required:
+        [id, projectId, title, status, evidenceRetentionDays, effectiveEvidenceRetentionDays,
+         createdAt, updatedAt, perspectives, scopes]
 
     ReviewPerspectiveWriteRequest:
       type: object
@@ -2098,6 +2230,7 @@ components:
         status: { type: string, enum: [draft, open, closed], default: draft }
         startAt: { type: [string, "null"], format: date-time }
         endAt: { type: [string, "null"], format: date-time }
+        evidenceRetentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
         perspectives:
           type: array
           items:
@@ -2116,6 +2249,7 @@ components:
         status: { type: string, enum: [draft, open, closed] }
         startAt: { type: [string, "null"], format: date-time }
         endAt: { type: [string, "null"], format: date-time }
+        evidenceRetentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
         perspectives:
           type: array
           items:
@@ -2142,9 +2276,10 @@ components:
         frontendVersion: { type: string }
         route: { type: string }
         capturedAt: { type: string, format: date-time }
+        expiresAt: { type: [string, "null"], format: date-time }
       required:
         [id, contentType, byteSize, viewportWidth, viewportHeight, scrollX, scrollY, pixelRatio,
-         frontendVersion, route, capturedAt]
+         frontendVersion, route, capturedAt, expiresAt]
 
     FeedbackMessage:
       type: object
@@ -2163,6 +2298,24 @@ components:
       properties:
         body: { type: string, minLength: 1 }
       required: [body]
+
+    FeedbackMessageUpdateRequest:
+      type: object
+      properties:
+        body: { type: string, minLength: 1 }
+      required: [body]
+
+    FeedbackMessageVersion:
+      type: object
+      properties:
+        messageId: { type: string }
+        version: { type: integer, minimum: 1 }
+        body: { type: string }
+        editedBy: { type: [string, "null"] }
+        editedByName: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        current: { type: boolean }
+      required: [messageId, version, body, editedBy, editedByName, createdAt, current]
 
     FeedbackThreadStatusPatchRequest:
       type: object
@@ -2207,6 +2360,34 @@ components:
           items:
             $ref: "#/components/schemas/FeedbackPerspectiveSummary"
       required: [totalCount, openCount, resolvedCount, withEvidenceCount, sessions, perspectives]
+
+    ReviewRetentionPolicy:
+      type: object
+      properties:
+        projectId: { type: string }
+        defaultEvidenceRetentionDays:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 3650
+          description: null は自動削除なし。
+        expiredEvidenceCount: { type: integer, format: int64 }
+        expiredEvidenceBytes: { type: integer, format: int64 }
+      required: [projectId, defaultEvidenceRetentionDays, expiredEvidenceCount, expiredEvidenceBytes]
+
+    ReviewRetentionPolicyPatchRequest:
+      type: object
+      properties:
+        defaultEvidenceRetentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
+      required: [defaultEvidenceRetentionDays]
+
+    ReviewRetentionPurgeResult:
+      type: object
+      properties:
+        purgedEvidenceCount: { type: integer }
+        purgedEvidenceBytes: { type: integer, format: int64 }
+        failedEvidenceCount: { type: integer }
+        remainingExpiredEvidenceCount: { type: integer, format: int64 }
+      required: [purgedEvidenceCount, purgedEvidenceBytes, failedEvidenceCount, remainingExpiredEvidenceCount]
 
     FeedbackThread:
       type: object

@@ -3,14 +3,17 @@ import {
   createFeedbackMessage,
   createFeedbackThread,
   getFeedbackEvidence,
+  getFeedbackMessageHistory,
   getFeedbackSummary,
   getFeedbackThread,
   getFeedbackThreads,
   searchFeedbackThreads,
+  updateFeedbackMessage,
   updateFeedbackThreadStatus
 } from "../api";
 import type {
   FeedbackMessageCreateRequest,
+  FeedbackMessageUpdateRequest,
   FeedbackThread,
   FeedbackThreadCreateMetadata,
   FeedbackThreadSearchQuery,
@@ -59,6 +62,14 @@ export function useFeedbackEvidenceQuery(threadId: string | null) {
   });
 }
 
+export function useFeedbackMessageHistoryQuery(messageId: string | null) {
+  return useQuery({
+    queryKey: keys.feedbackThreads.messageHistory(messageId ?? ""),
+    queryFn: () => getFeedbackMessageHistory(messageId!),
+    enabled: Boolean(messageId)
+  });
+}
+
 export type CreateFeedbackThreadInput = {
   reviewSessionId: string;
   metadata: FeedbackThreadCreateMetadata;
@@ -84,6 +95,23 @@ export function useCreateFeedbackMessageMutation() {
       createFeedbackMessage(input.threadId, input.request),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.feedbackThreads.all });
+    }
+  });
+}
+
+export function useUpdateFeedbackMessageMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { messageId: string; request: FeedbackMessageUpdateRequest }) =>
+      updateFeedbackMessage(input.messageId, input.request),
+    onSuccess: (message, input) => {
+      queryClient.setQueryData<FeedbackThread>(keys.feedbackThreads.detail(message.threadId), (thread) =>
+        thread
+          ? { ...thread, messages: thread.messages.map((item) => (item.id === message.id ? message : item)) }
+          : thread
+      );
+      void queryClient.invalidateQueries({ queryKey: keys.feedbackThreads.all });
+      void queryClient.invalidateQueries({ queryKey: keys.feedbackThreads.messageHistory(input.messageId) });
     }
   });
 }

@@ -15,12 +15,17 @@ export const keys = {
     list: (projectId: string, status?: string) => ["review-sessions", "list", projectId, status ?? null] as const,
     detail: (id: string) => ["review-sessions", "detail", id] as const
   },
+  reviewRetention: {
+    all: ["review-retention"] as const,
+    policy: (projectId: string) => ["review-retention", projectId] as const
+  },
   feedbackThreads: {
     all: ["feedback-threads"] as const,
     list: (reviewSessionId: string) => ["feedback-threads", "list", reviewSessionId] as const,
     search: (query: object) => ["feedback-threads", "search", query] as const,
     summary: (projectId: string) => ["feedback-threads", "summary", projectId] as const,
     detail: (threadId: string) => ["feedback-threads", "detail", threadId] as const,
+    messageHistory: (messageId: string) => ["feedback-threads", "message-history", messageId] as const,
     evidence: (threadId: string) => ["feedback-threads", "evidence", threadId] as const
   },
   layers: {

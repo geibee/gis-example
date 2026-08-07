@@ -15,6 +15,7 @@ import gis.example.ReviewEvidenceInput
 import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
 import gis.example.appPrincipal
+import gis.example.auditSuccessfulRead
 import gis.example.auditTrail
 import gis.example.authorizedResourceId
 import gis.example.authorizedProjectId
@@ -25,6 +26,7 @@ import gis.example.databaseJson
 import gis.example.feedbackTargetTypes
 import gis.example.getEvidenceReference
 import gis.example.getFeedbackThread
+import gis.example.getFeedbackMessageHistory
 import gis.example.listFeedbackThreads
 import gis.example.searchFeedbackThreads
 import gis.example.readOptionalDouble
@@ -35,6 +37,7 @@ import gis.example.readRequiredText
 import gis.example.requirePostableSession
 import gis.example.summarizeFeedbackThreads
 import gis.example.updateFeedbackThreadStatus
+import gis.example.updateFeedbackMessage
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -220,6 +223,38 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
             )
         }
 
+        patch(
+            "/api/messages/{messageId}",
+            ResourceFromPath(
+                Action.REVIEW_COMMENT,
+                ProjectResourceType.FEEDBACK_MESSAGE,
+                param = "messageId",
+                uuidLabel = "messageId"
+            )
+        ) {
+            val request = call.receive<JsonObject>()
+            call.respond(
+                db.updateFeedbackMessage(
+                    id = call.authorizedResourceId(),
+                    body = readRequiredText(request, "body"),
+                    editorId = call.appPrincipal().userId,
+                    audit = call.auditTrail()
+                )
+            )
+        }
+
+        get(
+            "/api/messages/{messageId}/history",
+            ResourceFromPath(
+                Action.REVIEW_READ,
+                ProjectResourceType.FEEDBACK_MESSAGE,
+                param = "messageId",
+                uuidLabel = "messageId"
+            )
+        ) {
+            call.respond(db.getFeedbackMessageHistory(call.authorizedResourceId()))
+        }
+
         // Resolve / Reopen はレビュー管理者相当 (現行ロールでは editor) のみ
         patch(
             "/api/threads/{threadId}/status",
@@ -259,6 +294,7 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
             }
             // 証跡には個人情報・業務情報が写り得るため共有キャッシュに残さない
             call.response.header(HttpHeaders.CacheControl, "private, no-store")
+            call.auditSuccessfulRead()
             call.respondBytes(bytes, ContentType.parse(contentType), HttpStatusCode.OK)
         }
     }

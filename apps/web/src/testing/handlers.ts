@@ -17,6 +17,7 @@ import type {
   Party,
   Project,
   ProjectMember,
+  ReviewRetentionPolicy,
   ReviewSession,
   UserAccount,
   Zone,
@@ -53,6 +54,14 @@ export const defaultHandlers = [
       withEvidenceCount: 0,
       sessions: [],
       perspectives: []
+    })
+  ),
+  http.get("*/api/review-retention", ({ request }) =>
+    HttpResponse.json<ReviewRetentionPolicy>({
+      projectId: new URL(request.url).searchParams.get("projectId") ?? "p1",
+      defaultEvidenceRetentionDays: null,
+      expiredEvidenceCount: 0,
+      expiredEvidenceBytes: 0
     })
   ),
   http.get("*/api/threads/:threadId", ({ params }) =>

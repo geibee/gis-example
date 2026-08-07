@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ChevronLeft, ChevronRight, Image, MessageSquareText, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Image, MessageSquareText, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import { useAppShell } from "../appShell";
 import type { FeedbackSummary as FeedbackSummaryDto, FeedbackThread, ReviewSession } from "../contracts";
 import {
   useFeedbackEvidenceQuery,
   useFeedbackSummaryQuery,
   useFeedbackThreadSearchQuery
 } from "../queries/feedbackThreads";
+import {
+  usePurgeExpiredReviewEvidenceMutation,
+  useReviewRetentionPolicyQuery,
+  useUpdateReviewRetentionPolicyMutation
+} from "../queries/reviewGovernance";
+import { useUpdateReviewSessionMutation } from "../queries/reviewSessions";
+import { notifyError, notifySuccess } from "../notifications";
 import { captureExcludeAttribute, useReview } from "../review";
 import { errorMessage } from "../utils";
 
@@ -26,6 +34,7 @@ export function FeedbackManagementPanel({
   onPerspectiveChange
 }: FeedbackManagementPanelProps) {
   const { openThread } = useReview();
+  const { me } = useAppShell();
   const [status, setStatus] = useState<"" | "OPEN" | "RESOLVED">("");
   const [evidence, setEvidence] = useState<"" | "with" | "without">("");
   const [searchDraft, setSearchDraft] = useState("");
@@ -54,6 +63,9 @@ export function FeedbackManagementPanel({
   const totalCount = threadsQuery.data?.totalCount ?? 0;
   const page = Math.floor(offset / PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const canManage =
+    me?.systemRole === "admin" ||
+    me?.memberships.some((membership) => membership.projectId === projectId && membership.role === "editor") === true;
 
   const applySearch = (event: FormEvent) => {
     event.preventDefault();
@@ -77,6 +89,7 @@ export function FeedbackManagementPanel({
         </p>
       ) : null}
       {summaryQuery.data ? <FeedbackSummary summary={summaryQuery.data} selectedSessionId={session.id} /> : null}
+      {canManage ? <ReviewRetentionPanel projectId={projectId} session={session} /> : null}
 
       <form className="feedback-management-filters" aria-label="フィードバックの絞り込み" onSubmit={applySearch}>
         <label>
@@ -227,6 +240,121 @@ export function FeedbackManagementPanel({
   );
 }
 
+function ReviewRetentionPanel({ projectId, session }: { projectId: string; session: ReviewSession }) {
+  const policyQuery = useReviewRetentionPolicyQuery(projectId);
+  const updatePolicy = useUpdateReviewRetentionPolicyMutation();
+  const updateSession = useUpdateReviewSessionMutation();
+  const purgeEvidence = usePurgeExpiredReviewEvidenceMutation();
+  const [projectDays, setProjectDays] = useState("");
+  const [sessionDays, setSessionDays] = useState("");
+
+  useEffect(() => {
+    setProjectDays(policyQuery.data?.defaultEvidenceRetentionDays?.toString() ?? "");
+  }, [policyQuery.data?.defaultEvidenceRetentionDays]);
+  useEffect(() => {
+    setSessionDays(session.evidenceRetentionDays?.toString() ?? "");
+  }, [session.evidenceRetentionDays, session.id]);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextProjectDays = projectDays === "" ? null : Number(projectDays);
+    const nextSessionDays = sessionDays === "" ? null : Number(sessionDays);
+    try {
+      if (nextProjectDays !== (policyQuery.data?.defaultEvidenceRetentionDays ?? null)) {
+        await updatePolicy.mutateAsync({
+          projectId,
+          request: { defaultEvidenceRetentionDays: nextProjectDays }
+        });
+      }
+      if (nextSessionDays !== (session.evidenceRetentionDays ?? null)) {
+        await updateSession.mutateAsync({ id: session.id, request: { evidenceRetentionDays: nextSessionDays } });
+      }
+      notifySuccess("証跡の保存期間を更新しました");
+    } catch (error) {
+      notifyError(errorMessage(error));
+    }
+  };
+
+  const purge = async () => {
+    if (!window.confirm("期限切れ証跡を完全に削除します。この操作は取り消せません。続行しますか？")) return;
+    try {
+      const result = await purgeEvidence.mutateAsync(projectId);
+      if (result.failedEvidenceCount > 0) {
+        notifyError(`${result.purgedEvidenceCount}件を削除し、${result.failedEvidenceCount}件は再試行が必要です`);
+      } else {
+        notifySuccess(`${result.purgedEvidenceCount}件の期限切れ証跡を削除しました`);
+      }
+    } catch (error) {
+      notifyError(errorMessage(error));
+    }
+  };
+
+  return (
+    <section className="review-retention" aria-label="証跡の保存期間">
+      <header>
+        <div>
+          <ShieldCheck size={16} />
+          <h3>証跡の保存期間</h3>
+        </div>
+        <span>
+          実効値: {session.effectiveEvidenceRetentionDays ? `${session.effectiveEvidenceRetentionDays}日` : "自動削除なし"}
+        </span>
+      </header>
+      {policyQuery.isError ? (
+        <p className="notice error" role="alert">
+          {errorMessage(policyQuery.error)}
+        </p>
+      ) : null}
+      <form onSubmit={(event) => void save(event)}>
+        <label>
+          プロジェクト既定（日）
+          <input
+            type="number"
+            min={1}
+            max={3650}
+            value={projectDays}
+            placeholder="自動削除なし"
+            onChange={(event) => setProjectDays(event.target.value)}
+          />
+        </label>
+        <label>
+          このセッションの上書き（日）
+          <input
+            type="number"
+            min={1}
+            max={3650}
+            value={sessionDays}
+            placeholder="プロジェクト既定を継承"
+            onChange={(event) => setSessionDays(event.target.value)}
+          />
+        </label>
+        <button
+          type="submit"
+          className="subtle-button"
+          disabled={updatePolicy.isPending || updateSession.isPending || policyQuery.isPending}
+        >
+          保存期間を更新
+        </button>
+      </form>
+      <div className="review-retention-purge">
+        <span>
+          期限切れ {policyQuery.data?.expiredEvidenceCount ?? 0}件
+          {policyQuery.data ? `（${formatBytes(policyQuery.data.expiredEvidenceBytes)}）` : ""}
+        </span>
+        <button
+          type="button"
+          className="subtle-button danger"
+          disabled={!policyQuery.data?.expiredEvidenceCount || purgeEvidence.isPending}
+          onClick={() => void purge()}
+        >
+          <Trash2 size={14} />
+          {purgeEvidence.isPending ? "削除中..." : "期限切れ証跡を削除"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function FeedbackSummary({
   summary,
   selectedSessionId
@@ -320,6 +448,9 @@ function FeedbackEvidenceDialog({ thread, onClose }: { thread: FeedbackThread; o
             <span>
               {thread.evidence.viewportWidth}×{thread.evidence.viewportHeight} · {formatTimestamp(thread.evidence.capturedAt)}
             </span>
+            <span>
+              保存期限: {thread.evidence.expiresAt ? formatTimestamp(thread.evidence.expiresAt) : "自動削除なし"}
+            </span>
           </p>
         ) : null}
         {evidenceQuery.isPending ? <p className="review-guide-note">証跡を読み込んでいます...</p> : null}
@@ -349,4 +480,10 @@ function formatTimestamp(value: string): string {
     hour: "2-digit",
     minute: "2-digit"
   }).format(parsed);
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MiB`;
 }
