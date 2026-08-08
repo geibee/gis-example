@@ -31,9 +31,26 @@ export class FeedbackApiError extends Error {
     this.status = status;
   }
 }
-export type FeedbackApiClient = ReturnType<typeof createFeedbackApiClient>;
+export type FeedbackApiClient = {
+  getMe(): Promise<Me>;
+  getReviewSessions(projectId: string, status?: ReviewSession["status"]): Promise<ReviewSession[]>;
+  getFeedbackThreads(reviewSessionId: string): Promise<FeedbackThread[]>;
+  getFeedbackThread(threadId: string): Promise<FeedbackThread>;
+  createFeedbackThread(
+    reviewSessionId: string,
+    metadata: FeedbackThreadCreateMetadata,
+    screenshot: Blob | null
+  ): Promise<FeedbackThread>;
+  createFeedbackMessage(threadId: string, body: FeedbackMessageCreateRequest): Promise<FeedbackMessage>;
+  updateFeedbackMessage(messageId: string, body: FeedbackMessageUpdateRequest): Promise<FeedbackMessage>;
+  getFeedbackMessageHistory(messageId: string): Promise<FeedbackMessageVersion[]>;
+  updateFeedbackThreadStatus(
+    threadId: string,
+    body: FeedbackThreadStatusPatchRequest
+  ): Promise<FeedbackThread>;
+};
 
-export function createFeedbackApiClient(options: FeedbackApiClientOptions) {
+export function createFeedbackApiClient(options: FeedbackApiClientOptions): FeedbackApiClient {
   const baseUrl = options.apiBaseUrl.replace(/\/$/, "");
   const requestFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   let refreshInFlight: Promise<string | null | undefined> | null = null;

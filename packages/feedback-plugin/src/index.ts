@@ -1,6 +1,8 @@
 import "./styles.css";
 
 export { createFeedbackApiClient, FeedbackApiError } from "./api";
+export { createFeedbackV1ApiClient } from "./api-v1";
+export type { FeedbackV1ApiClientOptions } from "./api-v1";
 export type {
   FeedbackApiClient,
   FeedbackApiClientOptions,

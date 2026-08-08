@@ -373,6 +373,11 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_FEEDBACK_API_MODE: ${VITE_FEEDBACK_API_MODE:-legacy}
+        VITE_FEEDBACK_API_BASE: ${VITE_FEEDBACK_API_BASE:-/feedback/v1}
+        VITE_FEEDBACK_APPLICATION_KEY: ${VITE_FEEDBACK_APPLICATION_KEY:-web-gis}
+        VITE_FEEDBACK_ENVIRONMENT_KEY: ${VITE_FEEDBACK_ENVIRONMENT_KEY:-local}
     # ホスト側で 5173 が使用中の場合は WEB_HOST_PORT で変更できる
     # (OIDC のリダイレクト URI と CORS は 5173 前提のため、UI を使う場合は既定のままにする)
     ports:

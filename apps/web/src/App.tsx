@@ -50,9 +50,17 @@ function FeedbackSdkHost({ children }: { children: ReactNode }) {
   const { selectedProject } = useAppShell();
   const queryClient = useQueryClient();
   const currentPath = useRouterState({ select: (state) => state.location.pathname });
+  const feedbackApiMode = import.meta.env.VITE_FEEDBACK_API_MODE === "feedback-v1"
+    ? "feedback-v1"
+    : "legacy";
   return (
     <FeedbackPluginProvider
-      apiBaseUrl={(import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
+      apiMode={feedbackApiMode}
+      apiBaseUrl={(feedbackApiMode === "feedback-v1"
+        ? import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1"
+        : import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
+      applicationKey={import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis"}
+      environmentKey={import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local"}
       projectId={selectedProject}
       appVersion={import.meta.env.VITE_APP_VERSION ?? "dev"}
       routes={feedbackRoutes}

@@ -30,6 +30,7 @@
 ## 互換期間として意図的に残しているもの
 
 - `@web-gis/feedback-plugin` と `/api/review-*`・`/api/threads/*` は consumer 1 の旧 API 互換層
+- 同 plugin に `feedback-v1` transport adapter を追加済み。Web GIS はビルド時 flag で新旧を選択でき、既定は `legacy`
 - consumer 1 はまだ `apps/api` の review table (`projects/users` と同じ DB・Flyway history) を読み書きする
 - 管理 UI、browser CSV export、通知 adapter は `apps/web` / `apps/api` に残る
 - `API_ROUTE_MODE=review-sidecar` は独立 Service ではなく route profile のまま
@@ -41,5 +42,5 @@
 
 - token exchange broker 自体のホスト session 検証・mTLS・短寿命 token 発行 (Service 側の token 検証は実装済み)
 
-Phase 4 の consumer 切替が完了するまでは、現行 DB の外部キー削除・旧 API の write 停止・データ移行を行わない。
-次は Web GIS を新 API へ dual-read/コピー移行する。
+Phase 4 のデータ copy/照合と本番切替が完了するまでは、現行 DB の外部キー削除・旧 API の write 停止・
+データ移行を行わない。次は匿名化 fixture で copy/照合を実装する。

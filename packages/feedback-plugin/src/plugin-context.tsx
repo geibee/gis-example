@@ -15,12 +15,18 @@ import {
   type TokenGetter,
   type TokenRefresher
 } from "./api";
+import { createFeedbackV1ApiClient } from "./api-v1";
 import { FeedbackStateProvider } from "./state";
 import type { FeedbackPluginNotificationHandler } from "./types";
 import { matchFeedbackRoute, type FeedbackRouteDefinition } from "./routes";
 
 export type FeedbackPluginProviderProps = {
   apiBaseUrl: string;
+  /** 既定 legacy。feedback-v1 は独立 Feedback Service へ接続する Phase 4 の切替フラグ。 */
+  apiMode?: "legacy" | "feedback-v1";
+  /** feedback-v1 の application/environment scope。 */
+  applicationKey?: string;
+  environmentKey?: string;
   projectId: string;
   appVersion: string;
   /** ホストアプリが明示的に公開する画面ルートの一覧。 */
@@ -53,6 +59,9 @@ export const defaultParticipantNameStorageKey = "web-gis.feedback.participant-na
 
 export function FeedbackPluginProvider({
   apiBaseUrl,
+  apiMode = "legacy",
+  applicationKey,
+  environmentKey,
   projectId,
   appVersion,
   routes,
@@ -98,14 +107,25 @@ export function FeedbackPluginProvider({
     return () => window.removeEventListener("storage", syncParticipantName);
   }, [participantNameStorageKey]);
   const api = useMemo(
-    () =>
-      createFeedbackApiClient({
+    () => {
+      const common = {
         apiBaseUrl,
         getAccessToken,
         refreshAccessToken,
         onNotification: notify
-      }),
-    [apiBaseUrl, getAccessToken, notify, refreshAccessToken]
+      };
+      if (apiMode === "legacy") return createFeedbackApiClient(common);
+      if (!applicationKey || !environmentKey) {
+        throw new Error("feedback-v1 では applicationKey と environmentKey が必要です");
+      }
+      return createFeedbackV1ApiClient({
+        ...common,
+        applicationKey,
+        environmentKey,
+        routes
+      });
+    },
+    [apiBaseUrl, apiMode, applicationKey, environmentKey, getAccessToken, notify, refreshAccessToken, routes]
   );
   const resolvedCurrentPath = currentPath ?? (typeof window === "undefined" ? "/" : window.location.pathname);
   const activeRoute = useMemo(

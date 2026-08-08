@@ -98,14 +98,28 @@ MapLibreの地図要素には `feedbackMapAttribute` を付け、Map生成時は
 
 ## バックエンド配置
 
-既存API (`API_ROUTE_MODE=full`) のURLをそのまま `apiBaseUrl` に指定できる。分離する場合は同じ
-APIイメージを `API_ROUTE_MODE=review-sidecar` でcompanion containerとして起動する。このモードは
-`/api/me`、レビューセッション、フィードバック、証跡ガバナンス、通知設定だけを公開し、分析や
-業務CRUDを公開しない。
+既定の `apiMode="legacy"` は移行期間用で、既存API (`API_ROUTE_MODE=full`) のURLをそのまま
+`apiBaseUrl` に指定できる。旧 `review-sidecar` も rollback のため Phase 4 完了までは維持する。
 
-sidecarは通信を透過的にインターセプトしない。Gatewayでレビュー系pathを振り分けるか、SDKを
-sidecarのURLへ直接向ける。これによりBearer JWT、`projectId`認可、監査ログ、証跡の非公開保管を
-本体と同じfail-closedな経路に保てる。
+独立 Feedback Service へ切り替える場合は次を指定する。
+
+```tsx
+<FeedbackPluginProvider
+  apiMode="feedback-v1"
+  apiBaseUrl="/feedback/v1"
+  applicationKey="consumer-app"
+  environmentKey="production"
+  projectId={hostWorkspaceKey}
+  // routes、token adapter、children 等は上の例と同じ
+/>
+```
+
+v1 adapter は起動時の capability 交渉、application/environment/workspace scope、location/target 変換、
+Idempotency-Key、ETag を担当する。切替前に application manifest、workspace membership、open session を
+独立 DB へ provisioning する。業務 API の access token を転送できない構成では、`getAccessToken` に
+host backend の token exchange で取得した短寿命 feedback token を返す adapter を渡す。
+
+いずれのモードも通信を透過的にインターセプトしない。Gateway の明示 path または専用 URL へ接続する。
 
 ## CSS変数
 
@@ -114,7 +128,8 @@ sidecarのURLへ直接向ける。これによりBearer JWT、`projectId`認可�
 `--wfg-feedback-review-guide-bottom`、`--wfg-feedback-review-guide-width`、
 `--wfg-feedback-panel-width` などをホスト側で上書きできる。
 
-API契約型は `apps/api/openapi.yaml` から生成する。
+legacy 互換型は `apps/api/openapi.yaml` から生成する。Feedback API v1 の公開型は
+`@feedback/contracts` を利用し、adapter 境界の外へ legacy 型を持ち出さない。
 
 ```bash
 npm --workspace @web-gis/feedback-plugin run generate:contracts

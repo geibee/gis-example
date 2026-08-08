@@ -20,6 +20,12 @@ COPY packages/feedback-plugin packages/feedback-plugin
 # 未指定 (dev) では ARG が環境変数として存在しないため、src/auth.ts の localhost 既定が使われる
 ARG VITE_OIDC_AUTHORITY
 ARG VITE_OIDC_CLIENT_ID
+ARG VITE_API_BASE
+ARG VITE_APP_VERSION
+ARG VITE_FEEDBACK_API_MODE
+ARG VITE_FEEDBACK_API_BASE
+ARG VITE_FEEDBACK_APPLICATION_KEY
+ARG VITE_FEEDBACK_ENVIRONMENT_KEY
 RUN npm run build:feedback-sdk
 RUN npm --workspace @web-gis/feedback-plugin run build
 RUN npm --workspace apps/web run build
