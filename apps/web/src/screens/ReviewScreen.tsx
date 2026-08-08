@@ -6,10 +6,33 @@ import { ReviewSessionManager } from "../components/ReviewSessionManager";
 import { useReviewSessionsQuery } from "../queries/reviewSessions";
 import { hasProjectPermission, reviewManagePermission } from "../permissions";
 import { errorMessage } from "../utils";
+import { buildFeedbackAdminUrl } from "../feedbackAdminLink";
 
 // レビュー画面 (docs/prototype-review.md Phase 1〜5)。
 // セッションのガイドと、フィードバックの検索・集計・証跡確認を同じ文脈で表示する。
 export default function ReviewScreen() {
+  if (import.meta.env.VITE_FEEDBACK_API_MODE === "feedback-v1" ||
+      import.meta.env.VITE_FEEDBACK_API_MODE === "feedback-v1-dual-read") {
+    return <FeedbackAdminHandoff />;
+  }
+  return <LegacyReviewScreen />;
+}
+
+function FeedbackAdminHandoff() {
+  const { selectedProject } = useAppShell();
+  const url = buildFeedbackAdminUrl(import.meta.env.VITE_FEEDBACK_ADMIN_URL ?? "http://localhost:5174/", {
+    applicationKey: import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis",
+    environmentKey: import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local",
+    externalWorkspaceKey: selectedProject
+  });
+  return <section className="tab-pane review-tab active">
+    <h1>レビュー管理</h1>
+    <p>セッション、フィードバック、証跡、Export、通知の管理は独立した Admin Console で行います。</p>
+    <a className="primary-button" href={url}>Feedback Admin Console を開く</a>
+  </section>;
+}
+
+function LegacyReviewScreen() {
   const { me, selectedProject } = useAppShell();
   const sessionsQuery = useReviewSessionsQuery(selectedProject);
   const sessions = sessionsQuery.data ?? [];

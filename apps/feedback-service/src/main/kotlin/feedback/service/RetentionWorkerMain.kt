@@ -69,11 +69,19 @@ class RetentionWorker(
                        t.workspace_id::text
                 FROM feedback.review_evidence e
                 JOIN feedback.feedback_threads t ON t.id = e.thread_id
-                JOIN feedback.retention_policies p ON p.workspace_id = t.workspace_id
-                WHERE p.evidence_retention_days IS NOT NULL
-                  AND e.created_at < now() - (p.evidence_retention_days * interval '1 day')
+                JOIN feedback.review_sessions s ON s.id = t.session_id
+                LEFT JOIN LATERAL (
+                    SELECT evidence_retention_days
+                    FROM feedback.retention_policies policy
+                    WHERE policy.workspace_id = t.workspace_id
+                    FOR UPDATE
+                ) p ON true
+                WHERE COALESCE(
+                    e.expires_at,
+                    e.created_at + (COALESCE(s.evidence_retention_days, p.evidence_retention_days) * interval '1 day')
+                ) <= now()
                 ORDER BY e.created_at
-                FOR UPDATE OF e, p SKIP LOCKED
+                FOR UPDATE OF e, s SKIP LOCKED
                 LIMIT ?
                 """.trimIndent()
             ).use { statement ->

@@ -26,13 +26,23 @@
 - notification endpoint の AES-256-GCM 暗号化、現行鍵/旧鍵を併用する段階的 key rotation
 - backend 品質ゲート: dedicated OpenAPI と routing tree の双方向同期、全 resource route の permission/scope 宣言、
   PostGIS を含まない空 PostgreSQL への migration/tenant 分離統合テスト、実 HTTP response の JSON Schema 適合試験
+- `apps/feedback-admin` / `@feedback/admin-react`: Web GIS なしで session/scope/perspective/thread/evidence、
+  manifest、membership、retention、Export、通知 retry を管理する独立 Console
+- 非同期 CSV/XLSX Export、private download、formula injection 対策、期限 purge
+- HMAC 署名 webhook、SSRF deny、本文/evidence 既定除外、retry/dead-letter/manual retry
+- Web GIS consumer 1 の `feedback-v1` / `feedback-v1-dual-read` adapter。dual-read の write は新 API のみで、
+  401/403/429 を旧 API で迂回しない
+- 新 `feedbackThread` と旧 `threadId` の permalink 互換 resolver、manifest 由来 deep link
+- v1 利用時の Web GIS 管理 route を独立 Admin Console link へ置換
+- `feedback-legacy-migration`: 匿名 snapshot の dry-run/copy/reconcile/rollback。session/thread/message/history/
+  evidence/audit/outbox を写し、ID、display number、SHA-256、個別の evidence expiry を維持する
 
 ## 互換期間として意図的に残しているもの
 
 - `@web-gis/feedback-plugin` と `/api/review-*`・`/api/threads/*` は consumer 1 の旧 API 互換層
-- 同 plugin に `feedback-v1` transport adapter を追加済み。Web GIS はビルド時 flag で新旧を選択でき、既定は `legacy`
+- Web GIS はビルド時 flag で `legacy` / read fallback 付き v1 / v1 の順に切り替えられ、既定は `legacy`
 - consumer 1 はまだ `apps/api` の review table (`projects/users` と同じ DB・Flyway history) を読み書きする
-- 管理 UI、browser CSV export、通知 adapter は `apps/web` / `apps/api` に残る
+- legacy mode の管理 UI、browser CSV export、通知 adapter は rollback 用に `apps/web` / `apps/api` に残る
 - `API_ROUTE_MODE=review-sidecar` は独立 Service ではなく route profile のまま
 
 これらを新 package へ見せないため、`scripts/check-feedback-contracts.sh` が
@@ -42,5 +52,6 @@
 
 - token exchange broker 自体のホスト session 検証・mTLS・短寿命 token 発行 (Service 側の token 検証は実装済み)
 
-Phase 4 のデータ copy/照合と本番切替が完了するまでは、現行 DB の外部キー削除・旧 API の write 停止・
-データ移行を行わない。次は匿名化 fixture で copy/照合を実装する。
+ローカルの Phase 4 実装は完了しているが、実データ copy、旧 API の read-only 化、traffic 切替、旧 DB/object の
+削除は未実施である。これらは外部依存文書の個別承認後に行う。次のリポジトリ内作業は Phase 5 の consumer 2
+fixture と conformance/upgrade/operations/security guide である。

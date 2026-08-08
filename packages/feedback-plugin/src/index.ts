@@ -2,6 +2,7 @@ import "./styles.css";
 
 export { createFeedbackApiClient, FeedbackApiError } from "./api";
 export { createFeedbackV1ApiClient } from "./api-v1";
+export { createDualReadFeedbackApiClient } from "./api-dual-read";
 export type { FeedbackV1ApiClientOptions } from "./api-v1";
 export type {
   FeedbackApiClient,

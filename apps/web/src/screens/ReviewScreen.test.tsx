@@ -313,13 +313,13 @@ describe("ReviewScreen", () => {
     const management = await screen.findByRole("region", { name: "フィードバック管理" });
 
     const link = await within(management).findByRole("link", { name: /スレッドを開く/ });
-    expect(link).toHaveAttribute("href", expect.stringContaining("/lands/L-1?projectId=p1&threadId=ft-1"));
+    expect(link).toHaveAttribute("href", expect.stringContaining("/lands/L-1?projectId=p1&feedbackThread=ft-1"));
     await user.click(link);
     await waitFor(() => expect(document.title).toContain("土地詳細"));
     expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
   });
 
-  it("通知リンクの projectId と threadId から対象スレッドを直接開ける", async () => {
+  it("旧通知リンクの projectId と threadId から対象スレッドを直接開ける", async () => {
     const thread = makeFeedbackThread({ id: "ft-notification" });
     server.use(
       http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([])),

@@ -75,7 +75,8 @@ OIDCの認証主体、API認可、正式な本人確認の代わりにはなら�
 <button data-feedback-id="contract.save">保存</button>
 ```
 
-通知などのディープリンクは、ホストのルーターで `threadId` を読んでSDKへ渡す。
+通知などのディープリンクは、ホストのルーターで `feedbackThread` を読んでSDKへ渡す。
+Phase 4 より前のリンクを残す consumer は `threadId` も別名として受ける。
 
 ```tsx
 function FeedbackDeepLink({ threadId }: { threadId: string | null }) {
@@ -88,8 +89,8 @@ function FeedbackDeepLink({ threadId }: { threadId: string | null }) {
 }
 ```
 
-`threadId` はレビュー管理画面に限らず、投稿対象のどの画面でも処理する。管理一覧やCSVでは
-`/lands/L-1?projectId=...&threadId=...` のようなパーマリンクを生成すると、対象詳細とスレッドを
+thread parameter はレビュー管理画面に限らず、投稿対象のどの画面でも処理する。管理一覧やCSVでは
+`/lands/L-1?projectId=...&feedbackThread=...` のようなパーマリンクを生成すると、対象詳細とスレッドを
 同時に開ける。
 
 MapLibreの地図要素には `feedbackMapAttribute` を付け、Map生成時は
@@ -118,6 +119,10 @@ v1 adapter は起動時の capability 交渉、application/environment/workspace
 Idempotency-Key、ETag を担当する。切替前に application manifest、workspace membership、open session を
 独立 DB へ provisioning する。業務 API の access token を転送できない構成では、`getAccessToken` に
 host backend の token exchange で取得した短寿命 feedback token を返す adapter を渡す。
+
+コピー移行中は `apiMode="feedback-v1-dual-read"` と `legacyApiBaseUrl` を指定できる。このモードでも
+投稿・返信・編集・resolve は v1 だけへ送る。session/thread/history の読み取りは ID で統合し、コピー済み
+resource は v1 を正とする。v1 の 401/403/429 は認証・認可を迂回しないよう旧 API へ fallback しない。
 
 いずれのモードも通信を透過的にインターセプトしない。Gateway の明示 path または専用 URL へ接続する。
 

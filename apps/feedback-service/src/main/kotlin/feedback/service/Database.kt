@@ -59,7 +59,7 @@ class FeedbackDatabase(val dataSource: HikariDataSource) : AutoCloseable {
             connection.rollback()
             throw exception
         } finally {
-            connection.autoCommit = previous
+            if (!connection.isClosed) connection.autoCommit = previous
         }
     }
 

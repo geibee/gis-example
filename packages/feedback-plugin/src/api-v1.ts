@@ -409,5 +409,5 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 function versionEtag(version: number): string {
-  return `"${version}"`;
+  return `"v${version}"`;
 }

@@ -46,7 +46,7 @@ describe("feedback export", () => {
     expect(csv).toContain("'=HYPERLINK");
     expect(csv).toContain("https://gis.example.test/lands/L-123?view=detail&");
     expect(csv).toContain("projectId=p1");
-    expect(csv).toContain("threadId=ft-1");
+    expect(csv).toContain("feedbackThread=ft-1");
   });
 
   it("1000件を超える場合はページを継続取得する", async () => {

@@ -16,14 +16,17 @@ import {
   type TokenRefresher
 } from "./api";
 import { createFeedbackV1ApiClient } from "./api-v1";
+import { createDualReadFeedbackApiClient } from "./api-dual-read";
 import { FeedbackStateProvider } from "./state";
 import type { FeedbackPluginNotificationHandler } from "./types";
 import { matchFeedbackRoute, type FeedbackRouteDefinition } from "./routes";
 
 export type FeedbackPluginProviderProps = {
   apiBaseUrl: string;
-  /** 既定 legacy。feedback-v1 は独立 Feedback Service へ接続する Phase 4 の切替フラグ。 */
-  apiMode?: "legacy" | "feedback-v1";
+  /** 既定 legacy。dual-read でも write は独立 Feedback Service だけへ送る。 */
+  apiMode?: "legacy" | "feedback-v1" | "feedback-v1-dual-read";
+  /** dual-read 時に読み取り fallback として使う旧 Web GIS API の base URL。 */
+  legacyApiBaseUrl?: string;
   /** feedback-v1 の application/environment scope。 */
   applicationKey?: string;
   environmentKey?: string;
@@ -60,6 +63,7 @@ export const defaultParticipantNameStorageKey = "web-gis.feedback.participant-na
 export function FeedbackPluginProvider({
   apiBaseUrl,
   apiMode = "legacy",
+  legacyApiBaseUrl,
   applicationKey,
   environmentKey,
   projectId,
@@ -118,14 +122,19 @@ export function FeedbackPluginProvider({
       if (!applicationKey || !environmentKey) {
         throw new Error("feedback-v1 では applicationKey と environmentKey が必要です");
       }
-      return createFeedbackV1ApiClient({
+      const primary = createFeedbackV1ApiClient({
         ...common,
         applicationKey,
         environmentKey,
         routes
       });
+      if (apiMode === "feedback-v1") return primary;
+      return createDualReadFeedbackApiClient(primary, createFeedbackApiClient({
+        ...common,
+        apiBaseUrl: legacyApiBaseUrl ?? ""
+      }));
     },
-    [apiBaseUrl, apiMode, applicationKey, environmentKey, getAccessToken, notify, refreshAccessToken, routes]
+    [apiBaseUrl, apiMode, applicationKey, environmentKey, getAccessToken, legacyApiBaseUrl, notify, refreshAccessToken, routes]
   );
   const resolvedCurrentPath = currentPath ?? (typeof window === "undefined" ? "/" : window.location.pathname);
   const activeRoute = useMemo(

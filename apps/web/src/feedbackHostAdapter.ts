@@ -51,6 +51,14 @@ export function buildWebGisFeedbackPath(
   );
   const search = new URLSearchParams(location.queryParameters ?? {});
   search.set("projectId", externalWorkspaceKey);
-  search.set("threadId", threadId);
+  search.set("feedbackThread", threadId);
   return `${pathname}?${search}`;
+}
+
+/** 新 permalink と Phase 4 より前の threadId permalink を同じ入口で解決する。 */
+export function resolveWebGisFeedbackThread(search: Record<string, unknown>): string | null {
+  const value = search.feedbackThread ?? search.threadId;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized && normalized.length <= 200 ? normalized : null;
 }

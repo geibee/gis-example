@@ -30,6 +30,7 @@ import { hasProjectPermission, reviewManagePermission } from "./permissions";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
 import { feedbackRoutes } from "./appRoutes";
+import { resolveWebGisFeedbackThread } from "./feedbackHostAdapter";
 
 // ルートレイアウト。認証・レイアウト・ルーター配置のみを担い、
 // サーバ状態は TanStack Query (src/queries/)、画面固有の状態は各 src/screens/、
@@ -50,15 +51,17 @@ function FeedbackSdkHost({ children }: { children: ReactNode }) {
   const { selectedProject } = useAppShell();
   const queryClient = useQueryClient();
   const currentPath = useRouterState({ select: (state) => state.location.pathname });
-  const feedbackApiMode = import.meta.env.VITE_FEEDBACK_API_MODE === "feedback-v1"
-    ? "feedback-v1"
+  const configuredMode = import.meta.env.VITE_FEEDBACK_API_MODE;
+  const feedbackApiMode = configuredMode === "feedback-v1" || configuredMode === "feedback-v1-dual-read"
+    ? configuredMode
     : "legacy";
   return (
     <FeedbackPluginProvider
       apiMode={feedbackApiMode}
-      apiBaseUrl={(feedbackApiMode === "feedback-v1"
+      apiBaseUrl={(feedbackApiMode !== "legacy"
         ? import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1"
         : import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
+      legacyApiBaseUrl={(import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
       applicationKey={import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis"}
       environmentKey={import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local"}
       projectId={selectedProject}
@@ -98,10 +101,7 @@ function AppLayout() {
     }
   });
   const linkedThreadId = useRouterState({
-    select: (state) => {
-      const value = (state.location.search as Record<string, unknown>).threadId;
-      return typeof value === "string" ? value : null;
-    }
+    select: (state) => resolveWebGisFeedbackThread(state.location.search as Record<string, unknown>)
   });
   const handledReviewLink = useRef("");
   useEffect(() => {

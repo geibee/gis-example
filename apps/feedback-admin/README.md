@@ -22,3 +22,6 @@ docker compose --env-file infra/.env -f infra/docker-compose.yml --profile feedb
 ```
 
 管理画面は `http://localhost:5174` に起動する。`VITE_*` はブラウザへ配布されるため、secret を設定しない。
+Web GIS などの consumer は `applicationKey`、`environmentKey`、`workspaceKey` query parameter を付けて
+対象 workspace を開ける。OIDC redirect 中はこの3値だけを sessionStorage に一時保存し、tokenやconsumerの
+任意 query は Admin Console へ転送しない。

@@ -11,7 +11,7 @@ export function buildFeedbackPermalink(
   // APIへ直接投入された外部originには遷移せず、pathname/search/hashだけを同一originへ移す。
   const result = new URL(`${sourceUrl.pathname}${sourceUrl.search}${sourceUrl.hash}`, baseUrl);
   result.searchParams.set("projectId", projectId);
-  result.searchParams.set("threadId", thread.id);
+  result.searchParams.set("feedbackThread", thread.id);
   return result.toString();
 }
 

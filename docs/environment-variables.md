@@ -227,8 +227,9 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 | `VITE_OIDC_AUTHORITY` | 任意 (本番は明示) | `http://localhost:8081/realms/gis` | ビルド引数 |
 | `VITE_OIDC_CLIENT_ID` | 任意 | `gis-web` | ビルド引数 |
 | `VITE_APP_VERSION` | 任意 (レビュー基盤を使うなら必須) | `"dev"` | ビルド引数 (git SHA / ビルド番号) |
-| `VITE_FEEDBACK_API_MODE` | 任意 | `legacy` (`feedback-v1` で独立 Service へ切替) | ビルド引数 |
+| `VITE_FEEDBACK_API_MODE` | 任意 | `legacy` (`feedback-v1`、互換期間は `feedback-v1-dual-read`) | ビルド引数 |
 | `VITE_FEEDBACK_API_BASE` | `feedback-v1` のとき必須 | `/feedback/v1` (同一 origin proxy) | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_URL` | `feedback-v1` のとき必須 | `http://localhost:5174/` | ビルド引数 |
 | `VITE_FEEDBACK_APPLICATION_KEY` | `feedback-v1` のとき必須 | `web-gis` | ビルド引数 |
 | `VITE_FEEDBACK_ENVIRONMENT_KEY` | `feedback-v1` のとき必須 | `local` | ビルド引数 |
 
@@ -236,9 +237,11 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 指摘か」を残すための識別子。未設定でも動くが `dev` 固定になり、後から対象ビルドを
 追跡できなくなる。
 
-`feedback-v1` は SDK overlay の通信先だけを切り替える Phase 4 の rollback 可能な flag である。
+`feedback-v1` は SDK overlay と管理画面の通信先を切り替える Phase 4 の rollback 可能な flag である。
 切替前に対象 application manifest、workspace membership、open session を Feedback DB へ provisioning する。
 問題時は同じ build pipeline で `legacy` に戻し、旧 API/DB を再選択する。
+`feedback-v1-dual-read` は新 API へだけ書き込み、一覧・詳細・履歴の読み取りだけ旧 API と統合する。
+新 API の 401/403/429 は旧 API へ fallback しない。
 
 ## feedback-admin (apps/feedback-admin — ビルド時のみ)
 

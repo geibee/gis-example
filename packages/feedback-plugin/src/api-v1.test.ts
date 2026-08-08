@@ -110,7 +110,7 @@ describe("Feedback API v1 互換adapter", () => {
       if (url.endsWith("/capabilities")) return Response.json(capabilities);
       if (url.includes("/sessions?")) return Response.json({ items: [session] });
       if (url.endsWith(`/sessions/${session.id}/threads`)) {
-        return Response.json(thread(), { status: 201, headers: { ETag: '"1"' } });
+        return Response.json(thread(), { status: 201 });
       }
       if (url.endsWith(`/threads/${thread().id}/status`)) {
         return Response.json(thread("resolved"), { headers: { ETag: '"2"' } });
@@ -163,7 +163,7 @@ describe("Feedback API v1 互換adapter", () => {
     expect(createBody.evidence).toMatchObject({ contentType: "image/png", dataBase64: "AQID" });
     expect(new Headers(createRequest?.init?.headers).get("Idempotency-Key")).toBe("idempotency-00001");
     const statusRequest = requests.find(({ url }) => url.endsWith(`/threads/${thread().id}/status`));
-    expect(new Headers(statusRequest?.init?.headers).get("If-Match")).toBe('"1"');
+    expect(new Headers(statusRequest?.init?.headers).get("If-Match")).toBe('"v1"');
     expect(updated.status).toBe("RESOLVED");
   });
 });

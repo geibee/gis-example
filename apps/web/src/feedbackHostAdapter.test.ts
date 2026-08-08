@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { feedbackApplicationManifest } from "./appRoutes";
-import { buildWebGisFeedbackPath, createWebGisFeedbackHostAdapter } from "./feedbackHostAdapter";
+import {
+  buildWebGisFeedbackPath,
+  createWebGisFeedbackHostAdapter,
+  resolveWebGisFeedbackThread
+} from "./feedbackHostAdapter";
 
 describe("Web GIS FeedbackHostAdapter", () => {
   it("画面manifestをWeb GIS APIから独立したapplication契約として公開する", () => {
@@ -42,7 +46,14 @@ describe("Web GIS FeedbackHostAdapter", () => {
       pathParameters: { id: "L 1" },
       queryParameters: { tab: "owner" }
     }, "project-1", "thread-1")).toBe(
-      "/lands/L%201?tab=owner&projectId=project-1&threadId=thread-1"
+      "/lands/L%201?tab=owner&projectId=project-1&feedbackThread=thread-1"
     );
+  });
+
+  it("新旧permalinkのthread parameterを同じresolverで受ける", () => {
+    expect(resolveWebGisFeedbackThread({ feedbackThread: "new-thread", threadId: "old-thread" }))
+      .toBe("new-thread");
+    expect(resolveWebGisFeedbackThread({ threadId: "old-thread" })).toBe("old-thread");
+    expect(resolveWebGisFeedbackThread({ feedbackThread: " ".repeat(201) })).toBeNull();
   });
 });
