@@ -17,6 +17,7 @@ type Thread = Schemas["FeedbackThreadV1"];
 type ExportJob = Schemas["FeedbackExportJob"];
 type Member = Schemas["FeedbackWorkspaceMember"];
 type Delivery = Schemas["FeedbackNotificationDelivery"];
+type ManifestRoute = Schemas["FeedbackApplicationManifestV1"]["routes"][number];
 
 export type FeedbackAdminConsoleProps = {
   transport: FeedbackTransport;
@@ -124,6 +125,7 @@ function SessionAdministration({
   const [manifestVersion, setManifestVersion] = useState("1");
   const [scopes, setScopes] = useState('[{"pageKey":"home","routeTemplate":"/","reviewable":true}]');
   const [perspectives, setPerspectives] = useState('[{"code":"quality","label":"品質","status":"active","guidance":null}]');
+  const [manifestRoutes, setManifestRoutes] = useState<ManifestRoute[]>([]);
   const [evidenceUrl, setEvidenceUrl] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     try {
@@ -134,6 +136,17 @@ function SessionAdministration({
     } catch (caught) { onError(messageOf(caught)); }
   }, [onError, scopeQuery, transport]);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void transport.request<Schemas["FeedbackApplicationManifestV1"]>(
+      `/applications/${encodeURIComponent(applicationKey)}/manifest`
+    ).then(
+      (resource) => {
+        setManifestVersion(resource.value.manifestVersion);
+        setManifestRoutes(resource.value.routes);
+      },
+      (caught) => onError(messageOf(caught))
+    );
+  }, [applicationKey, onError, transport]);
   useEffect(() => {
     if (!selectedId) { setThreads([]); return; }
     void transport.request<Schemas["FeedbackThreadPage"]>(`/sessions/${selectedId}/threads`).then(
@@ -187,6 +200,14 @@ function SessionAdministration({
   const patchSessionState = (patch: Partial<Session>) => {
     setSessions((current) => current.map((session) => session.id === selectedId ? { ...session, ...patch } : session));
   };
+  const selectedScopes = parseScopeDraft(scopes);
+  const toggleManifestRoute = (route: ManifestRoute, checked: boolean) => {
+    const retained = selectedScopes.filter((scope) => scope.pageKey !== route.pageKey);
+    const next = checked
+      ? [...retained, { pageKey: route.pageKey, routeTemplate: route.template, reviewable: true }]
+      : retained;
+    setScopes(JSON.stringify(next, null, 2));
+  };
   const toggleThread = async (thread: Thread) => {
     try {
       await transport.request(`/threads/${thread.id}/status`, {
@@ -218,6 +239,16 @@ function SessionAdministration({
         <h2>レビューを作成</h2>
         <label>タイトル<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <label>Manifest version<input required value={manifestVersion} onChange={(event) => setManifestVersion(event.target.value)} /></label>
+        <fieldset><legend>Manifest の対象画面</legend>
+          {manifestRoutes.map((route) => <label key={route.pageKey}>
+            <input
+              type="checkbox"
+              checked={selectedScopes.some((scope) => scope.pageKey === route.pageKey)}
+              onChange={(event) => toggleManifestRoute(route, event.target.checked)}
+            />
+            {route.label} ({route.template})
+          </label>)}
+        </fieldset>
         <label>Scope JSON<textarea value={scopes} onChange={(event) => setScopes(event.target.value)} /></label>
         <label>Perspective JSON<textarea value={perspectives} onChange={(event) => setPerspectives(event.target.value)} /></label>
         <button type="submit">作成</button>
@@ -452,6 +483,18 @@ function parseArray(value: string, name: string): unknown[] {
   const parsed = JSON.parse(value) as unknown;
   if (!Array.isArray(parsed)) throw new Error(`${name} JSONは配列で指定してください`);
   return parsed;
+}
+
+function parseScopeDraft(value: string): Array<{ pageKey: string; routeTemplate?: string; reviewable: boolean }> {
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is { pageKey: string; routeTemplate?: string; reviewable: boolean } =>
+      item != null && typeof item === "object" && typeof item.pageKey === "string"
+    );
+  } catch {
+    return [];
+  }
 }
 function permissionList(value: string): string[] { return value.split(",").map((item) => item.trim()).filter(Boolean); }
 function idempotencyKey(): string { return `feedback-admin-${crypto.randomUUID()}`; }

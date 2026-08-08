@@ -7,14 +7,24 @@ cd "$ROOT"
 
 OPENAPI="contracts/feedback/openapi.yaml"
 GENERATED="contracts/feedback/src/generated.ts"
+KOTLIN_GENERATED="contracts/feedback/kotlin/FeedbackContractTypes.kt"
 [[ -f "$OPENAPI" ]] || { echo "[feedback-contract] FAIL: $OPENAPI がありません" >&2; exit 1; }
 [[ -f "$GENERATED" ]] || { echo "[feedback-contract] FAIL: $GENERATED がありません" >&2; exit 1; }
+[[ -f "$KOTLIN_GENERATED" ]] || { echo "[feedback-contract] FAIL: $KOTLIN_GENERATED がありません" >&2; exit 1; }
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+kotlin_tmp=$(mktemp)
+trap 'rm -f "$tmp" "$kotlin_tmp"' EXIT
 npx --no-install openapi-typescript "$OPENAPI" -o "$tmp" >/dev/null
 if ! diff -u "$GENERATED" "$tmp"; then
   echo "[feedback-contract] FAIL: @feedback/contracts の生成型が専用OpenAPIと同期していません" >&2
+  echo "  npm --workspace @feedback/contracts run generate を実行してください" >&2
+  exit 1
+fi
+
+node scripts/generate-feedback-kotlin-contracts.mjs "$OPENAPI" "$kotlin_tmp"
+if ! diff -u "$KOTLIN_GENERATED" "$kotlin_tmp"; then
+  echo "[feedback-contract] FAIL: Kotlin契約型が専用OpenAPIと同期していません" >&2
   echo "  npm --workspace @feedback/contracts run generate を実行してください" >&2
   exit 1
 fi
@@ -48,6 +58,11 @@ if rg -n '@web-gis|apps/api/openapi|projectId|app\.projects|app\.users|gis_data|
 fi
 if rg -n 'maplibre' packages/feedback-react/package.json packages/feedback-react/src; then
   echo "[feedback-contract] FAIL: @feedback/react がMapLibreへ依存しています" >&2
+  exit 1
+fi
+if rg -n 'style=|dangerouslySetInnerHTML|document\.head|<style' \
+  packages/feedback-react/src packages/feedback-admin-react/src packages/feedback-maplibre/src; then
+  echo "[feedback-contract] FAIL: strict CSPを壊すinline style/runtime style注入がpackageに混入しています" >&2
   exit 1
 fi
 if rg -n "from ['\"](react|react-dom|@tanstack/|maplibre-gl)|document\\.|window\\." packages/feedback-core/src; then

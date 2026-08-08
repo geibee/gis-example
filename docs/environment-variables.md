@@ -131,7 +131,10 @@ Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flywa
 | `FEEDBACK_TOKEN_EXCHANGE_ACTOR_ISSUERS` | exchange issuer 設定時**必須** | なし | 許可する元 IdP issuer のカンマ区切り |
 | `FEEDBACK_TOKEN_EXCHANGE_MAX_LIFETIME_SECONDS` | 任意 | `300` (許容範囲 30..900) | タスク定義 |
 | `FEEDBACK_EVIDENCE_MAX_BYTES` | 任意 | `10485760` (10MiB) | タスク定義 |
-| `FEEDBACK_WRITE_RATE_LIMIT_PER_MINUTE` | 任意 | `120` (tenant/principal 単位、1..10000) | タスク定義 |
+| `FEEDBACK_EVIDENCE_MAX_COUNT_PER_WORKSPACE` | 任意 | `1000` (workspace単位、1..1000000) | タスク定義 |
+| `FEEDBACK_WRITE_RATE_LIMIT_PER_MINUTE` | 任意 | `120` (principal単位、1..10000) | タスク定義 |
+| `FEEDBACK_WRITE_RATE_LIMIT_PER_TENANT_PER_MINUTE` | 任意 | `1200` (tenant単位、1..100000) | タスク定義 |
+| `FEEDBACK_WRITE_RATE_LIMIT_PER_IP_PER_MINUTE` | 任意 | `240` (IPはSHA-256のみ保存、1..100000) | タスク定義 |
 | `FEEDBACK_EVIDENCE_STORAGE` | 任意 (**本番は `s3`**) | `local` | タスク定義 |
 | `FEEDBACK_EVIDENCE_DIR` | `local` のとき任意 | `/data/evidence` | タスク定義 / volume |
 | `FEEDBACK_S3_BUCKET` | `s3` のとき**必須** | なし | タスク定義 / SSM |

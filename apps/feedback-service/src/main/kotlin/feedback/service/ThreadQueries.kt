@@ -134,7 +134,9 @@ fun FeedbackDatabase.createThread(
     hash: String,
     evidenceStorage: EvidenceStorage,
     evidenceKeyPrefix: String,
-    evidenceMaxBytes: Long
+    evidenceMaxBytes: Long,
+    evidenceMaxCountPerWorkspace: Int = 1000,
+    requestId: String = "unknown"
 ): FeedbackThread {
     var storedObjectKey: String? = null
     try {
@@ -186,6 +188,9 @@ fun FeedbackDatabase.createThread(
             if (session.perspectives.none { it.code == request.perspectiveCode && it.status == "active" }) {
                 badRequest("active な perspectiveCode を指定してください")
             }
+            if (request.evidence != null) {
+                enforceEvidenceCountQuota(connection, scope, evidenceMaxCountPerWorkspace)
+            }
             val displayNumber = nextThreadNumber(connection, sessionId)
             val threadId = UUID.randomUUID().toString()
             connection.prepareStatement(
@@ -219,7 +224,15 @@ fun FeedbackDatabase.createThread(
             request.evidence?.let { evidence ->
                 val bytes = decodeEvidence(evidence, evidenceMaxBytes)
                 val objectKey = "$evidenceKeyPrefix${scope.tenantId}/${scope.workspaceId}/$threadId"
-                evidenceStorage.put(objectKey, evidence.contentType, bytes)
+                try {
+                    evidenceStorage.put(objectKey, evidence.contentType, bytes)
+                } catch (_: Exception) {
+                    throw FeedbackApiException(
+                        io.ktor.http.HttpStatusCode.ServiceUnavailable,
+                        "evidence.storage_unavailable",
+                        "evidence storage へ保存できません"
+                    )
+                }
                 storedObjectKey = objectKey
                 connection.prepareStatement(
                     """
@@ -242,11 +255,25 @@ fun FeedbackDatabase.createThread(
                     statement.executeUpdate()
                 }
             }
-            enqueueEvent(connection, scope, "feedback.thread.created.v1", sessionId, threadId, principal, request.body)
+            enqueueEvent(connection, scope, "feedback.thread.created.v1", sessionId, threadId, principal, request.body, requestId)
+            connection.incrementOperationalMetric("posts_total", scope.tenantId)
             readThreadById(connection, threadId)
         }
     } catch (exception: Exception) {
-        storedObjectKey?.let { key -> runCatching { evidenceStorage.delete(key) } }
+        if (exception is FeedbackApiException && exception.code in setOf(
+                "evidence.storage_unavailable",
+                "evidence.integrity_error"
+            )) {
+            runCatching { recordOperationalMetric("storage_failures_total", scope.tenantId) }
+        }
+        if (exception is FeedbackApiException && exception.code == "evidence.quota_exceeded") {
+            runCatching { recordOperationalMetric("evidence_quota_rejections_total", scope.tenantId) }
+        }
+        storedObjectKey?.let { key ->
+            runCatching { evidenceStorage.delete(key) }.onFailure {
+                runCatching { recordOperationalMetric("storage_failures_total", scope.tenantId) }
+            }
+        }
         throw exception
     }
 }
@@ -257,7 +284,8 @@ fun FeedbackDatabase.createMessage(
     principal: FeedbackPrincipal,
     request: FeedbackMessageCreateRequest,
     idempotencyKey: String,
-    hash: String
+    hash: String,
+    requestId: String = "unknown"
 ): FeedbackMessage = idempotent(
     scope = scope,
     principal = principal,
@@ -275,7 +303,8 @@ fun FeedbackDatabase.createMessage(
         it.setString(1, threadId)
         it.executeUpdate()
     }
-    enqueueEvent(connection, scope, "feedback.message.created.v1", thread.sessionId, threadId, principal, request.body)
+    enqueueEvent(connection, scope, "feedback.message.created.v1", thread.sessionId, threadId, principal, request.body, requestId)
+    connection.incrementOperationalMetric("posts_total", scope.tenantId)
     message
 }
 
@@ -287,7 +316,7 @@ fun FeedbackDatabase.patchMessage(
 ): FeedbackMessage = transaction { connection ->
     validateBody(request.body)
     request.participantName?.let { validateKey(it, "participantName", 100) }
-    val current = readMessageById(connection, messageId)
+    val current = readMessageByIdForUpdate(connection, messageId)
     if (current.version != expectedVersion) preconditionFailed()
     if (current.author.principalId != principal.subject) {
         throw FeedbackApiException(io.ktor.http.HttpStatusCode.Forbidden, "message.not_owner", "自分の message だけを編集できます")
@@ -364,7 +393,8 @@ fun FeedbackDatabase.patchThreadStatus(
     threadId: String,
     principal: FeedbackPrincipal,
     expectedVersion: Int,
-    status: String
+    status: String,
+    requestId: String = "unknown"
 ): FeedbackThread = transaction { connection ->
     if (status !in setOf("open", "resolved")) badRequest("status が不正です")
     val current = readThreadById(connection, threadId)
@@ -382,14 +412,19 @@ fun FeedbackDatabase.patchThreadStatus(
         if (statement.executeUpdate() != 1) preconditionFailed()
     }
     val eventType = if (status == "resolved") "feedback.thread.resolved.v1" else "feedback.thread.reopened.v1"
-    enqueueEvent(connection, scope, eventType, current.sessionId, threadId, principal, null)
+    enqueueEvent(connection, scope, eventType, current.sessionId, threadId, principal, null, requestId)
     readThreadById(connection, threadId)
 }
 
 fun FeedbackDatabase.getEvidence(threadId: String, storage: EvidenceStorage): StoredEvidence =
     dataSource.connection.use { connection ->
         connection.prepareStatement(
-            "SELECT object_key, content_type, sha256 FROM feedback.review_evidence WHERE thread_id = ?::uuid"
+            """
+            SELECT evidence.object_key, evidence.content_type, evidence.sha256, thread.tenant_id::text
+            FROM feedback.review_evidence evidence
+            JOIN feedback.feedback_threads thread ON thread.id = evidence.thread_id
+            WHERE evidence.thread_id = ?::uuid
+            """.trimIndent()
         ).use { statement ->
             statement.setString(1, threadId)
             statement.executeQuery().use { result ->
@@ -400,6 +435,7 @@ fun FeedbackDatabase.getEvidence(threadId: String, storage: EvidenceStorage): St
                 val bytes = try {
                     storage.get(objectKey)
                 } catch (_: Exception) {
+                    runCatching { connection.incrementOperationalMetric("storage_failures_total", result.getString(4)) }
                     throw FeedbackApiException(
                         io.ktor.http.HttpStatusCode.ServiceUnavailable,
                         "evidence.storage_unavailable",
@@ -407,6 +443,7 @@ fun FeedbackDatabase.getEvidence(threadId: String, storage: EvidenceStorage): St
                     )
                 }
                 if (sha256(bytes) != expectedHash) {
+                    runCatching { connection.incrementOperationalMetric("storage_failures_total", result.getString(4)) }
                     throw FeedbackApiException(
                         io.ktor.http.HttpStatusCode.ServiceUnavailable,
                         "evidence.integrity_error",
@@ -430,6 +467,31 @@ private fun nextThreadNumber(connection: Connection, sessionId: String): Int =
         statement.setString(1, sessionId)
         statement.executeQuery().use { result -> result.next(); result.getInt(1) }
     }
+
+private fun enforceEvidenceCountQuota(connection: Connection, scope: ResourceScope, maximum: Int) {
+    connection.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))").use { statement ->
+        statement.setString(1, "evidence-quota:${scope.workspaceId}")
+        statement.executeQuery().use { it.next() }
+    }
+    val count = connection.prepareStatement(
+        """
+        SELECT count(*)
+        FROM feedback.review_evidence evidence
+        JOIN feedback.feedback_threads thread ON thread.id = evidence.thread_id
+        WHERE thread.workspace_id = ?::uuid
+        """.trimIndent()
+    ).use { statement ->
+        statement.setString(1, scope.workspaceId)
+        statement.executeQuery().use { result -> result.next(); result.getInt(1) }
+    }
+    if (count >= maximum) {
+        throw FeedbackApiException(
+            io.ktor.http.HttpStatusCode.TooManyRequests,
+            "evidence.quota_exceeded",
+            "workspace の evidence 件数上限を超えました"
+        )
+    }
+}
 
 private fun insertMessage(
     connection: Connection,
@@ -516,6 +578,15 @@ private fun readMessageById(connection: Connection, messageId: String): Feedback
         }
     }
 
+private fun readMessageByIdForUpdate(connection: Connection, messageId: String): FeedbackMessage =
+    connection.prepareStatement("SELECT * FROM feedback.feedback_messages WHERE id = ?::uuid FOR UPDATE").use { statement ->
+        statement.setString(1, messageId)
+        statement.executeQuery().use { result ->
+            if (!result.next()) notFound()
+            readMessage(result)
+        }
+    }
+
 private fun readMessage(row: ResultSet): FeedbackMessage = FeedbackMessage(
     id = row.getString("id"),
     threadId = row.getString("thread_id"),
@@ -552,11 +623,13 @@ private fun enqueueEvent(
     sessionId: String,
     threadId: String,
     principal: FeedbackPrincipal,
-    body: String?
+    body: String?,
+    requestId: String
 ) {
     val eventId = UUID.randomUUID().toString()
     val payload = NotificationWebhookEvent(
         eventId = eventId,
+        requestId = requestId,
         eventType = eventType,
         occurredAt = java.time.Instant.now().toString(),
         tenantKey = scope.tenantKey,

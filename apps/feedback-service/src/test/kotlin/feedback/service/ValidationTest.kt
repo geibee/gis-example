@@ -93,4 +93,37 @@ class ValidationTest {
         assertTrue(decodeEvidence(input, 100).contentEquals(png))
         assertFailsWith<FeedbackApiException> { decodeEvidence(input, 1) }
     }
+
+    @Test
+    fun `single byte rangeとsuffixを解決し範囲外を拒否する`() {
+        assertEquals(ByteRange(2, 5), parseByteRange("bytes=2-5", 10))
+        assertEquals(ByteRange(7, 9), parseByteRange("bytes=-3", 10))
+        assertEquals(ByteRange(8, 9), parseByteRange("bytes=8-", 10))
+        assertFailsWith<FeedbackApiException> { parseByteRange("bytes=10-11", 10) }
+        assertFailsWith<FeedbackApiException> { parseByteRange("bytes=0-1,3-4", 10) }
+    }
+
+    @Test
+    fun `targetの全variantをserver validatorでも受理する`() {
+        val variants = listOf(
+            buildJsonObject {
+                put("schemaVersion", "1"); put("kind", "ui-element"); put("elementKey", "submit")
+                put("relativeX", 0.5); put("relativeY", 0.5)
+            },
+            buildJsonObject {
+                put("schemaVersion", "1"); put("kind", "screen-position")
+                put("relativeX", 0.25); put("relativeY", 0.75)
+            },
+            buildJsonObject {
+                put("schemaVersion", "1"); put("kind", "map-feature"); put("provider", "maplibre")
+                put("sourceKey", "parcels"); put("sourceLayer", "active"); put("featureKey", "P-1")
+                put("longitude", 139.7); put("latitude", 35.6)
+            },
+            buildJsonObject {
+                put("schemaVersion", "1"); put("kind", "map-position")
+                put("longitude", 139.7); put("latitude", 35.6)
+            }
+        )
+        variants.forEach { assertEquals(it, validateTarget(it)) }
+    }
 }

@@ -4,6 +4,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
@@ -33,6 +35,7 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
     database.migrate()
     val evidenceStorage = createEvidenceStorage(settings.evidenceStorage)
     val exportStorage = LocalEvidenceStorage(settings.exportStorage.localDirectory)
+    val metrics = FeedbackServiceMetrics(database)
     environment.monitor.subscribe(io.ktor.server.application.ApplicationStopped) {
         evidenceStorage.close()
         exportStorage.close()
@@ -49,6 +52,20 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
         level = Level.INFO
         filter { !it.request.path().startsWith("/health/") }
         mdc("requestId") { it.callId }
+        mdc("tenant") { it.attributes.getOrNull(auditTenantKey) }
+        mdc("application") { it.attributes.getOrNull(auditApplicationKey) }
+        mdc("environment") { it.attributes.getOrNull(auditEnvironmentKey) }
+        mdc("workspace") { it.attributes.getOrNull(auditWorkspaceKey) }
+    }
+    intercept(ApplicationCallPipeline.Monitoring) {
+        val startedAt = System.nanoTime()
+        try {
+            proceed()
+        } finally {
+            if (!call.request.path().startsWith("/metrics")) {
+                metrics.recordRequest(System.nanoTime() - startedAt, call.response.status()?.value ?: 500)
+            }
+        }
     }
     install(ContentNegotiation) { json(serviceJson) }
     install(StatusPages) {
@@ -124,14 +141,17 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
     installEnvironmentCors(database)
     installFeedbackAuthentication(database, settings.oidc, settings.tokenExchange)
     routing {
-        healthRoutes(database)
+        healthRoutes(database, evidenceStorage, settings.evidenceStorage.keyPrefix, metrics)
         feedbackRoutes(
             FeedbackDependencies(
                 database = database,
                 evidenceStorage = evidenceStorage,
                 evidenceMaxBytes = settings.evidenceMaxBytes,
+                evidenceMaxCountPerWorkspace = settings.evidenceMaxCountPerWorkspace,
                 evidenceKeyPrefix = settings.evidenceStorage.keyPrefix,
                 writeRateLimitPerMinute = settings.writeRateLimitPerMinute,
+                writeRateLimitPerTenantPerMinute = settings.writeRateLimitPerTenantPerMinute,
+                writeRateLimitPerIpPerMinute = settings.writeRateLimitPerIpPerMinute,
                 notificationCipher = settings.notificationCipher,
                 exportStorage = exportStorage
             )

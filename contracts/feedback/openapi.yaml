@@ -491,6 +491,8 @@ paths:
     get:
       tags: [threads]
       operationId: getFeedbackEvidence
+      parameters:
+        - $ref: "#/components/parameters/Range"
       responses:
         "200":
           description: 認可済み証跡画像
@@ -502,12 +504,26 @@ paths:
               schema: { type: string, format: binary }
             image/webp:
               schema: { type: string, format: binary }
+        "206":
+          description: Rangeで指定したprivate evidenceの一部
+          headers:
+            Content-Range:
+              schema: { type: string }
+            Accept-Ranges:
+              schema: { type: string, const: bytes }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
 
   /exports:
     post:
@@ -730,6 +746,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "416": { $ref: "#/components/responses/RangeNotSatisfiable" }
         "409": { $ref: "#/components/responses/Conflict" }
 
   /memberships/{userId}:
@@ -894,6 +911,13 @@ components:
       in: header
       required: false
       schema: { type: string, minLength: 3, maxLength: 200 }
+    Range:
+      name: Range
+      in: header
+      required: false
+      schema:
+        type: string
+        pattern: "^bytes=(?:[0-9]+-[0-9]*|-[0-9]+)$"
 
   headers:
     ETag:
@@ -949,6 +973,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    RangeNotSatisfiable:
+      description: evidence size の範囲外または複数 byte range
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
 
   schemas:
     FeedbackApplicationManifestV1:
@@ -976,9 +1005,10 @@ components:
         evidence:
           type: object
           additionalProperties: false
-          required: [maxBytes, acceptedContentTypes]
+          required: [maxBytes, maxCountPerWorkspace, acceptedContentTypes]
           properties:
             maxBytes: { type: integer, minimum: 1 }
+            maxCountPerWorkspace: { type: integer, minimum: 1 }
             acceptedContentTypes:
               type: array
               items: { enum: [image/png, image/webp] }

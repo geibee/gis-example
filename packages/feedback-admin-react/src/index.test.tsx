@@ -45,6 +45,9 @@ describe("FeedbackAdminConsole", () => {
     const openExternal = vi.fn();
     render(<FeedbackAdminConsole {...scope} transport={createTransport()} openExternal={openExternal} />);
     expect(await screen.findByText("#1 quality")).toBeTruthy();
+    const detailRoute = await screen.findByRole("checkbox", { name: "注文詳細 (/orders/{id})" });
+    fireEvent.click(detailRoute);
+    expect((detailRoute as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "対象アプリを開く" }));
     await waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://consumer.example/?feedbackThread=thread-1"));
   });
@@ -84,7 +87,13 @@ function createRequest() {
     if (path.startsWith("/sessions?")) return { value: { items: [session] }, etag: null };
     if (path.endsWith("/threads")) return { value: { items: [thread] }, etag: null };
     if (path.endsWith("/deep-link")) return { value: { url: "https://consumer.example/?feedbackThread=thread-1" }, etag: null };
-    if (path.includes("/manifest")) return { value: { schemaVersion: "1", applicationKey: "consumer", displayName: "Consumer", manifestVersion: "1", routes: [] }, etag: '"v1"' };
+    if (path.includes("/manifest")) return { value: {
+      schemaVersion: "1", applicationKey: "consumer", displayName: "Consumer", manifestVersion: "1",
+      routes: [
+        { pageKey: "orders.list", template: "/orders", label: "注文一覧" },
+        { pageKey: "orders.detail", template: "/orders/{id}", label: "注文詳細" }
+      ]
+    }, etag: '"v1"' };
     if (path.startsWith("/retention-policy")) return { value: { evidenceRetentionDays: null, exportRetentionDays: 7 }, etag: '"v1"' };
     if (path.startsWith("/memberships")) return { value: [], etag: null };
     if (path.startsWith("/notification-settings")) return { value: { webhookEnabled: false, webhookEndpoint: null, includeBody: false, includeEvidence: false }, etag: '"v1"' };

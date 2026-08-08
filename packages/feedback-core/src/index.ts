@@ -27,6 +27,13 @@ export type {
   FeedbackEvidenceRequest,
   FeedbackHostAdapter
 } from "./host-adapter.js";
+export { createInMemoryFeedbackTelemetry } from "./telemetry.js";
+export type {
+  FeedbackTelemetry,
+  FeedbackTelemetryDimensions,
+  FeedbackTelemetryEvent,
+  FeedbackTelemetrySnapshot
+} from "./telemetry.js";
 export type {
   FeedbackApplicationManifestV1,
   FeedbackCapabilities,

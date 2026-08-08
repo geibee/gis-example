@@ -8,7 +8,7 @@
 
 - `contracts/feedback/openapi.yaml`: GIS・業務 API を含まない `/feedback/v1` 専用契約
 - `contracts/feedback/schemas`: application manifest、location、target、webhook の JSON Schema
-- `@feedback/contracts`: 専用 OpenAPI だけから生成する型と schema/version 定数
+- `@feedback/contracts`: 専用 OpenAPI だけから生成する TypeScript/Kotlin 型と schema/version 定数
 - `@feedback/core`: manifest/location/target validator、HostAdapter、transport、capabilities 交渉、
   401 single-flight refresh、Problem Details、ETag、Idempotency-Key
 - `@feedback/react`: Service 障害をホスト画面から隔離する Provider/ErrorBoundary、locale、feature flag、portal 境界
@@ -20,12 +20,13 @@
   retention、audit、idempotency、notification outbox を通常 PostgreSQL だけで管理
 - 独立認証認可: feedback 専用 OIDC audience/claim mapping、別 issuer の短寿命 exchange token 検証、
   DB membership と token scope の積集合、`feedback.read/comment/manage/admin`、resource ID 経由の cross-workspace 404
-- private evidence: local/S3 adapter、content-type/magic/size/SHA-256 検証、認可付き read
+- private evidence: local/S3 adapter、content-type/magic/size/count/SHA-256 検証、認可付き range read
 - deployment 分離: HTTP API、HMAC 署名 notification worker、policy 競合を lock する retention/orphan worker、
   one-shot provisioning CLI を同一 image の別 command で提供
 - notification endpoint の AES-256-GCM 暗号化、現行鍵/旧鍵を併用する段階的 key rotation
 - backend 品質ゲート: dedicated OpenAPI と routing tree の双方向同期、全 resource route の permission/scope 宣言、
-  PostGIS を含まない空 PostgreSQL への migration/tenant 分離統合テスト、実 HTTP response の JSON Schema 適合試験
+  PostGIS を含まない空 PostgreSQLへの migration、V1 schema upgrade/convergence、tenant 分離、並行更新、OIDC/CORS、
+  実 HTTP request/response の JSON Schema 適合試験
 - `apps/feedback-admin` / `@feedback/admin-react`: Web GIS なしで session/scope/perspective/thread/evidence、
   manifest、membership、retention、Export、通知 retry を管理する独立 Console
 - 非同期 CSV/XLSX Export、private download、formula injection 対策、期限 purge
@@ -39,6 +40,8 @@
 - `apps/feedback-conformance-consumer`: native History router、在庫・承認画面、mock token exchange、site workspace を
   使う consumer 2。Web GIS 固有依存なしで投稿、DOM pin、deep link、workspace state 分離を検証する
 - 互換 matrix、upgrade、operations、security guide と consumer 2 fail-closed dependency guard
+- tenant/principal/IP rate limit、環境別 issuer allowlist、監査 mask、request ID の監査/log/outbox 相関、
+  readiness の必須/任意依存分離、Prometheus 形式の運用 metric、SDK capture/post/unavailable telemetry
 
 ## 互換期間として意図的に残しているもの
 

@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode
@@ -180,10 +181,12 @@ function Composer({
   const [participantName, setParticipantName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingRequest = useRef<{ idempotencyKey: string; body: Record<string, unknown> } | null>(null);
 
   useEffect(() => {
     void Promise.resolve(feedback.adapter.getParticipantName?.() ?? null).then((value) => setParticipantName(value ?? ""));
   }, [feedback.adapter]);
+  useEffect(() => { pendingRequest.current = null; }, [body, participantName, perspective, target]);
 
   if (!session || !feedback.location || !feedback.hostContext) return null;
   const hostContext = feedback.hostContext;
@@ -195,26 +198,25 @@ function Composer({
     setSubmitting(true);
     setError(null);
     try {
-      let evidence: FeedbackEvidencePayload | null = null;
-      if (feedback.features.evidenceCapture !== false) {
-        try {
-          evidence = await (feedback.adapter.captureEvidence ?? createDomEvidenceProvider({
-            maxBytes: feedback.reviewContext?.evidencePolicy.maxBytes
-          }))({
-            context: hostContext,
-            location,
-            target,
-            excludeSelector: `[${feedbackExcludeAttribute}], [data-feedback-overlay]`,
-            maskSelector: `[${feedbackMaskAttribute}]`
-          });
-        } catch (captureError) {
-          setError(`証跡を取得できなかったためコメントのみ投稿します: ${messageOf(captureError)}`);
+      if (!pendingRequest.current) {
+        let evidence: FeedbackEvidencePayload | null = null;
+        if (feedback.features.evidenceCapture !== false) {
+          try {
+            evidence = await (feedback.adapter.captureEvidence ?? createDomEvidenceProvider({
+              maxBytes: feedback.reviewContext?.evidencePolicy.maxBytes
+            }))({
+              context: hostContext,
+              location,
+              target,
+              excludeSelector: `[${feedbackExcludeAttribute}], [data-feedback-overlay]`,
+              maskSelector: `[${feedbackMaskAttribute}]`
+            });
+          } catch (captureError) {
+            feedback.telemetry?.increment("capture_failure", hostContext);
+            setError(`証跡を取得できなかったためコメントのみ投稿します: ${messageOf(captureError)}`);
+          }
         }
-      }
-      const resource = await feedback.transport.request<Thread>(
-        `/sessions/${encodeURIComponent(session.id)}/threads`,
-        {
-          method: "POST",
+        pendingRequest.current = {
           idempotencyKey: idempotencyKey(),
           body: {
             location,
@@ -224,8 +226,19 @@ function Composer({
             participantName: participantName.trim() || null,
             ...(evidence ? { evidence: evidenceBody(evidence) } : {})
           }
+        };
+      }
+      const pending = pendingRequest.current!;
+      const resource = await feedback.transport.request<Thread>(
+        `/sessions/${encodeURIComponent(session.id)}/threads`,
+        {
+          method: "POST",
+          idempotencyKey: pending.idempotencyKey,
+          body: pending.body
         }
       );
+      pendingRequest.current = null;
+      feedback.telemetry?.increment("post_success", hostContext);
       await feedback.adapter.setParticipantName?.(participantName.trim() || null);
       onCreated(resource.value);
     } catch (nextError) {

@@ -78,6 +78,7 @@ describe("Feedback JSON Schema", () => {
     const event = {
       schemaVersion: "1",
       eventId: "00000000-0000-4000-8000-000000000001",
+      requestId: "request-0001",
       eventType: "feedback.thread.created.v1",
       occurredAt: "2026-08-09T00:00:00Z",
       tenantKey: "tenant-1",

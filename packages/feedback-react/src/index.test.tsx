@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { FeedbackHostAdapter, FeedbackTransport } from "@feedback/core";
+import { createInMemoryFeedbackTelemetry, type FeedbackHostAdapter, type FeedbackTransport } from "@feedback/core";
 import { FeedbackProvider, useFeedback } from "./index";
 
 const adapter: FeedbackHostAdapter = {
@@ -30,7 +30,7 @@ describe("FeedbackProvider", () => {
         apiMajorVersion: 1,
         manifestSchemaVersions: ["1"],
         targetSchemaVersions: ["1"],
-        evidence: { maxBytes: 1024, acceptedContentTypes: ["image/png"] },
+        evidence: { maxBytes: 1024, maxCountPerWorkspace: 1000, acceptedContentTypes: ["image/png"] },
         features: []
       })),
       getReviewContext: vi.fn(async () => ({
@@ -55,6 +55,7 @@ describe("FeedbackProvider", () => {
   it("service障害をunavailable stateへ閉じ込め、再試行できる", async () => {
     let unavailable = true;
     const onUnavailable = vi.fn();
+    const telemetry = createInMemoryFeedbackTelemetry();
     const transport = {
       getCapabilities: vi.fn(async () => {
         if (unavailable) throw new Error("down");
@@ -63,7 +64,7 @@ describe("FeedbackProvider", () => {
           apiMajorVersion: 1,
           manifestSchemaVersions: ["1"],
           targetSchemaVersions: ["1"],
-          evidence: { maxBytes: 1, acceptedContentTypes: ["image/png"] },
+          evidence: { maxBytes: 1, maxCountPerWorkspace: 1000, acceptedContentTypes: ["image/png"] },
           features: []
         };
       }),
@@ -72,11 +73,12 @@ describe("FeedbackProvider", () => {
       requestBinary: vi.fn()
     } as unknown as FeedbackTransport;
     const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(FeedbackProvider, { adapter, transport, onUnavailable, children });
+      createElement(FeedbackProvider, { adapter, transport, onUnavailable, telemetry, children });
     const { result } = renderHook(() => useFeedback(), { wrapper });
 
     await waitFor(() => expect(result.current.state).toBe("unavailable"));
     expect(onUnavailable).toHaveBeenCalledOnce();
+    expect(telemetry.snapshot().service_unavailable).toBe(1);
     unavailable = false;
     await act(() => result.current.refresh());
     expect(result.current.state).toBe("ready");

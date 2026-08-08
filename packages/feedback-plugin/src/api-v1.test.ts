@@ -6,7 +6,7 @@ const capabilities = {
   apiMajorVersion: 1,
   manifestSchemaVersions: ["1"],
   targetSchemaVersions: ["1"],
-  evidence: { maxBytes: 1024, acceptedContentTypes: ["image/png"] },
+  evidence: { maxBytes: 1024, maxCountPerWorkspace: 1000, acceptedContentTypes: ["image/png"] },
   features: []
 };
 

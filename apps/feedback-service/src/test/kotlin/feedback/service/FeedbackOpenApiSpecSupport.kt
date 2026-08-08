@@ -45,6 +45,13 @@ object FeedbackOpenApiSpecSupport {
         return SchemaNode(media.map("schema"), response.document, response.source)
     }
 
+    fun requestSchema(method: String, path: String, mediaType: String = "application/json"): SchemaNode {
+        val operation = document.map("paths").map(path).map(method.lowercase())
+        val requestBody = dereference(SchemaNode(operation.map("requestBody"), document, specPath))
+        val media = requestBody.definition.map("content").map(mediaType)
+        return SchemaNode(media.map("schema"), requestBody.document, requestBody.source)
+    }
+
     fun validate(element: JsonElement, schema: SchemaNode): List<String> = buildList {
         validateInto(element, schema, "$", this)
     }

@@ -35,7 +35,7 @@ export type FeedbackResource<T> = { value: T; etag: string | null };
 
 export interface FeedbackTransport {
   request<T>(path: string, options?: FeedbackRequestOptions): Promise<FeedbackResource<T>>;
-  requestBinary(path: string): Promise<FeedbackBinaryResource>;
+  requestBinary(path: string, options?: FeedbackBinaryRequestOptions): Promise<FeedbackBinaryResource>;
   getCapabilities(): Promise<FeedbackCapabilities>;
   getReviewContext(context: FeedbackHostContextV1, location: FeedbackLocationV1): Promise<FeedbackReviewContextV1>;
 }
@@ -44,7 +44,10 @@ export type FeedbackBinaryResource = {
   bytes: Uint8Array;
   contentType: string;
   etag: string | null;
+  contentRange: string | null;
 };
+
+export type FeedbackBinaryRequestOptions = { range?: string };
 
 export type FeedbackTransportOptions = {
   baseUrl: string;
@@ -123,10 +126,14 @@ export function createFeedbackTransport(options: FeedbackTransportOptions): Feed
     return value;
   };
 
-  const requestBinary = async (path: string): Promise<FeedbackBinaryResource> => {
+  const requestBinary = async (
+    path: string,
+    requestOptions: FeedbackBinaryRequestOptions = {}
+  ): Promise<FeedbackBinaryResource> => {
     const perform = async (token: string | null) => {
       const headers: Record<string, string> = {};
       if (token) headers.Authorization = `Bearer ${token}`;
+      if (requestOptions.range) headers.Range = requestOptions.range;
       return options.fetch(`${baseUrl}${normalizePath(path)}`, { method: "GET", headers });
     };
     let response = await perform(await options.getAccessToken());
@@ -141,7 +148,8 @@ export function createFeedbackTransport(options: FeedbackTransportOptions): Feed
     return {
       bytes: new Uint8Array(await response.arrayBuffer()),
       contentType: response.headers.get("Content-Type") ?? "application/octet-stream",
-      etag: response.headers.get("ETag")
+      etag: response.headers.get("ETag"),
+      contentRange: response.headers.get("Content-Range")
     };
   };
 

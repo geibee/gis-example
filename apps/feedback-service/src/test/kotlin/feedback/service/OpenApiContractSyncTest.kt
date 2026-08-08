@@ -24,7 +24,8 @@ import kotlin.test.assertTrue
 class OpenApiContractSyncTest {
     private val contractExemptRoutes = mapOf(
         "GET /health/live" to "コンテナ orchestrator 専用 liveness。公開 Feedback API の versioning 対象外",
-        "GET /health/ready" to "コンテナ orchestrator 専用 readiness。公開 Feedback API の versioning 対象外"
+        "GET /health/ready" to "コンテナ orchestrator 専用 readiness。公開 Feedback API の versioning 対象外",
+        "GET /metrics" to "内部監視基盤向けPrometheus endpoint。公開 Feedback API の versioning 対象外"
     )
 
     private val permissionExemptRoutes = mapOf(

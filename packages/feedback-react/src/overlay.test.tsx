@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FeedbackHostAdapter, FeedbackTransport } from "@feedback/core";
+import { createInMemoryFeedbackTelemetry, type FeedbackHostAdapter, type FeedbackTransport } from "@feedback/core";
 import { FeedbackOverlay, createLocalStorageParticipantAdapter, feedbackThreadMatchesLocation } from "./overlay";
 import { FeedbackProvider } from "./index";
 
@@ -70,6 +70,7 @@ describe("FeedbackOverlay", () => {
   it("capture失敗時もコメントだけを投稿する", async () => {
     const posted: unknown[] = [];
     const adapter = createAdapter({ captureEvidence: vi.fn(async () => { throw new Error("capture blocked"); }) });
+    const telemetry = createInMemoryFeedbackTelemetry();
     const transport = createTransport(async (path, options) => {
       if (path.endsWith("/threads") && options?.method === "POST") {
         posted.push(options.body);
@@ -79,7 +80,7 @@ describe("FeedbackOverlay", () => {
       throw new Error(`unexpected: ${path}`);
     });
     render(
-      <FeedbackProvider adapter={adapter} transport={transport}>
+      <FeedbackProvider adapter={adapter} transport={transport} telemetry={telemetry}>
         <FeedbackOverlay />
       </FeedbackProvider>
     );
@@ -91,6 +92,32 @@ describe("FeedbackOverlay", () => {
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toMatchObject({ body: "確認してください" });
     expect(posted[0]).not.toHaveProperty("evidence");
+    expect(telemetry.snapshot()).toMatchObject({ capture_failure: 1, post_success: 1 });
+  });
+
+  it("不確実な送信失敗の再試行で同じIdempotency-Keyとbodyを再利用する", async () => {
+    const attempts: Array<{ key?: string; body?: unknown }> = [];
+    const transport = createTransport(async (path, options) => {
+      if (path.endsWith("/threads") && options?.method === "POST") {
+        attempts.push({ key: options.idempotencyKey, body: options.body });
+        if (attempts.length === 1) throw new Error("response lost");
+        return { value: thread, etag: '"1"' };
+      }
+      if (path.endsWith("/threads")) return { value: { items: [] }, etag: null };
+      throw new Error(`unexpected: ${path}`);
+    });
+    render(
+      <FeedbackProvider adapter={createAdapter()} transport={transport} features={{ evidenceCapture: false }}>
+        <FeedbackOverlay />
+      </FeedbackProvider>
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "フィードバック" }));
+    fireEvent.change(screen.getByLabelText("コメント"), { target: { value: "再試行" } });
+    fireEvent.click(screen.getByRole("button", { name: "投稿する" }));
+    await waitFor(() => expect(attempts).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "投稿する" }));
+    await waitFor(() => expect(attempts).toHaveLength(2));
+    expect(attempts[1]).toEqual(attempts[0]);
   });
 
   it("deep link navigation完了後にthread drawerを開く", async () => {
@@ -223,7 +250,7 @@ function createTransport(
       apiMajorVersion: 1,
       manifestSchemaVersions: ["1"],
       targetSchemaVersions: ["1"],
-      evidence: { maxBytes: 1024, acceptedContentTypes: ["image/png"] },
+      evidence: { maxBytes: 1024, maxCountPerWorkspace: 1000, acceptedContentTypes: ["image/png"] },
       features: []
     })),
     getReviewContext: vi.fn(async () => ({

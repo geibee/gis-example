@@ -8,10 +8,13 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.AuthenticationStrategy
+import io.ktor.server.plugins.callid.callId
 import io.ktor.server.request.receive
+import io.ktor.server.plugins.origin
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
@@ -32,18 +35,48 @@ data class FeedbackDependencies(
     val evidenceKeyPrefix: String,
     val writeRateLimitPerMinute: Int,
     val notificationCipher: NotificationCipher,
-    val exportStorage: EvidenceStorage
+    val exportStorage: EvidenceStorage,
+    val evidenceMaxCountPerWorkspace: Int = 1000,
+    val writeRateLimitPerTenantPerMinute: Int = 1200,
+    val writeRateLimitPerIpPerMinute: Int = 240
 )
 
-fun Route.healthRoutes(database: FeedbackDatabase) {
+fun Route.healthRoutes(
+    database: FeedbackDatabase,
+    evidenceStorage: EvidenceStorage? = null,
+    evidencePrefix: String = "evidence/",
+    metrics: FeedbackServiceMetrics? = null
+) {
     get("/health/live") { call.respond(mapOf("status" to "live")) }
     get("/health/ready") {
         try {
             database.ping()
-            call.respond(mapOf("status" to "ready", "database" to "available"))
+            val storage = try {
+                evidenceStorage?.list(evidencePrefix)
+                "available"
+            } catch (_: Exception) {
+                "unavailable"
+            }
+            val notification = database.dependencyHealth()
+            val response = mapOf(
+                "status" to if (storage == "available") "ready" else "unavailable",
+                "database" to "available",
+                "storage" to storage,
+                "notification" to notification.notification,
+                "notificationFailedDeliveries" to notification.failedDeliveries.toString(),
+                "outboxLagSeconds" to notification.outboxLagSeconds.toString()
+            )
+            call.respond(if (storage == "available") HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable, response)
         } catch (_: Exception) {
-            call.respond(HttpStatusCode.ServiceUnavailable, mapOf("status" to "unavailable", "database" to "unavailable"))
+            call.respond(
+                HttpStatusCode.ServiceUnavailable,
+                mapOf("status" to "unavailable", "database" to "unavailable", "storage" to "unknown", "notification" to "unknown")
+            )
         }
+    }
+    get("/metrics") {
+        val body = metrics?.render() ?: database.let { FeedbackServiceMetrics(it).render() }
+        call.respondText(body, ContentType.parse("text/plain; version=0.0.4; charset=utf-8"))
     }
 }
 
@@ -55,7 +88,10 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                 database.ping()
                 call.respond(
                     FeedbackCapabilities(
-                        evidence = CapabilitiesEvidencePolicy(maxBytes = dependencies.evidenceMaxBytes),
+                        evidence = CapabilitiesEvidencePolicy(
+                            maxBytes = dependencies.evidenceMaxBytes,
+                            maxCountPerWorkspace = dependencies.evidenceMaxCountPerWorkspace
+                        ),
                         features = listOf(
                             "application-manifest",
                             "idempotency",
@@ -235,7 +271,7 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                     val principal = call.feedbackPrincipal()
                     val scope = database.resolveResourceScope(principal.userId, ScopeKind.SESSION, sessionId)
                     val context = authorize(database, call, FeedbackPermission.COMMENT, scope, hideExistence = true)
-                    database.enforceWriteRateLimit(scope, principal, dependencies.writeRateLimitPerMinute)
+                    enforceWriteRateLimit(database, dependencies, call, scope, principal)
                     val requestElement = call.receive<JsonElement>()
                     val request = decode(requestElement, FeedbackThreadCreateRequest.serializer())
                     val thread = database.createThread(
@@ -247,7 +283,9 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                         requestHash(requestElement),
                         dependencies.evidenceStorage,
                         dependencies.evidenceKeyPrefix,
-                        dependencies.evidenceMaxBytes
+                        dependencies.evidenceMaxBytes,
+                        dependencies.evidenceMaxCountPerWorkspace,
+                        call.callId ?: "unknown"
                     )
                     call.response.header(HttpHeaders.ETag, etag(thread.version))
                     auditMutation(database, call, context, "thread.create", "thread", thread.id)
@@ -278,7 +316,7 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                 val principal = call.feedbackPrincipal()
                 val scope = database.resolveResourceScope(principal.userId, ScopeKind.THREAD, threadId)
                 val context = authorize(database, call, FeedbackPermission.COMMENT, scope, hideExistence = true)
-                database.enforceWriteRateLimit(scope, principal, dependencies.writeRateLimitPerMinute)
+                enforceWriteRateLimit(database, dependencies, call, scope, principal)
                 val requestElement = call.receive<JsonElement>()
                 val request = decode(requestElement, FeedbackMessageCreateRequest.serializer())
                 val message = database.createMessage(
@@ -287,7 +325,8 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                     principal,
                     request,
                     validateIdempotencyKey(call.request.headers["Idempotency-Key"]),
-                    requestHash(requestElement)
+                    requestHash(requestElement),
+                    call.callId ?: "unknown"
                 )
                 call.response.header(HttpHeaders.ETag, etag(message.version))
                 auditMutation(database, call, context, "message.create", "message", message.id)
@@ -330,7 +369,8 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                     threadId,
                     principal,
                     parseEtag(call.request.headers[HttpHeaders.IfMatch]),
-                    request.status
+                    request.status,
+                    call.callId ?: "unknown"
                 )
                 call.response.header(HttpHeaders.ETag, etag(thread.version))
                 auditMutation(database, call, context, "thread.status.patch", "thread", thread.id)
@@ -344,11 +384,26 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                 val context = authorize(database, call, FeedbackPermission.READ, scope, hideExistence = true)
                 val evidence = database.getEvidence(threadId, dependencies.evidenceStorage)
                 auditMutation(database, call, context, "evidence.read", "thread", threadId)
+                call.response.header(HttpHeaders.AcceptRanges, "bytes")
                 call.response.header(
                     HttpHeaders.ContentDisposition,
                     ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, "feedback-evidence").toString()
                 )
-                call.respondBytes(evidence.bytes, ContentType.parse(evidence.contentType))
+                val requestedRange = call.request.headers[HttpHeaders.Range]
+                if (requestedRange == null) {
+                    call.respondBytes(evidence.bytes, ContentType.parse(evidence.contentType))
+                } else {
+                    val range = parseByteRange(requestedRange, evidence.bytes.size)
+                    call.response.header(
+                        HttpHeaders.ContentRange,
+                        "bytes ${range.first}-${range.last}/${evidence.bytes.size}"
+                    )
+                    call.respondBytes(
+                        evidence.bytes.copyOfRange(range.first, range.last + 1),
+                        ContentType.parse(evidence.contentType),
+                        HttpStatusCode.PartialContent
+                    )
+                }
             }
 
             post("/exports") {
@@ -362,7 +417,7 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                     validateKey(request.environmentKey, "environmentKey", 100)
                 )
                 val context = authorize(database, call, FeedbackPermission.MANAGE, scope)
-                database.enforceWriteRateLimit(scope, principal, dependencies.writeRateLimitPerMinute)
+                enforceWriteRateLimit(database, dependencies, call, scope, principal)
                 val job = database.createExport(
                     scope,
                     principal,
@@ -477,6 +532,24 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
             }
         }
     }
+}
+
+private fun enforceWriteRateLimit(
+    database: FeedbackDatabase,
+    dependencies: FeedbackDependencies,
+    call: ApplicationCall,
+    scope: ResourceScope,
+    principal: FeedbackPrincipal
+) {
+    database.enforceWriteRateLimit(
+        scope = scope,
+        principal = principal,
+        remoteAddress = call.request.origin.remoteHost,
+        principalLimitPerMinute = dependencies.writeRateLimitPerMinute,
+        tenantLimitPerMinute = dependencies.writeRateLimitPerTenantPerMinute,
+        ipLimitPerMinute = dependencies.writeRateLimitPerIpPerMinute,
+        requestId = call.callId ?: "unknown"
+    )
 }
 
 private suspend fun respondRetentionPolicy(database: FeedbackDatabase, call: ApplicationCall, patch: Boolean) {

@@ -1,6 +1,9 @@
 package feedback.service
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.postgresql.util.PGobject
 import java.sql.Connection
 import java.sql.ResultSet
@@ -182,6 +185,25 @@ fun FeedbackDatabase.workspacePermissions(userId: String, workspaceId: String): 
         workspaceId
     )
 
+fun FeedbackDatabase.isIssuerAllowed(
+    scope: ResourceScope,
+    issuer: String,
+    applicationOnly: Boolean
+): Boolean = dataSource.connection.use { connection ->
+    val sql = when {
+        !applicationOnly && scope.environmentId != null ->
+            "SELECT ? = ANY(allowed_issuers) FROM feedback.application_environments WHERE id = ?::uuid"
+        else ->
+            "SELECT coalesce(bool_or(? = ANY(allowed_issuers)), false) " +
+                "FROM feedback.application_environments WHERE application_id = ?::uuid"
+    }
+    connection.prepareStatement(sql).use { statement ->
+        statement.setString(1, issuer.trimEnd('/'))
+        statement.setString(2, if (!applicationOnly && scope.environmentId != null) scope.environmentId else scope.applicationId)
+        statement.executeQuery().use { result -> result.next() && result.getBoolean(1) }
+    }
+}
+
 private fun FeedbackDatabase.permissionQuery(sql: String, userId: String, resourceId: String): Set<FeedbackPermission> =
     dataSource.connection.use { connection ->
         connection.prepareStatement(sql).use { statement ->
@@ -224,9 +246,32 @@ fun FeedbackDatabase.recordAudit(
             statement.setString(8, resourceId)
             statement.setString(9, outcome)
             statement.setString(10, requestId)
-            statement.setString(11, changes?.toString())
+            statement.setString(11, sanitizeAuditChanges(changes)?.toString())
             statement.executeUpdate()
         }
+    }
+}
+
+/** 監査の全書き込み経路で、secret・本文・巨大値を同じ規則により無害化する。 */
+internal fun sanitizeAuditChanges(changes: JsonObject?): JsonObject? =
+    changes?.let { sanitizeAuditElement(it, null) as JsonObject }
+
+private val auditSensitiveKey = Regex(
+    "(?i)(password|passwd|token|secret|authorization|cookie|body|dataBase64|evidence|webhookEndpoint|privateKey)"
+)
+
+private fun sanitizeAuditElement(value: JsonElement, key: String?): JsonElement {
+    if (key != null && auditSensitiveKey.containsMatchIn(key)) return JsonPrimitive("[REDACTED]")
+    return when (value) {
+        is JsonObject -> JsonObject(value.mapValues { (childKey, child) -> sanitizeAuditElement(child, childKey) })
+        is JsonArray -> if (value.size <= 50) {
+            JsonArray(value.map { sanitizeAuditElement(it, null) })
+        } else {
+            JsonArray(value.take(50).map { sanitizeAuditElement(it, null) } + JsonPrimitive("[TRUNCATED:${value.size}]") )
+        }
+        is JsonPrimitive -> if (value.isString && value.content.length > 1000) {
+            JsonPrimitive("[SUMMARY:length=${value.content.length},sha256=${sha256(value.content.toByteArray())}]")
+        } else value
     }
 }
 
@@ -234,31 +279,106 @@ fun FeedbackDatabase.enforceWriteRateLimit(
     scope: ResourceScope,
     principal: FeedbackPrincipal,
     limitPerMinute: Int
+): Unit = enforceWriteRateLimit(
+    scope = scope,
+    principal = principal,
+    remoteAddress = "fixture",
+    principalLimitPerMinute = limitPerMinute,
+    tenantLimitPerMinute = Int.MAX_VALUE,
+    ipLimitPerMinute = Int.MAX_VALUE
+)
+
+fun FeedbackDatabase.enforceWriteRateLimit(
+    scope: ResourceScope,
+    principal: FeedbackPrincipal,
+    remoteAddress: String,
+    principalLimitPerMinute: Int,
+    tenantLimitPerMinute: Int,
+    ipLimitPerMinute: Int,
+    requestId: String = "unknown"
 ) {
-    val count = dataSource.connection.use { connection ->
-        connection.prepareStatement(
-            """
-            INSERT INTO feedback.rate_limit_counters (
-                tenant_id, principal_id, window_epoch, request_count
-            ) VALUES (?::uuid, ?, floor(extract(epoch FROM now()) / 60)::bigint, 1)
-            ON CONFLICT (tenant_id, principal_id, window_epoch)
-            DO UPDATE SET request_count = feedback.rate_limit_counters.request_count + 1
-            RETURNING request_count
-            """.trimIndent()
-        ).use { statement ->
-            statement.setString(1, scope.tenantId)
-            statement.setString(2, principal.subject)
-            statement.executeQuery().use { result -> result.next(); result.getInt(1) }
+    val dimensions = listOf(
+        RateLimitDimension("tenant", scope.tenantId, tenantLimitPerMinute),
+        RateLimitDimension("principal", principal.subject, principalLimitPerMinute),
+        RateLimitDimension("ip", remoteAddress, ipLimitPerMinute)
+    )
+    val exceeded = transaction { connection ->
+        dimensions.mapNotNull { dimension ->
+            val count = connection.prepareStatement(
+                """
+                INSERT INTO feedback.write_rate_limit_counters (
+                    tenant_id, dimension, subject_hash, window_epoch, request_count
+                ) VALUES (?::uuid, ?, ?, floor(extract(epoch FROM now()) / 60)::bigint, 1)
+                ON CONFLICT (tenant_id, dimension, subject_hash, window_epoch)
+                DO UPDATE SET request_count = feedback.write_rate_limit_counters.request_count + 1
+                RETURNING request_count
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, scope.tenantId)
+                statement.setString(2, dimension.name)
+                statement.setString(3, sha256(dimension.subject.toByteArray()))
+                statement.executeQuery().use { result -> result.next(); result.getInt(1) }
+            }
+            dimension.takeIf { count > it.limit }
         }
     }
-    if (count > limitPerMinute) {
+    if (exceeded.isNotEmpty()) {
+        recordOperationalMetric("rate_limit_rejections_total", scope.tenantId)
+        recordAudit(
+            scope = scope,
+            principalId = principal.subject,
+            action = "rate_limit",
+            resourceType = "workspace",
+            resourceId = scope.workspaceId,
+            outcome = "denied",
+            requestId = requestId,
+            changes = JsonObject(mapOf("dimensions" to JsonArray(exceeded.map { JsonPrimitive(it.name) })))
+        )
         throw FeedbackApiException(
             io.ktor.http.HttpStatusCode.TooManyRequests,
             "rate_limit.exceeded",
-            "write rate limit を超えました"
+            "${exceeded.joinToString { it.name }} write rate limit を超えました"
         )
     }
 }
+
+fun FeedbackDatabase.recordOperationalMetric(metricName: String, tenantId: String, increment: Long = 1) {
+    require(metricName.matches(Regex("[a-z][a-z0-9_]{0,99}"))) { "metric name が不正です" }
+    require(increment > 0) { "metric increment は正数です" }
+    dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            """
+            INSERT INTO feedback.operational_metric_counters (metric_name, tenant_id, value)
+            VALUES (?, ?::uuid, ?)
+            ON CONFLICT (metric_name, tenant_id)
+            DO UPDATE SET value = feedback.operational_metric_counters.value + EXCLUDED.value, updated_at = now()
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, metricName)
+            statement.setString(2, tenantId)
+            statement.setLong(3, increment)
+            statement.executeUpdate()
+        }
+    }
+}
+
+internal fun Connection.incrementOperationalMetric(metricName: String, tenantId: String, increment: Long = 1) {
+    prepareStatement(
+        """
+        INSERT INTO feedback.operational_metric_counters (metric_name, tenant_id, value)
+        VALUES (?, ?::uuid, ?)
+        ON CONFLICT (metric_name, tenant_id)
+        DO UPDATE SET value = feedback.operational_metric_counters.value + EXCLUDED.value, updated_at = now()
+        """.trimIndent()
+    ).use { statement ->
+        statement.setString(1, metricName)
+        statement.setString(2, tenantId)
+        statement.setLong(3, increment)
+        statement.executeUpdate()
+    }
+}
+
+private data class RateLimitDimension(val name: String, val subject: String, val limit: Int)
 
 internal fun ResultSet.toResourceScope(): ResourceScope = ResourceScope(
     tenantId = getString(1),

@@ -46,7 +46,7 @@ describe("FeedbackTransport", () => {
         apiMajorVersion: 2,
         manifestSchemaVersions: ["1"],
         targetSchemaVersions: ["1"],
-        evidence: { maxBytes: 1, acceptedContentTypes: ["image/png"] },
+        evidence: { maxBytes: 1, maxCountPerWorkspace: 1, acceptedContentTypes: ["image/png"] },
         features: []
       })
     });
@@ -80,7 +80,10 @@ describe("FeedbackTransport", () => {
         if (url.endsWith("/evidence")) {
           return {
             ...jsonResponse(null),
-            headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "image/png" : null },
+          headers: { get: (name: string) => ({
+            "content-type": "image/png",
+            "content-range": "bytes 0-2/3"
+          })[name.toLowerCase()] ?? null },
             arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer
           };
         }
@@ -93,7 +96,7 @@ describe("FeedbackTransport", () => {
       idempotencyKey: "idempotency-00001",
       ifMatch: '"2"'
     });
-    const binary = await transport.requestBinary("/threads/t1/evidence");
+    const binary = await transport.requestBinary("/threads/t1/evidence", { range: "bytes=0-2" });
     expect(calls[0].headers).toMatchObject({
       "Content-Type": "application/merge-patch+json",
       "Idempotency-Key": "idempotency-00001",
@@ -101,5 +104,7 @@ describe("FeedbackTransport", () => {
     });
     expect([...binary.bytes]).toEqual([1, 2, 3]);
     expect(binary.contentType).toBe("image/png");
+    expect(binary.contentRange).toBe("bytes 0-2/3");
+    expect(calls[1].headers).toMatchObject({ Range: "bytes=0-2" });
   });
 });

@@ -45,7 +45,7 @@ for package_name in "${packages[@]}"; do
     const required = ["dist/index.js", "dist/index.d.ts", "package.json", "README.md", "CHANGELOG.md"];
     if (["@feedback/react", "@feedback/admin-react"].includes(process.env.PACKAGE_NAME)) required.push("dist/styles.css");
     if (process.env.PACKAGE_NAME === "@feedback/contracts") {
-      required.push("openapi.yaml", "schemas/application-manifest.schema.json", "schemas/location.schema.json", "schemas/target.schema.json", "schemas/webhook-event.schema.json");
+      required.push("openapi.yaml", "kotlin/FeedbackContractTypes.kt", "schemas/application-manifest.schema.json", "schemas/location.schema.json", "schemas/target.schema.json", "schemas/webhook-event.schema.json");
     }
     if (required.some((path) => !files.has(path))) process.exit(1);
     process.stdout.write(result.filename);
@@ -120,3 +120,49 @@ for index in "${!react_versions[@]}"; do
   )
   echo "[feedback-package] PASS: clean Vite React $react_version fixture"
 done
+
+# alpha tarballと同じ公開surfaceを、version/internal dependencyだけ1.0.0へ昇格した候補で再検証する。
+# publishは行わず、pre-release consumer sourceがstable候補へ無変更で移れることだけを確認する。
+stable_tarball_dir="$feedback_package_tmp/stable-tarballs"
+mkdir -p "$stable_tarball_dir"
+declare -A stable_tarballs
+for package_name in "${packages[@]}"; do
+  package_key=${package_name#@feedback/}
+  candidate="$feedback_package_tmp/stable-$package_key"
+  mkdir -p "$candidate"
+  tar -xzf "${tarballs[$package_key]}" -C "$candidate" --strip-components=1
+  node -e '
+    const fs = require("node:fs");
+    const file = process.argv[1];
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    value.version = "1.0.0";
+    for (const section of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+      for (const name of Object.keys(value[section] || {})) {
+        if (name.startsWith("@feedback/")) value[section][name] = "1.0.0";
+      }
+    }
+    fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+  ' "$candidate/package.json"
+  stable_pack=$(npm pack "$candidate" --pack-destination "$stable_tarball_dir" --json)
+  stable_file=$(PACK_RESULT="$stable_pack" node -e 'const [result] = JSON.parse(process.env.PACK_RESULT); process.stdout.write(result.filename)')
+  stable_tarballs[$package_key]="$stable_tarball_dir/$stable_file"
+done
+
+stable_fixture="$feedback_package_tmp/stable-consumer"
+cp -R tests/fixtures/feedback-sdk-vite "$stable_fixture"
+(
+  cd "$stable_fixture"
+  npm install --ignore-scripts --no-audit --no-fund \
+    react@19.1.1 react-dom@19.1.1 @types/react@19.1.9 @types/react-dom@19.1.7 \
+    typescript@5.9.3 vite@5.4.21 @vitejs/plugin-react@4.7.0 vitest@4.1.9 jsdom@29.1.1 \
+    @testing-library/react@16.3.2 react-router-dom@6.30.1 maplibre-gl@5.24.0
+  npm install --ignore-scripts --no-audit --no-fund \
+    "${stable_tarballs[contracts]}" "${stable_tarballs[core]}" "${stable_tarballs[react]}" \
+    "${stable_tarballs[maplibre]}" "${stable_tarballs[admin-react]}"
+  npm run typecheck
+  npm run typecheck:maplibre
+  npm run typecheck:admin
+  npm run build
+  npm run test
+)
+echo "[feedback-package] PASS: prerelease consumer → stable 1.0.0 candidate semver compatibility"

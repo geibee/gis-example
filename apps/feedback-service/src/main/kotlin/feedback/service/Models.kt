@@ -28,6 +28,7 @@ data class FeedbackCapabilities(
 @Serializable
 data class CapabilitiesEvidencePolicy(
     val maxBytes: Long,
+    val maxCountPerWorkspace: Int,
     val acceptedContentTypes: List<String> = listOf("image/png", "image/webp")
 )
 
@@ -305,6 +306,7 @@ data class StoredExport(
 data class NotificationWebhookEvent(
     val schemaVersion: String = "1",
     val eventId: String,
+    val requestId: String = "unknown",
     val eventType: String,
     val occurredAt: String,
     val tenantKey: String,
@@ -335,6 +337,10 @@ data class StoredEvidence(
     val contentType: String,
     val bytes: ByteArray
 )
+
+data class ByteRange(val first: Int, val last: Int) {
+    val length: Int get() = last - first + 1
+}
 
 data class IdempotentResponse(
     val status: Int,

@@ -10,10 +10,13 @@ HTTP API、notification worker、export worker、retention worker、bootstrap、
 
 - backup/restore 手順と対象 database/bucket を人手で確認する。
 - Flyway は version 順に適用し、checksum 不一致を修正 migration で回避しない。
-- `/health/live`、`/health/ready`、`/feedback/v1/capabilities` を確認する。
+- `/health/live`、`/health/ready`、`/feedback/v1/capabilities` を確認する。readiness の
+  `database` / `storage` は必須、`notification: degraded` は API を停止しない非同期系の要調査状態として扱う。
+- 内部ネットワーク限定の `/metrics` を収集する。公開 ingress では `/metrics` を遮断する。
 - API error/latency、投稿成功、storage failure、outbox lag、delivery failure、export/purge backlog、tenant 使用量を監視する。
 - notification/export/retention worker は claim lease と retry を利用し、同時実行数を小さく始める。
 - structured log に request/tenant/application/environment/workspace/event ID を残し、本文・token・evidence を出さない。
+  request ID は監査と outbox payload まで同じ値で相関する。
 
 ## incident と rollback
 

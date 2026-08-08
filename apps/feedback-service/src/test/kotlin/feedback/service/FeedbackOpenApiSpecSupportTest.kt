@@ -34,4 +34,15 @@ class FeedbackOpenApiSpecSupportTest {
             FeedbackOpenApiSpecSupport.validate(buildJsonObject {}, schema)
         }
     }
+
+
+    @Test
+    fun `request body schemaを専用OpenAPIから解決する`() {
+        val valid = serviceJson.parseToJsonElement("""{"body":"返信","participantName":null}""")
+        val violations = FeedbackOpenApiSpecSupport.validate(
+            valid,
+            FeedbackOpenApiSpecSupport.requestSchema("post", "/threads/{threadId}/messages")
+        )
+        assertTrue(violations.isEmpty(), violations.joinToString("\n"))
+    }
 }

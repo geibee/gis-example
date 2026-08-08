@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import org.slf4j.MDC
 
 fun main() {
     val database = FeedbackDatabase.create(DatabaseSettings.fromEnv())
@@ -47,7 +48,9 @@ class NotificationWorker(
 
     fun runOnce(): Boolean {
         val delivery = claim() ?: return false
-        deliver(delivery)
+        MDC.putCloseable("eventId", delivery.id).use {
+            deliver(delivery)
+        }
         return true
     }
 
@@ -58,7 +61,8 @@ class NotificationWorker(
                    s.webhook_endpoint_ciphertext, s.webhook_endpoint_nonce,
                    s.include_body, s.include_evidence, o.retry_cycle,
                    t.location::text, e.base_url, e.deep_link_thread_parameter, m.manifest::text,
-                   EXISTS (SELECT 1 FROM feedback.review_evidence evidence WHERE evidence.thread_id = t.id)
+                   EXISTS (SELECT 1 FROM feedback.review_evidence evidence WHERE evidence.thread_id = t.id),
+                   o.tenant_id::text
             FROM feedback.notification_outbox o
             JOIN feedback.notification_settings s ON s.workspace_id = o.workspace_id
             LEFT JOIN feedback.feedback_threads t ON t.id = NULLIF(o.payload->>'threadId', '')::uuid
@@ -104,7 +108,8 @@ class NotificationWorker(
                     endpoint = notificationCipher.decrypt(result.getBytes(4), result.getBytes(5)),
                     includeBody = result.getBoolean(6),
                     includeEvidence = result.getBoolean(7),
-                    retryCycle = result.getInt(8)
+                    retryCycle = result.getInt(8),
+                    tenantId = result.getString(14)
                 )
                 connection.prepareStatement(
                     """
@@ -180,6 +185,7 @@ class NotificationWorker(
                 statement.setString(4, delivery.id)
                 statement.executeUpdate()
             }
+            delivery.tenantId?.let { connection.incrementOperationalMetric("delivery_failures_total", it) }
         }
     }
 }
@@ -267,5 +273,6 @@ data class ClaimedDelivery(
     val endpoint: String,
     val includeBody: Boolean,
     val includeEvidence: Boolean,
-    val retryCycle: Int
+    val retryCycle: Int,
+    val tenantId: String? = null
 )

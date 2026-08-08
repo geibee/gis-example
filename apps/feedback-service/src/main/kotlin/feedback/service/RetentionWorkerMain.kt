@@ -57,6 +57,9 @@ class RetentionWorker(
             connection.prepareStatement(
                 "DELETE FROM feedback.rate_limit_counters WHERE window_epoch < floor(extract(epoch FROM now()) / 60)::bigint - 2"
             ).use { it.executeUpdate() }
+            connection.prepareStatement(
+                "DELETE FROM feedback.write_rate_limit_counters WHERE window_epoch < floor(extract(epoch FROM now()) / 60)::bigint - 2"
+            ).use { it.executeUpdate() }
         }
     }
 

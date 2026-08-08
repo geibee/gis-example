@@ -422,6 +422,7 @@ export interface components {
             targetSchemaVersions: "1"[];
             evidence: {
                 maxBytes: number;
+                maxCountPerWorkspace: number;
                 acceptedContentTypes: ("image/png" | "image/webp")[];
             };
             features: string[];
@@ -807,6 +808,7 @@ export interface components {
             schemaVersion: "1";
             /** Format: uuid */
             eventId: string;
+            requestId: string;
             /** @enum {unknown} */
             eventType: "feedback.thread.created.v1" | "feedback.message.created.v1" | "feedback.thread.resolved.v1" | "feedback.thread.reopened.v1";
             /** Format: date-time */
@@ -914,6 +916,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["FeedbackProblem"];
             };
         };
+        /** @description evidence size の範囲外または複数 byte range */
+        RangeNotSatisfiable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["FeedbackProblem"];
+            };
+        };
     };
     parameters: {
         ApplicationKey: string;
@@ -931,6 +942,7 @@ export interface components {
         IdempotencyKey: string;
         IfMatch: string;
         IfMatchOptional: string;
+        Range: string;
     };
     requestBodies: never;
     headers: {
@@ -1444,7 +1456,9 @@ export interface operations {
     getFeedbackEvidence: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                Range?: components["parameters"]["Range"];
+            };
             path: {
                 threadId: components["parameters"]["ThreadId"];
             };
@@ -1463,9 +1477,22 @@ export interface operations {
                     "image/webp": string;
                 };
             };
+            /** @description Rangeで指定したprivate evidenceの一部 */
+            206: {
+                headers: {
+                    "Content-Range"?: string;
+                    "Accept-Ranges"?: "bytes";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            416: components["responses"]["RangeNotSatisfiable"];
         };
     };
     createFeedbackExport: {
@@ -1729,6 +1756,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            416: components["responses"]["RangeNotSatisfiable"];
         };
     };
     deleteFeedbackWorkspaceMembership: {

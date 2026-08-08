@@ -3,6 +3,7 @@ package feedback.service
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.callid.callId
+import io.ktor.util.AttributeKey
 import kotlinx.serialization.json.JsonObject
 
 internal val feedbackRoutePolicies: Set<RoutePolicy> = setOf(
@@ -43,6 +44,11 @@ data class AuthorizedContext(
     val permissions: Set<FeedbackPermission>
 )
 
+internal val auditTenantKey = AttributeKey<String>("feedback.tenant")
+internal val auditApplicationKey = AttributeKey<String>("feedback.application")
+internal val auditEnvironmentKey = AttributeKey<String>("feedback.environment")
+internal val auditWorkspaceKey = AttributeKey<String>("feedback.workspace")
+
 internal fun authorize(
     db: FeedbackDatabase,
     call: ApplicationCall,
@@ -58,10 +64,15 @@ internal fun authorize(
         db.workspacePermissions(principal.userId, requireNotNull(scope.workspaceId))
     }
     val tokenScopeMatches = principal.tokenScope?.matches(scope, applicationOnly) ?: true
+    val issuerAllowed = db.isIssuerAllowed(scope, principal.issuer, applicationOnly)
     val permissions = databasePermissions.expanded().let { expanded ->
         principal.tokenScope?.permissions?.expanded()?.let(expanded::intersect) ?: expanded
     }
-    val allowed = tokenScopeMatches && permission in permissions
+    val allowed = issuerAllowed && tokenScopeMatches && permission in permissions
+    call.attributes.put(auditTenantKey, scope.tenantKey)
+    call.attributes.put(auditApplicationKey, scope.applicationKey)
+    scope.environmentKey?.let { call.attributes.put(auditEnvironmentKey, it) }
+    scope.externalWorkspaceKey?.let { call.attributes.put(auditWorkspaceKey, it) }
     db.recordAudit(
         scope = scope,
         principalId = principal.subject,

@@ -163,14 +163,32 @@ data class ServiceSettings(
     val tokenExchange: TokenExchangeSettings?,
     val notificationCipher: NotificationCipher,
     val evidenceStorage: EvidenceStorageSettings,
-    val exportStorage: ExportStorageSettings
+    val exportStorage: ExportStorageSettings,
+    val evidenceMaxCountPerWorkspace: Int = 1000,
+    val writeRateLimitPerTenantPerMinute: Int = 1200,
+    val writeRateLimitPerIpPerMinute: Int = 240
 ) {
     companion object {
         fun fromEnv(): ServiceSettings = ServiceSettings(
             port = (System.getenv("FEEDBACK_PORT") ?: "8090").toInt(),
             evidenceMaxBytes = (System.getenv("FEEDBACK_EVIDENCE_MAX_BYTES") ?: "10485760").toLong(),
+            evidenceMaxCountPerWorkspace =
+                (System.getenv("FEEDBACK_EVIDENCE_MAX_COUNT_PER_WORKSPACE") ?: "1000").toInt()
+                    .also { require(it in 1..1_000_000) {
+                        "FEEDBACK_EVIDENCE_MAX_COUNT_PER_WORKSPACE は 1..1000000 です"
+                    } },
             writeRateLimitPerMinute = (System.getenv("FEEDBACK_WRITE_RATE_LIMIT_PER_MINUTE") ?: "120").toInt()
                 .also { require(it in 1..10000) { "FEEDBACK_WRITE_RATE_LIMIT_PER_MINUTE は 1..10000 です" } },
+            writeRateLimitPerTenantPerMinute =
+                (System.getenv("FEEDBACK_WRITE_RATE_LIMIT_PER_TENANT_PER_MINUTE") ?: "1200").toInt()
+                    .also { require(it in 1..100_000) {
+                        "FEEDBACK_WRITE_RATE_LIMIT_PER_TENANT_PER_MINUTE は 1..100000 です"
+                    } },
+            writeRateLimitPerIpPerMinute =
+                (System.getenv("FEEDBACK_WRITE_RATE_LIMIT_PER_IP_PER_MINUTE") ?: "240").toInt()
+                    .also { require(it in 1..100_000) {
+                        "FEEDBACK_WRITE_RATE_LIMIT_PER_IP_PER_MINUTE は 1..100000 です"
+                    } },
             database = DatabaseSettings.fromEnv(),
             oidc = OidcSettings.fromEnv(),
             tokenExchange = TokenExchangeSettings.fromEnvOrNull(),

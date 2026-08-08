@@ -7,6 +7,7 @@
   "required": [
     "schemaVersion",
     "eventId",
+    "requestId",
     "eventType",
     "occurredAt",
     "tenantKey",
@@ -21,6 +22,7 @@
   "properties": {
     "schemaVersion": { "const": "1" },
     "eventId": { "type": "string", "format": "uuid" },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 200 },
     "eventType": {
       "enum": [
         "feedback.thread.created.v1",

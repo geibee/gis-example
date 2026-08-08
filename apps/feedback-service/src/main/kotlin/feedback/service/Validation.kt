@@ -304,6 +304,36 @@ internal fun validateRetentionPolicy(value: FeedbackRetentionPolicy) {
     if (value.exportRetentionDays !in 1..365) badRequest("exportRetentionDays が範囲外です")
 }
 
+internal fun parseByteRange(raw: String, totalBytes: Int): ByteRange {
+    if (totalBytes <= 0 || !raw.startsWith("bytes=") || ',' in raw) rangeNotSatisfiable(totalBytes)
+    val value = raw.removePrefix("bytes=").trim()
+    val separator = value.indexOf('-')
+    if (separator < 0) rangeNotSatisfiable(totalBytes)
+    val firstRaw = value.substring(0, separator)
+    val lastRaw = value.substring(separator + 1)
+    val range = when {
+        firstRaw.isEmpty() -> {
+            val suffixLength = lastRaw.toIntOrNull()?.takeIf { it > 0 } ?: rangeNotSatisfiable(totalBytes)
+            val first = (totalBytes - suffixLength).coerceAtLeast(0)
+            ByteRange(first, totalBytes - 1)
+        }
+        else -> {
+            val first = firstRaw.toIntOrNull()?.takeIf { it >= 0 } ?: rangeNotSatisfiable(totalBytes)
+            val last = if (lastRaw.isEmpty()) totalBytes - 1 else
+                lastRaw.toIntOrNull()?.takeIf { it >= first } ?: rangeNotSatisfiable(totalBytes)
+            if (first >= totalBytes) rangeNotSatisfiable(totalBytes)
+            ByteRange(first, last.coerceAtMost(totalBytes - 1))
+        }
+    }
+    return range
+}
+
+private fun rangeNotSatisfiable(totalBytes: Int): Nothing = throw FeedbackApiException(
+    HttpStatusCode.RequestedRangeNotSatisfiable,
+    "evidence.range_not_satisfiable",
+    "要求された byte range は evidence size $totalBytes の範囲外です"
+)
+
 internal fun requestHash(element: JsonElement): String = sha256(serviceJson.encodeToString(JsonElement.serializer(), element).toByteArray())
 
 internal fun sha256(bytes: ByteArray): String =

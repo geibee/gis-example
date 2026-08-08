@@ -11,6 +11,7 @@ import {
 } from "react";
 import type {
   FeedbackHostAdapter,
+  FeedbackTelemetry,
   FeedbackTransport
 } from "@feedback/core";
 import type {
@@ -76,6 +77,7 @@ export type FeedbackProviderProps = {
   onUnavailable?: (error: unknown) => void;
   requestTimeoutMs?: number;
   contextRetryCount?: number;
+  telemetry?: FeedbackTelemetry;
 };
 
 export type FeedbackRuntimeState = "loading" | "ready" | "unavailable";
@@ -91,6 +93,7 @@ export type FeedbackContextValue = {
   messages: FeedbackMessages;
   features: FeedbackFeatureFlags;
   portalTarget: Element | DocumentFragment | null;
+  telemetry?: FeedbackTelemetry;
   refresh(): Promise<void>;
 };
 
@@ -106,7 +109,8 @@ export function FeedbackProvider({
   portalTarget = null,
   onUnavailable,
   requestTimeoutMs = 5000,
-  contextRetryCount = 1
+  contextRetryCount = 1,
+  telemetry
 }: FeedbackProviderProps) {
   const [state, setState] = useState<FeedbackRuntimeState>("loading");
   const [hostContext, setHostContext] = useState<FeedbackHostContextV1 | null>(null);
@@ -150,9 +154,10 @@ export function FeedbackProvider({
       setReviewContext(null);
       setError(nextError);
       setState("unavailable");
+      telemetry?.increment("service_unavailable", hostContextDimensions(adapter));
       onUnavailable?.(nextError);
     }
-  }, [adapter, contextRetryCount, onUnavailable, requestTimeoutMs, transport]);
+  }, [adapter, contextRetryCount, onUnavailable, requestTimeoutMs, telemetry, transport]);
 
   useEffect(() => {
     void refresh();
@@ -169,10 +174,24 @@ export function FeedbackProvider({
     messages,
     features,
     portalTarget,
-    refresh
-  }), [adapter, error, features, hostContext, location, messages, portalTarget, refresh, reviewContext, state, transport]);
+    refresh,
+    telemetry
+  }), [adapter, error, features, hostContext, location, messages, portalTarget, refresh, reviewContext, state, telemetry, transport]);
 
   return <FeedbackContext.Provider value={value}>{children}</FeedbackContext.Provider>;
+}
+
+function hostContextDimensions(adapter: FeedbackHostAdapter) {
+  try {
+    const context = adapter.getContext();
+    return {
+      applicationKey: context.applicationKey,
+      environmentKey: context.environmentKey,
+      externalWorkspaceKey: context.externalWorkspaceKey
+    };
+  } catch {
+    return {};
+  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
@@ -236,6 +255,7 @@ export type {
   FeedbackEvidenceProvider,
   FeedbackEvidenceRequest,
   FeedbackHostAdapter,
+  FeedbackTelemetry,
   FeedbackTransport
 } from "@feedback/core";
 export type {

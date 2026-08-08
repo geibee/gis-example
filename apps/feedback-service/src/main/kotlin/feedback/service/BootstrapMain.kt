@@ -94,6 +94,10 @@ data class BootstrapResult(
 )
 
 fun FeedbackDatabase.bootstrap(input: BootstrapInput): BootstrapResult = transaction { connection ->
+    validateServiceUrl(input.environmentBaseUrl, "base URL")
+    validateServiceUrl(input.issuer, "issuer")
+    require(input.allowedOrigins.isNotEmpty()) { "allowedOrigins は 1 件以上必要です" }
+    input.allowedOrigins.forEach(::validateOrigin)
     val tenantId = upsertReturningId(
         connection,
         """
@@ -127,10 +131,15 @@ fun FeedbackDatabase.bootstrap(input: BootstrapInput): BootstrapResult = transac
     val environmentId = connection.prepareStatement(
         """
         INSERT INTO feedback.application_environments (
-            id, application_id, environment_key, base_url, allowed_origins
-        ) VALUES (?::uuid, ?::uuid, ?, ?, ?)
+            id, application_id, environment_key, base_url, allowed_origins, allowed_issuers
+        ) VALUES (?::uuid, ?::uuid, ?, ?, ?, ARRAY[?]::text[])
         ON CONFLICT (application_id, environment_key) DO UPDATE SET
-            base_url = EXCLUDED.base_url, allowed_origins = EXCLUDED.allowed_origins
+            base_url = EXCLUDED.base_url,
+            allowed_origins = EXCLUDED.allowed_origins,
+            allowed_issuers = (
+                SELECT array_agg(DISTINCT value ORDER BY value)
+                FROM unnest(feedback.application_environments.allowed_issuers || EXCLUDED.allowed_issuers) value
+            )
         RETURNING id::text
         """.trimIndent()
     ).use { statement ->
@@ -139,6 +148,7 @@ fun FeedbackDatabase.bootstrap(input: BootstrapInput): BootstrapResult = transac
         statement.setString(3, input.environmentKey)
         statement.setString(4, input.environmentBaseUrl)
         statement.setArray(5, connection.createArrayOf("text", input.allowedOrigins.toTypedArray()))
+        statement.setString(6, input.issuer.trimEnd('/'))
         statement.executeQuery().use { result -> result.next(); result.getString(1) }
     }
     val workspaceId = connection.prepareStatement(
@@ -211,7 +221,7 @@ private fun upsertReturningId(connection: java.sql.Connection, sql: String, vara
         statement.executeQuery().use { result -> result.next(); result.getString(1) }
     }
 
-private fun validateOrigin(raw: String): String {
+internal fun validateOrigin(raw: String): String {
     val uri = URI(raw)
     val localHttp = uri.scheme == "http" && uri.host in setOf("localhost", "127.0.0.1", "::1")
     require((uri.scheme == "https" || localHttp) && uri.host != null &&
@@ -221,7 +231,7 @@ private fun validateOrigin(raw: String): String {
     return raw.trimEnd('/')
 }
 
-private fun validateServiceUrl(raw: String, name: String): String {
+internal fun validateServiceUrl(raw: String, name: String): String {
     val uri = URI(raw)
     val localHttp = uri.scheme == "http" && uri.host in setOf("localhost", "127.0.0.1", "::1")
     require((uri.scheme == "https" || localHttp) && uri.host != null && uri.userInfo == null && uri.fragment == null) {

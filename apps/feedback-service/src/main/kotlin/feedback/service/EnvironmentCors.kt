@@ -12,7 +12,12 @@ import io.ktor.server.request.httpMethod
 
 fun Application.installEnvironmentCors(database: FeedbackDatabase) {
     intercept(ApplicationCallPipeline.Plugins) {
-        val origin = call.request.headers[HttpHeaders.Origin] ?: return@intercept
+        val rawOrigin = call.request.headers[HttpHeaders.Origin] ?: return@intercept
+        val origin = try {
+            validateOrigin(rawOrigin)
+        } catch (_: IllegalArgumentException) {
+            throw FeedbackApiException(HttpStatusCode.Forbidden, "cors.origin_invalid", "origin が不正です")
+        }
         if (!database.isAllowedOrigin(origin)) {
             throw FeedbackApiException(HttpStatusCode.Forbidden, "cors.origin_denied", "登録されていない origin です")
         }
@@ -20,7 +25,7 @@ fun Application.installEnvironmentCors(database: FeedbackDatabase) {
         call.response.header(HttpHeaders.Vary, HttpHeaders.Origin)
         call.response.header(HttpHeaders.AccessControlExposeHeaders, "ETag, X-Request-ID")
         if (call.request.httpMethod == HttpMethod.Options) {
-            call.response.header(HttpHeaders.AccessControlAllowMethods, "GET, POST, PUT, PATCH, OPTIONS")
+            call.response.header(HttpHeaders.AccessControlAllowMethods, "GET, POST, PUT, PATCH, DELETE, OPTIONS")
             call.response.header(
                 HttpHeaders.AccessControlAllowHeaders,
                 "Authorization, Content-Type, If-Match, Idempotency-Key, X-Request-ID"

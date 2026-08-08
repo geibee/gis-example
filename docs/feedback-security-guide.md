@@ -1,6 +1,7 @@
 # Feedback SDK / Service セキュリティガイド
 
-- OIDC は issuer/audience/signature/expiry を検証する。異なる認証基盤では、HttpOnly host session を検証する
+- OIDC は issuer/audience/signature/expiry を検証し、application environment の issuer allowlist も通す。
+  異なる認証基盤では、HttpOnly host session を検証する
   broker が短寿命・feedback audience 限定 token を発行する。業務 API token、任意の user/role header は信用しない。
 - JIT user 作成と membership 付与を分離し、未知 user/workspace は既定 deny とする。resource ID 経由の
   cross-workspace access は 404、permission 不足は 403 とする。
@@ -14,6 +15,8 @@
   package は inline secret/credential を含めず、Admin Console の `VITE_*` に secret を置かない。
 - audit は allow/deny/mutate/evidence read/export を追記専用で記録し、password/token/secret/body/evidence を mask、
   巨大値を hash 要約する。
+- write rate limit は tenant/principal/IP を独立に数え、counter の principal/IP は SHA-256 だけを保存する。
+  `/metrics` は内部運用 endpoint として公開 ingress から遮断する。
 
 依存更新時は lockfile audit、SBOM、gitleaks、container scan を nightly で確認する。脆弱性を自動 `--force` 更新せず、
 互換試験と影響範囲を確認して更新する。実 penetration test、外部 IdP/webhook/bucket 接続は個別承認対象である。
