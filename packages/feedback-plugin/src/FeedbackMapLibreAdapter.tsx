@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import type { Map as MapLibreMap, MapMouseEvent, Marker } from "maplibre-gl";
 import type { FeedbackThread } from "./contracts";
 import { useFeedbackThreadsQuery, useOpenReviewSessionQuery } from "./queries";
@@ -23,28 +23,49 @@ export function FeedbackMapLibreAdapter({
   layers,
   styleLayersByLayerId
 }: FeedbackMapLibreAdapterProps) {
-  const { mode, selectTarget, openThread } = useFeedbackState();
+  const { mode, selectTarget, showContextMenu, openThread } = useFeedbackState();
   const sessionQuery = useOpenReviewSessionQuery();
   const threadsQuery = useFeedbackThreadsQuery(sessionQuery.data?.id ?? null);
   const threads = threadsQuery.data ?? [];
 
+  const resolveTarget = useCallback((event: MapMouseEvent) => {
+    const queryLayerIds = Object.values(styleLayersByLayerId)
+      .flat()
+      .filter((id) => Boolean(map.getLayer(id)));
+    const featureIdPropertyBySource = Object.fromEntries(
+      layers.flatMap((layer) => layer.featureIdColumn ? [[layer.id, layer.featureIdColumn]] : [])
+    );
+    return resolveMapTarget(map, event, { layers: queryLayerIds, featureIdPropertyBySource });
+  }, [layers, map, styleLayersByLayerId]);
+
   useEffect(() => {
     if (mode !== "picking") return;
     const handleFeedbackClick = (event: MapMouseEvent) => {
-      const queryLayerIds = Object.values(styleLayersByLayerId)
-        .flat()
-        .filter((id) => Boolean(map.getLayer(id)));
-      const featureIdPropertyBySource = Object.fromEntries(
-        layers.flatMap((layer) => layer.featureIdColumn ? [[layer.id, layer.featureIdColumn]] : [])
-      );
       event.preventDefault();
-      void selectTarget(resolveMapTarget(map, event, { layers: queryLayerIds, featureIdPropertyBySource }));
+      void selectTarget(resolveTarget(event));
     };
     map.on("click", handleFeedbackClick);
     return () => {
       map.off("click", handleFeedbackClick);
     };
-  }, [layers, map, mode, selectTarget, styleLayersByLayerId]);
+  }, [map, mode, resolveTarget, selectTarget]);
+
+  useEffect(() => {
+    if (mode !== "idle" || !sessionQuery.data) return;
+    const handleFeedbackContextMenu = (event: MapMouseEvent) => {
+      event.preventDefault();
+      event.originalEvent.preventDefault();
+      showContextMenu({
+        clientX: event.originalEvent.clientX,
+        clientY: event.originalEvent.clientY,
+        target: resolveTarget(event)
+      });
+    };
+    map.on("contextmenu", handleFeedbackContextMenu);
+    return () => {
+      map.off("contextmenu", handleFeedbackContextMenu);
+    };
+  }, [map, mode, resolveTarget, sessionQuery.data, showContextMenu]);
 
   useEffect(() => {
     let active = true;

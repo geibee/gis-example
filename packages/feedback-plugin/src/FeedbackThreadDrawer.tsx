@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { FeedbackMessage, FeedbackThread } from "./contracts";
+import { useDismissiblePanel } from "./dismiss";
 import { errorMessage, PanelHeader } from "./FeedbackOverlay";
 import { useFeedbackPluginContext } from "./plugin-context";
 import {
@@ -13,17 +14,10 @@ import {
 
 export function FeedbackThreadDrawer({ threadId, onClose }: { threadId: string; onClose: () => void }) {
   const threadQuery = useFeedbackThreadQuery(threadId);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  const panelRef = useDismissiblePanel<HTMLElement>(onClose);
 
   return (
-    <aside className="wfg-feedback-panel wfg-feedback-thread-drawer" role="dialog" aria-label="フィードバックスレッド">
+    <aside ref={panelRef} className="wfg-feedback-panel wfg-feedback-thread-drawer" role="dialog" aria-label="フィードバックスレッド">
       {threadQuery.isPending ? (
         <PanelHeader title="コメントを読み込んでいます…" onClose={onClose} />
       ) : threadQuery.isError ? (

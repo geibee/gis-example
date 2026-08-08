@@ -20,12 +20,21 @@ export type PickedFeedbackTarget = {
   captureError: string | null;
 };
 
+type FeedbackContextMenu = {
+  clientX: number;
+  clientY: number;
+  target: FeedbackTarget;
+};
+
 type FeedbackState = {
   mode: FeedbackMode;
   picked: PickedFeedbackTarget | null;
   activeThreadId: string | null;
+  contextMenu: FeedbackContextMenu | null;
   startPicking: () => void;
   selectTarget: (target: FeedbackTarget) => Promise<void>;
+  showContextMenu: (menu: FeedbackContextMenu) => void;
+  closeContextMenu: () => void;
   openThread: (threadId: string) => void;
   closeThread: () => void;
   reset: () => void;
@@ -38,6 +47,7 @@ export function FeedbackStateProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<FeedbackMode>("idle");
   const [picked, setPicked] = useState<PickedFeedbackTarget | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<FeedbackContextMenu | null>(null);
   const modeRef = useRef<FeedbackMode>("idle");
   const generation = useRef(0);
   const activeThreadProjectId = useRef<string | null>(null);
@@ -49,11 +59,13 @@ export function FeedbackStateProvider({ children }: { children: ReactNode }) {
   const reset = useCallback(() => {
     generation.current += 1;
     setPicked(null);
+    setContextMenu(null);
     transition("idle");
   }, [transition]);
   const startPicking = useCallback(() => {
     generation.current += 1;
     setPicked(null);
+    setContextMenu(null);
     activeThreadProjectId.current = null;
     setActiveThreadId(null);
     transition("picking");
@@ -62,6 +74,7 @@ export function FeedbackStateProvider({ children }: { children: ReactNode }) {
     (threadId: string) => {
       generation.current += 1;
       setPicked(null);
+      setContextMenu(null);
       activeThreadProjectId.current = projectId;
       setActiveThreadId(threadId);
       transition("idle");
@@ -72,10 +85,20 @@ export function FeedbackStateProvider({ children }: { children: ReactNode }) {
     activeThreadProjectId.current = null;
     setActiveThreadId(null);
   }, []);
+  const showContextMenu = useCallback((menu: FeedbackContextMenu) => {
+    generation.current += 1;
+    setPicked(null);
+    activeThreadProjectId.current = null;
+    setActiveThreadId(null);
+    setContextMenu(menu);
+    transition("idle");
+  }, [transition]);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   useEffect(() => {
     generation.current += 1;
     setPicked(null);
+    setContextMenu(null);
     setActiveThreadId((current) => activeThreadProjectId.current === projectId ? current : null);
     transition("idle");
   }, [projectId, transition]);
@@ -83,6 +106,7 @@ export function FeedbackStateProvider({ children }: { children: ReactNode }) {
   const selectTarget = useCallback(
     async (target: FeedbackTarget) => {
       if (modeRef.current !== "picking") return;
+      setContextMenu(null);
       const activeGeneration = generation.current;
       transition("capturing");
       let evidence: ViewportEvidence | null = null;
@@ -99,8 +123,32 @@ export function FeedbackStateProvider({ children }: { children: ReactNode }) {
     [appVersion, transition]
   );
   const value = useMemo(
-    () => ({ mode, picked, activeThreadId, startPicking, selectTarget, openThread, closeThread, reset }),
-    [activeThreadId, closeThread, mode, openThread, picked, reset, selectTarget, startPicking]
+    () => ({
+      mode,
+      picked,
+      activeThreadId,
+      contextMenu,
+      startPicking,
+      selectTarget,
+      showContextMenu,
+      closeContextMenu,
+      openThread,
+      closeThread,
+      reset
+    }),
+    [
+      activeThreadId,
+      closeContextMenu,
+      closeThread,
+      contextMenu,
+      mode,
+      openThread,
+      picked,
+      reset,
+      selectTarget,
+      showContextMenu,
+      startPicking
+    ]
   );
   return <FeedbackStateContext.Provider value={value}>{children}</FeedbackStateContext.Provider>;
 }

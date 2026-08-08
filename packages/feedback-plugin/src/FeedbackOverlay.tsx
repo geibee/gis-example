@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReviewSession } from "./contracts";
+import { useDismissiblePanel } from "./dismiss";
 import { FeedbackPins } from "./FeedbackPins";
 import { FeedbackThreadDrawer } from "./FeedbackThreadDrawer";
 import { useFeedbackPluginContext } from "./plugin-context";
@@ -26,11 +27,26 @@ export function FeedbackOverlay({ launcherLabel = "フィードバック" }: Fee
   const sessionQuery = useOpenReviewSessionQuery();
   const session = sessionQuery.data ?? null;
   const threadsQuery = useFeedbackThreadsQuery(session?.id ?? null);
-  const { mode, picked, activeThreadId, startPicking, selectTarget, closeThread, reset } = useFeedbackState();
+  const {
+    mode,
+    picked,
+    activeThreadId,
+    contextMenu,
+    startPicking,
+    selectTarget,
+    showContextMenu,
+    closeContextMenu,
+    closeThread,
+    reset
+  } = useFeedbackState();
 
   useEffect(() => {
     if (sessionQuery.isSuccess && !session && mode !== "idle") reset();
   }, [mode, reset, session, sessionQuery.isSuccess]);
+
+  useEffect(() => {
+    if (sessionQuery.isSuccess && !session && contextMenu) closeContextMenu();
+  }, [closeContextMenu, contextMenu, session, sessionQuery.isSuccess]);
 
   useEffect(() => {
     if (mode !== "picking" && mode !== "capturing") return;
@@ -59,6 +75,28 @@ export function FeedbackOverlay({ launcherLabel = "フィードバック" }: Fee
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [mode, reset, selectTarget]);
+
+  useEffect(() => {
+    if (!session || mode !== "idle") return;
+    const onContextMenu = (event: MouseEvent) => {
+      const element = event.target instanceof Element ? event.target : null;
+      if (element?.closest(`[${captureExcludeAttribute}]`)) return;
+      // 地図上ではMapLibreアダプタが地物・緯度経度を解決する。
+      if (element?.closest(`[${feedbackMapAttribute}]`)) return;
+      event.preventDefault();
+      showContextMenu({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        target: resolveScreenTarget(
+          { clientX: event.clientX, clientY: event.clientY },
+          element,
+          { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }
+        )
+      });
+    };
+    document.addEventListener("contextmenu", onContextMenu, true);
+    return () => document.removeEventListener("contextmenu", onContextMenu, true);
+  }, [mode, session, showContextMenu]);
 
   if (typeof document === "undefined") return null;
   const content = !session ? (
@@ -92,6 +130,18 @@ export function FeedbackOverlay({ launcherLabel = "フィードバック" }: Fee
       {mode === "idle" && activeThreadId ? (
         <FeedbackThreadDrawer threadId={activeThreadId} onClose={closeThread} />
       ) : null}
+      {mode === "idle" && contextMenu ? (
+        <FeedbackContextMenu
+          clientX={contextMenu.clientX}
+          clientY={contextMenu.clientY}
+          onClose={closeContextMenu}
+          onSelect={() => {
+            const target = contextMenu.target;
+            startPicking();
+            void selectTarget(target);
+          }}
+        />
+      ) : null}
     </>
   );
 
@@ -100,6 +150,38 @@ export function FeedbackOverlay({ launcherLabel = "フィードバック" }: Fee
       {content}
     </div>,
     document.body
+  );
+}
+
+function FeedbackContextMenu({
+  clientX,
+  clientY,
+  onClose,
+  onSelect
+}: {
+  clientX: number;
+  clientY: number;
+  onClose: () => void;
+  onSelect: () => void;
+}) {
+  const menuRef = useDismissiblePanel<HTMLDivElement>(onClose);
+  const menuWidth = 220;
+  const menuHeight = 48;
+  const viewportMargin = 8;
+  const left = Math.max(viewportMargin, Math.min(clientX, window.innerWidth - menuWidth - viewportMargin));
+  const top = Math.max(viewportMargin, Math.min(clientY, window.innerHeight - menuHeight - viewportMargin));
+
+  return (
+    <div
+      ref={menuRef}
+      className="wfg-feedback-context-menu"
+      role="menu"
+      aria-label="フィードバックメニュー"
+      style={{ left, top }}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <button type="button" role="menuitem" onClick={onSelect}>フィードバックを残す</button>
+    </div>
   );
 }
 
@@ -112,6 +194,7 @@ function FeedbackComposer({
   picked: ReturnType<typeof useFeedbackState>["picked"] & {};
   onClose: () => void;
 }) {
+  const panelRef = useDismissiblePanel<HTMLElement>(onClose);
   const { notify, currentPageId } = useFeedbackPluginContext();
   const activePerspectives = useMemo(
     () => session.perspectives.filter((perspective) => perspective.status === "ACTIVE"),
@@ -165,7 +248,7 @@ function FeedbackComposer({
   };
 
   return (
-    <section className="wfg-feedback-panel wfg-feedback-composer" role="dialog" aria-label="フィードバックの投稿">
+    <section ref={panelRef} className="wfg-feedback-panel wfg-feedback-composer" role="dialog" aria-label="フィードバックの投稿">
       <PanelHeader title="フィードバック" onClose={onClose} closeLabel="投稿画面を閉じる" />
       <p className="wfg-feedback-target-summary">
         対象: <code>{describeTarget(picked.target)}</code>

@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -181,6 +181,56 @@ describe("FeedbackOverlay", () => {
     expect(await within(drawer).findByText("対応します")).toBeInTheDocument();
     await user.click(await within(drawer).findByRole("button", { name: "解決済みにする" }));
     expect(await within(drawer).findByText("解決済み")).toBeInTheDocument();
+  });
+
+  it("投稿画面とスレッドをパネル外のクリックで閉じる", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/review-sessions?")) return response([session]);
+      if (url.endsWith(`/api/review-sessions/${session.id}/threads`)) return response([baseThread]);
+      if (url.endsWith(`/api/threads/${baseThread.id}`)) return response(baseThread);
+      if (url.endsWith("/api/me")) return response(me);
+      throw new Error(`未定義の要求: ${url}`);
+    }) as typeof fetch;
+    const { user } = renderHost(
+      fetchMock,
+      <>
+        <button type="button" data-feedback-id="host.save">保存</button>
+        <button type="button">パネルの外側</button>
+      </>
+    );
+
+    await user.click(await screen.findByRole("button", { name: /保存ボタンを確認してください/ }));
+    expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "パネルの外側" }));
+    expect(screen.queryByRole("dialog", { name: "フィードバックスレッド" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^フィードバック$/ }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("dialog", { name: "フィードバックの投稿" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "パネルの外側" }));
+    expect(screen.queryByRole("dialog", { name: "フィードバックの投稿" })).not.toBeInTheDocument();
+  });
+
+  it("右クリックメニューから対象を保持して投稿画面を開く", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/review-sessions?")) return response([session]);
+      if (url.endsWith(`/api/review-sessions/${session.id}/threads`)) return response([]);
+      throw new Error(`未定義の要求: ${url}`);
+    }) as typeof fetch;
+    const { user } = renderHost(fetchMock);
+    const target = await screen.findByRole("button", { name: "保存" });
+    await screen.findByRole("button", { name: /^フィードバック$/ });
+    const contextMenuEvent = createEvent.contextMenu(target, { clientX: 160, clientY: 120 });
+
+    fireEvent(target, contextMenuEvent);
+
+    expect(contextMenuEvent.defaultPrevented).toBe(true);
+    const menu = screen.getByRole("menu", { name: "フィードバックメニュー" });
+    await user.click(within(menu).getByRole("menuitem", { name: "フィードバックを残す" }));
+    const composer = await screen.findByRole("dialog", { name: "フィードバックの投稿" });
+    expect(within(composer).getByText(/host\.save/)).toBeInTheDocument();
   });
 });
 

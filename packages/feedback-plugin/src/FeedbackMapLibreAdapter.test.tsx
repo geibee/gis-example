@@ -40,6 +40,11 @@ type MapListener = (event: {
   point: { x: number; y: number };
   lngLat: { lng: number; lat: number };
   preventDefault: () => void;
+  originalEvent?: {
+    clientX: number;
+    clientY: number;
+    preventDefault: () => void;
+  };
 }) => void;
 
 function makeMap() {
@@ -95,6 +100,7 @@ function Probe() {
     <button type="button" onClick={state.startPicking}>対象を選ぶ</button>
     <output aria-label="モード">{state.mode}</output>
     <output aria-label="対象">{state.picked ? JSON.stringify(state.picked.target) : ""}</output>
+    <output aria-label="右クリック対象">{state.contextMenu ? JSON.stringify(state.contextMenu.target) : ""}</output>
     <output aria-label="開いているスレッド">{state.activeThreadId ?? ""}</output>
   </>;
 }
@@ -134,6 +140,20 @@ describe("FeedbackMapLibreAdapter", () => {
     await waitFor(() => expect(maplibreState.markers[0]).toMatchObject({ lngLat: [139.7, 35.6] }));
     await act(async () => maplibreState.markers[0].element?.click());
     await waitFor(() => expect(screen.getByLabelText("開いているスレッド")).toHaveTextContent("thread-map"));
+    await waitFor(() => expect(listeners.get("contextmenu")).toBeDefined());
+    const preventMapDefault = vi.fn();
+    const preventBrowserDefault = vi.fn();
+    await act(async () => {
+      listeners.get("contextmenu")?.({
+        point: { x: 10, y: 20 },
+        lngLat: { lng: 139.71, lat: 35.61 },
+        preventDefault: preventMapDefault,
+        originalEvent: { clientX: 300, clientY: 240, preventDefault: preventBrowserDefault }
+      });
+    });
+    expect(preventMapDefault).toHaveBeenCalled();
+    expect(preventBrowserDefault).toHaveBeenCalled();
+    expect(screen.getByLabelText("右クリック対象")).toHaveTextContent('"featureId":"B-42"');
     await user.click(screen.getByRole("button", { name: "対象を選ぶ" }));
     await waitFor(() => expect(listeners.get("click")).toBeDefined());
     await act(async () => {
