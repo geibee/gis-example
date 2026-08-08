@@ -21,8 +21,14 @@ data class FeedbackCapabilities(
     val apiMajorVersion: Int = 1,
     val manifestSchemaVersions: List<String> = listOf("1"),
     val targetSchemaVersions: List<String> = listOf("1"),
-    val evidence: EvidencePolicy,
+    val evidence: CapabilitiesEvidencePolicy,
     val features: List<String>
+)
+
+@Serializable
+data class CapabilitiesEvidencePolicy(
+    val maxBytes: Long,
+    val acceptedContentTypes: List<String> = listOf("image/png", "image/webp")
 )
 
 @Serializable

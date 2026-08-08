@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.io.TempDir
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.nio.file.Path
 import java.nio.file.Files
@@ -21,9 +23,12 @@ import java.util.Date
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.client.request.get
-import io.ktor.client.request.put
 import io.ktor.client.request.header
+import io.ktor.client.request.patch
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.request.put
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -381,10 +386,12 @@ class StandaloneMigrationIntegrationTest {
         val unauthorized = client.get("/feedback/v1/me")
         assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
         assertTrue(unauthorized.headers[HttpHeaders.ContentType]?.startsWith("application/problem+json") == true)
+        assertConformsTo(unauthorized, "get", "/me", 401)
 
         val capabilities = client.get("/feedback/v1/capabilities")
         assertEquals(HttpStatusCode.OK, capabilities.status)
         assertTrue(capabilities.bodyAsText().contains("\"apiVersion\":\"1.0\""))
+        assertConformsTo(capabilities, "get", "/capabilities", 200)
 
         val manifestBody = """
             {
@@ -403,6 +410,63 @@ class StandaloneMigrationIntegrationTest {
         assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
         assertEquals("\"v1\"", response.headers[HttpHeaders.ETag])
         assertTrue(response.bodyAsText().contains("\"applicationKey\":\"http-app\""))
+        assertConformsTo(response, "put", "/applications/{applicationKey}/manifest", 200)
+
+        val sessionCreated = client.post("/feedback/v1/sessions") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header("Idempotency-Key", "contract-session-0001")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "applicationKey":"http-app",
+                  "environmentKey":"prod",
+                  "externalWorkspaceKey":"workspace-http",
+                  "manifestVersion":"v1",
+                  "title":"契約テストセッション",
+                  "outOfScopePosting":"warn",
+                  "scopes":[{"pageKey":"home","routeTemplate":"/","reviewable":true}],
+                  "perspectives":[{"code":"usability","label":"使いやすさ","status":"active"}]
+                }
+                """.trimIndent()
+            )
+        }
+        assertConformsTo(sessionCreated, "post", "/sessions", 201)
+        val sessionId = serviceJson.parseToJsonElement(sessionCreated.bodyAsText()).jsonObject
+            .getValue("id").jsonPrimitive.content
+
+        val sessionOpened = client.patch("/feedback/v1/sessions/$sessionId") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header(HttpHeaders.IfMatch, requireNotNull(sessionCreated.headers[HttpHeaders.ETag]))
+            contentType(ContentType.Application.Json)
+            setBody("""{"status":"open"}""")
+        }
+        assertConformsTo(sessionOpened, "patch", "/sessions/{sessionId}", 200)
+
+        val threadCreated = client.post("/feedback/v1/sessions/$sessionId/threads") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header("Idempotency-Key", "contract-thread-00001")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "location":{
+                    "schemaVersion":"1","pageKey":"home","routeTemplate":"/",
+                    "pathParameters":{},"queryParameters":{}
+                  },
+                  "target":{"schemaVersion":"1","kind":"screen-position","relativeX":0.25,"relativeY":0.75},
+                  "perspectiveCode":"usability",
+                  "body":"契約テストコメント"
+                }
+                """.trimIndent()
+            )
+        }
+        assertConformsTo(threadCreated, "post", "/sessions/{sessionId}/threads", 201)
+
+        val threadList = client.get("/feedback/v1/sessions/$sessionId/threads") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(threadList, "get", "/sessions/{sessionId}/threads", 200)
 
         val exchangeAuthorized = client.get(
             "/feedback/v1/retention-policy?applicationKey=http-app&externalWorkspaceKey=workspace-http"
@@ -410,6 +474,7 @@ class StandaloneMigrationIntegrationTest {
             header(HttpHeaders.Authorization, "Bearer ${exchangeToken("workspace-http")}")
         }
         assertEquals(HttpStatusCode.OK, exchangeAuthorized.status, exchangeAuthorized.bodyAsText())
+        assertConformsTo(exchangeAuthorized, "get", "/retention-policy", 200)
 
         val exchangeScopeDenied = client.get(
             "/feedback/v1/retention-policy?applicationKey=http-app&externalWorkspaceKey=workspace-http"
@@ -417,6 +482,23 @@ class StandaloneMigrationIntegrationTest {
             header(HttpHeaders.Authorization, "Bearer ${exchangeToken("other-workspace")}")
         }
         assertEquals(HttpStatusCode.Forbidden, exchangeScopeDenied.status)
+        assertConformsTo(exchangeScopeDenied, "get", "/retention-policy", 403)
+    }
+
+    private suspend fun assertConformsTo(response: HttpResponse, method: String, path: String, status: Int) {
+        assertEquals(status, response.status.value, "$method $path の status")
+        val mediaType = requireNotNull(response.headers[HttpHeaders.ContentType])
+            .substringBefore(';')
+            .trim()
+        val schema = FeedbackOpenApiSpecSupport.responseSchema(method, path, status, mediaType)
+        val violations = FeedbackOpenApiSpecSupport.validate(
+            serviceJson.parseToJsonElement(response.bodyAsText()),
+            schema
+        )
+        assertTrue(
+            violations.isEmpty(),
+            "$method $path の $status 応答が専用 OpenAPI schema に適合しません:\n${violations.joinToString("\n")}"
+        )
     }
 
     private fun seedMembershipFixture(): Fixture {

@@ -25,7 +25,7 @@
   one-shot provisioning CLI を同一 image の別 command で提供
 - notification endpoint の AES-256-GCM 暗号化、現行鍵/旧鍵を併用する段階的 key rotation
 - backend 品質ゲート: dedicated OpenAPI と routing tree の双方向同期、全 resource route の permission/scope 宣言、
-  PostGIS を含まない空 PostgreSQL への migration/tenant 分離統合テスト
+  PostGIS を含まない空 PostgreSQL への migration/tenant 分離統合テスト、実 HTTP response の JSON Schema 適合試験
 
 ## 互換期間として意図的に残しているもの
 
@@ -37,10 +37,9 @@
 これらを新 package へ見せないため、`scripts/check-feedback-contracts.sh` が
 `@web-gis`、`apps/api/openapi.yaml`、`projectId` の混入と React/MapLibre の逆依存を fail-closed で検査する。
 
-## Phase 2 で残っているもの
+## Phase 2 の外部接続として残っているもの
 
 - token exchange broker 自体のホスト session 検証・mTLS・短寿命 token 発行 (Service 側の token 検証は実装済み)
-- API 実 response を OpenAPI schema へ適合させる DB あり contract test
 
-これらと Phase 4 の consumer 切替が完了するまでは、現行 DB の外部キー削除・旧 API の write 停止・
-データ移行を行わない。次は DB あり contract test を完成させた後、Web GIS を新 API へ dual-read/コピー移行する。
+Phase 4 の consumer 切替が完了するまでは、現行 DB の外部キー削除・旧 API の write 停止・データ移行を行わない。
+次は Web GIS を新 API へ dual-read/コピー移行する。

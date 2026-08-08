@@ -53,7 +53,7 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                 database.ping()
                 call.respond(
                     FeedbackCapabilities(
-                        evidence = EvidencePolicy(maxBytes = dependencies.evidenceMaxBytes),
+                        evidence = CapabilitiesEvidencePolicy(maxBytes = dependencies.evidenceMaxBytes),
                         features = listOf(
                             "application-manifest",
                             "idempotency",
