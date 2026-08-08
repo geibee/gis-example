@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { useAppShell } from "../appShell";
 import { ReviewGuide, reviewSessionStatusLabels } from "../components/ReviewGuide";
 import { FeedbackManagementPanel } from "../components/FeedbackManagementPanel";
+import { ReviewSessionManager } from "../components/ReviewSessionManager";
 import { useReviewSessionsQuery } from "../queries/reviewSessions";
 import { errorMessage } from "../utils";
 
 // レビュー画面 (docs/prototype-review.md Phase 1〜5)。
 // セッションのガイドと、フィードバックの検索・集計・証跡確認を同じ文脈で表示する。
 export default function ReviewScreen() {
-  const { selectedProject } = useAppShell();
+  const { me, selectedProject } = useAppShell();
   const sessionsQuery = useReviewSessionsQuery(selectedProject);
   const sessions = sessionsQuery.data ?? [];
 
@@ -26,12 +27,25 @@ export default function ReviewScreen() {
   }, [selectedSessionId, sessions]);
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const canManage =
+    me?.systemRole === "admin" ||
+    me?.memberships.some((membership) => membership.projectId === selectedProject && membership.role === "editor") === true;
 
   return (
     <section className="tab-pane review-tab active">
       <div className="review-layout">
         <aside className="review-session-list" aria-label="レビューセッション">
           <h2 className="section-title">レビューセッション</h2>
+          {canManage ? (
+            <ReviewSessionManager
+              projectId={selectedProject}
+              selectedSession={selectedSession}
+              onSaved={(session) => {
+                setSelectedSessionId(session.id);
+                setSelectedPerspective(null);
+              }}
+            />
+          ) : null}
           {sessionsQuery.isPending ? <p className="review-guide-note">読み込み中...</p> : null}
           {sessionsQuery.isError ? (
             <p className="notice error" role="alert">

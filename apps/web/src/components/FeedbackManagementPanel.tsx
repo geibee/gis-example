@@ -3,6 +3,7 @@ import {
   BellRing,
   ChevronLeft,
   ChevronRight,
+  Download,
   Image,
   MessageSquareText,
   RefreshCw,
@@ -30,8 +31,9 @@ import {
   useUpdateReviewNotificationSettingsMutation
 } from "../queries/reviewNotifications";
 import { notifyError, notifySuccess } from "../notifications";
-import { captureExcludeAttribute, useReview } from "../review";
+import { captureExcludeAttribute, useFeedbackPlugin } from "@web-gis/feedback-plugin";
 import { errorMessage } from "../utils";
+import { downloadFeedbackExportCsv, loadFeedbackThreadsForExport } from "../feedbackExport";
 
 const PAGE_SIZE = 20;
 
@@ -49,7 +51,7 @@ export function FeedbackManagementPanel({
   selectedPerspective,
   onPerspectiveChange
 }: FeedbackManagementPanelProps) {
-  const { openThread } = useReview();
+  const { openThread } = useFeedbackPlugin();
   const { me } = useAppShell();
   const [status, setStatus] = useState<"" | "OPEN" | "RESOLVED">("");
   const [evidence, setEvidence] = useState<"" | "with" | "without">("");
@@ -57,6 +59,7 @@ export function FeedbackManagementPanel({
   const [searchText, setSearchText] = useState("");
   const [offset, setOffset] = useState(0);
   const [evidenceThread, setEvidenceThread] = useState<FeedbackThread | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => setOffset(0), [projectId, session.id]);
 
@@ -89,6 +92,26 @@ export function FeedbackManagementPanel({
     setSearchText(searchDraft.trim());
   };
 
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const exportedThreads = await loadFeedbackThreadsForExport({
+        projectId,
+        reviewSessionId: session.id,
+        status: status || undefined,
+        perspectiveCode: selectedPerspective ?? undefined,
+        hasEvidence: evidence === "" ? undefined : evidence === "with",
+        q: searchText || undefined
+      });
+      downloadFeedbackExportCsv(session, exportedThreads);
+      notifySuccess(`${exportedThreads.length}件のスレッドをExcel用CSVへ出力しました`);
+    } catch (error) {
+      notifyError(errorMessage(error));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <section className="feedback-management" aria-label="フィードバック管理">
       <header className="feedback-management-header">
@@ -96,7 +119,13 @@ export function FeedbackManagementPanel({
           <p className="eyebrow">レビュー管理</p>
           <h2>フィードバックの確認</h2>
         </div>
-        <span className="review-guide-note">一覧は「{session.title}」で絞り込まれています</span>
+        <div className="feedback-management-header-actions">
+          <span className="review-guide-note">一覧は「{session.title}」で絞り込まれています</span>
+          <button type="button" className="subtle-button" disabled={exporting} onClick={() => void exportCsv()}>
+            <Download size={14} />
+            {exporting ? "出力中..." : "Excel用CSV"}
+          </button>
+        </div>
       </header>
 
       {summaryQuery.isError ? (

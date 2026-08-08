@@ -3,7 +3,6 @@
 package gis.example
 
 import gis.example.routes.AppDependencies
-import gis.example.routes.TOTAL_COUNT_HEADER
 import gis.example.routes.adminRoutes
 import gis.example.routes.buildingRoutes
 import gis.example.routes.featureRoutes
@@ -20,8 +19,6 @@ import gis.example.routes.reviewGovernanceRoutes
 import gis.example.routes.reviewNotificationRoutes
 import gis.example.routes.tileRoutes
 import gis.example.routes.zoneRoutes
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -31,7 +28,6 @@ import io.ktor.server.auth.authenticate
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.uri
@@ -61,6 +57,8 @@ fun Application.module(
     db: Database = Database.fromEnv(),
     oidcSettings: OidcSettings = OidcSettings.fromEnv()
 ) {
+    val apiRouteMode = parseApiRouteMode(System.getenv("API_ROUTE_MODE"))
+    val allowedWebOrigins = allowedWebOriginsFromEnv()
     db.migrateSchema()
     val uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads")
     val reviewNotificationSender = reviewNotificationSenderFromEnv()
@@ -77,12 +75,13 @@ fun Application.module(
         // JOB_QUEUE_MODE=sqs でジョブ作成コミット後に SQS へ起動通知を送る (既定 polling は no-op)
         jobDispatcher = jobDispatcherFromEnv()
     )
-    val webOrigin = System.getenv("WEB_ORIGIN")
-
     // 分析ランナーの配置 (issue #24)。既定 in-process は dev / 単一ホスト互換。
     // 本番 (ECS) は external にして独立サービス (bin/analysis-worker) へ分離し、
     // API のレイテンシが解析負荷の影響を受けないようにする
-    val analysisJobRunner = when (val mode = (System.getenv("ANALYSIS_RUNNER_MODE") ?: "in-process").trim().lowercase()) {
+    val analysisJobRunner = if (apiRouteMode == ApiRouteMode.REVIEW_SIDECAR) {
+        // レビュー専用コンテナは分析ジョブをclaimしない。同じイメージを安全に並行起動できる。
+        null
+    } else when (val mode = (System.getenv("ANALYSIS_RUNNER_MODE") ?: "in-process").trim().lowercase()) {
         "in-process" -> {
             val settings = AnalysisWorkerSettings.fromEnv()
             AnalysisJobRunner(
@@ -143,22 +142,7 @@ fun Application.module(
             }
         )
     }
-    install(CORS) {
-        // WEB_ORIGIN 未設定時に anyHost に開放しない (fail-open 防止)。
-        // localhost 既定は dev 専用。本番では web の公開オリジン (https://...) を必ず設定する
-        val origin = webOrigin?.takeIf { it.isNotBlank() } ?: "http://localhost:5173"
-        allowHost(origin.removePrefix("http://").removePrefix("https://"), schemes = listOf("http", "https"))
-        allowMethod(HttpMethod.Get)
-        allowMethod(HttpMethod.Post)
-        allowMethod(HttpMethod.Patch)
-        allowMethod(HttpMethod.Put)
-        allowMethod(HttpMethod.Delete)
-        allowMethod(HttpMethod.Options)
-        allowHeader(HttpHeaders.ContentType)
-        allowHeader(HttpHeaders.Authorization)
-        // 一覧 API の総件数ヘッダをブラウザの JS から読めるようにする
-        exposeHeader(TOTAL_COUNT_HEADER)
-    }
+    installWebCors(allowedWebOrigins)
     installOidcAuthentication(db, oidcSettings)
     install(auditLogPlugin(db))
     install(StatusPages) {
@@ -183,11 +167,25 @@ fun Application.module(
         authenticate(OIDC_AUTH_NAME) {
             // 実行時の安全網: 認可判定マーカーのない 2xx 応答を 500 に置き換える
             install(authzGuardPlugin(db))
-            authenticatedApiRoutes(deps)
+            when (apiRouteMode) {
+                ApiRouteMode.FULL -> authenticatedApiRoutes(deps)
+                ApiRouteMode.REVIEW_SIDECAR -> authenticatedReviewSidecarRoutes(deps)
+            }
         }
     }
     // 起動時の安全網: 認可宣言のないルートが 1 つでもあれば起動に失敗する
     validateAuthorizedRoutes(rootRoute)
+}
+
+internal enum class ApiRouteMode {
+    FULL,
+    REVIEW_SIDECAR
+}
+
+internal fun parseApiRouteMode(raw: String?): ApiRouteMode = when (val mode = raw?.trim()?.lowercase() ?: "full") {
+    "full" -> ApiRouteMode.FULL
+    "review-sidecar" -> ApiRouteMode.REVIEW_SIDECAR
+    else -> error("API_ROUTE_MODE は full | review-sidecar のいずれかを指定してください: $mode")
 }
 
 /**
@@ -212,4 +210,17 @@ fun Route.authenticatedApiRoutes(deps: AppDependencies) {
     feedbackRoutes(deps)
     jobRoutes(deps)
     tileRoutes(deps)
+}
+
+/**
+ * フィードバックバックエンドを同じイメージのcompanion containerとして分離する経路集合。
+ * JWT検証、DBメンバーシップ認可、監査、証跡、通知設定を本体と同じ実装で保ったまま、
+ * 分析・GIS・業務CRUDは公開しない。GatewayまたはSDKのapiBaseUrlでこのコンテナへ明示的に振り分ける。
+ */
+fun Route.authenticatedReviewSidecarRoutes(deps: AppDependencies) {
+    meRoutes(deps)
+    reviewRoutes(deps)
+    reviewGovernanceRoutes(deps)
+    reviewNotificationRoutes(deps)
+    feedbackRoutes(deps)
 }

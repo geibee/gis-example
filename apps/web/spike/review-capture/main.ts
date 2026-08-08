@@ -9,8 +9,12 @@
 //     ?pdb=0 を付けると preserveDrawingBuffer 無効で同じ検証を行う (対照実験)
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { captureViewport, findUnreadableMapCanvases, resolveMapTarget } from "../../src/review";
-import type { FeedbackTarget } from "../../src/review";
+import {
+  captureViewport,
+  findUnreadableMapCanvases,
+  resolveMapTarget,
+  type FeedbackTarget
+} from "@web-gis/feedback-plugin";
 
 const params = new URLSearchParams(window.location.search);
 const preserveDrawingBuffer = params.get("pdb") !== "0";

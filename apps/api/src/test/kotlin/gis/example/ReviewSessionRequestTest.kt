@@ -74,24 +74,45 @@ class ReviewSessionRequestTest {
             json(
                 """
                 {"scopes": [
-                  {"pageId": "/lands", "description": "案件一覧"},
-                  {"pageId": "/admin", "reviewable": false}
+                  {"pageId": "lands.list", "route": "/lands", "description": "案件一覧"},
+                  {"pageId": "admin.users", "route": "/admin", "reviewable": false}
                 ]}
                 """.trimIndent()
             )
         )
 
-        assertEquals(ReviewScopeInput("/lands", "案件一覧", true), inputs[0])
-        assertEquals(ReviewScopeInput("/admin", null, false), inputs[1])
+        assertEquals(ReviewScopeInput("lands.list", "/lands", "案件一覧", true), inputs[0])
+        assertEquals(ReviewScopeInput("admin.users", "/admin", null, false), inputs[1])
     }
 
     @Test
     fun `同じ画面を二重に指定した作成は拒否する`() {
         val exc = assertFailsWith<ApiException> {
-            readScopeInputs(json("""{"scopes": [{"pageId": "/lands"}, {"pageId": "/lands"}]}"""))
+            readScopeInputs(
+                json(
+                    """{"scopes": [
+                      {"pageId": "lands.detail", "route": "/lands/l1"},
+                      {"pageId": "lands.detail", "route": "/lands/l1"}
+                    ]}"""
+                )
+            )
         }
 
-        assertTrue("/lands" in exc.message, exc.message)
+        assertTrue("lands.detail" in exc.message, exc.message)
+    }
+
+    @Test
+    fun `同じ詳細画面種別でも具体ルートが異なれば複数指定できる`() {
+        val inputs = readScopeInputs(
+            json(
+                """{"scopes": [
+                  {"pageId": "lands.detail", "route": "/lands/l1"},
+                  {"pageId": "lands.detail", "route": "/lands/l2"}
+                ]}"""
+            )
+        )
+
+        assertEquals(listOf("/lands/l1", "/lands/l2"), inputs.map { it.route })
     }
 
     @Test

@@ -185,8 +185,8 @@ export function makeReviewSession(overrides: Partial<ReviewSession> = {}): Revie
       }
     ],
     scopes: [
-      { id: "sc-1", pageId: "/lands", description: "案件一覧", reviewable: true, displayOrder: 10 },
-      { id: "sc-2", pageId: "/admin", description: "管理画面", reviewable: false, displayOrder: 20 }
+      { id: "sc-1", pageId: "lands.list", route: "/lands", description: "案件一覧", reviewable: true, displayOrder: 10 },
+      { id: "sc-2", pageId: "admin.users", route: "/admin", description: "管理画面", reviewable: false, displayOrder: 20 }
     ],
     ...overrides
   };

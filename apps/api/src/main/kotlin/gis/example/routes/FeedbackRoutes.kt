@@ -131,6 +131,7 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
                         targetType = targetType,
                         targetMetadata = targetMetadata,
                         pageId = readOptionalText(metadata, "pageId"),
+                        pageRoute = readOptionalText(metadata, "route"),
                         body = body,
                         evidence = evidence
                     ),

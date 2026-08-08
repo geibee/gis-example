@@ -982,6 +982,29 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/review-perspectives:
+    get:
+      tags: [review]
+      operationId: listReviewPerspectiveDefinitions
+      summary: レビュー観点マスタ一覧
+      description: セッション作成・編集画面で使用する観点を表示順で返す。
+      parameters:
+        - { name: projectId, in: query, required: true, schema: { type: string } }
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReviewPerspectiveDefinition"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
   /api/review-sessions:
     get:
       tags: [review]
@@ -2228,7 +2251,12 @@ components:
       type: object
       properties:
         id: { type: string }
-        pageId: { type: string }
+        pageId:
+          type: string
+          description: "ホストアプリが定義する画面種別の安定 ID (例: zones.detail)"
+        route:
+          type: [string, "null"]
+          description: "ホストが登録したルートテンプレート (例: /zones/{id})。旧データでは具体URLまたはnullの場合がある。"
         description: { type: [string, "null"] }
         reviewable: { type: boolean }
         displayOrder: { type: integer }
@@ -2271,6 +2299,15 @@ components:
         [id, projectId, title, status, evidenceRetentionDays, effectiveEvidenceRetentionDays,
          createdAt, updatedAt, perspectives, scopes]
 
+    ReviewPerspectiveDefinition:
+      type: object
+      properties:
+        code: { type: string }
+        label: { type: string }
+        description: { type: [string, "null"] }
+        displayOrder: { type: integer }
+      required: [code, label, displayOrder]
+
     ReviewPerspectiveWriteRequest:
       type: object
       properties:
@@ -2282,7 +2319,12 @@ components:
     ReviewScopeWriteRequest:
       type: object
       properties:
-        pageId: { type: string }
+        pageId:
+          type: string
+          description: ホストアプリが定義する画面種別の安定 ID
+        route:
+          type: [string, "null"]
+          description: "ホストがSDKへ登録したルートテンプレート (例: /zones/{id})。"
         description: { type: [string, "null"] }
         reviewable: { type: boolean, default: true }
       required: [pageId]
@@ -2507,7 +2549,7 @@ components:
         targetMetadata:
           type: object
           additionalProperties: true
-          description: FeedbackTarget (apps/web/src/review/types.ts) をそのまま保持する
+          description: FeedbackTarget (packages/feedback-plugin/src/types.ts) をそのまま保持する
         evidence:
           oneOf:
             - $ref: "#/components/schemas/ReviewEvidence"

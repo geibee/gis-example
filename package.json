@@ -2,11 +2,14 @@
   "name": "web-gis-mvp",
   "private": true,
   "workspaces": [
-    "apps/web"
+    "apps/web",
+    "packages/feedback-plugin"
   ],
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
-    "preview:web": "npm --workspace apps/web run preview"
+    "preview:web": "npm --workspace apps/web run preview",
+    "build:feedback-plugin": "npm --workspace @web-gis/feedback-plugin run build",
+    "test:feedback-plugin": "npm --workspace @web-gis/feedback-plugin run test"
   }
 }

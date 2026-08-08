@@ -137,7 +137,7 @@ class FeedbackThreadIntegrationTest {
                     {"code": "BUSINESS_FLOW", "status": "ACTIVE"},
                     {"code": "UI_DESIGN", "status": "FUTURE"}
                   ],
-                  "scopes": [{"pageId": "/lands", "description": "案件一覧"}]
+                  "scopes": [{"pageId": "lands.detail", "route": "/lands/{id}", "description": "土地詳細"}]
                 }
                 """.trimIndent()
             )
@@ -206,8 +206,8 @@ class FeedbackThreadIntegrationTest {
             "relativeX": 0.63,
             "relativeY": 0.41
           },
-          "pageId": "/lands",
-          "route": "/lands?projectId=$defaultProject",
+          "pageId": "lands.detail",
+          "route": "/lands/L-1?projectId=$defaultProject",
           "viewportWidth": 1440,
           "viewportHeight": 900,
           "scrollX": 0,

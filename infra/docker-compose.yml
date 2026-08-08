@@ -65,8 +65,10 @@ services:
     command: ["--config", "/config/martin.yaml"]
     # タイルは API (/api/tiles) 経由で配信する。Martin の直接公開は API の認可を
     # 迂回する経路になるため、ローカル開発用にループバックのみに限定する
+    # ホスト側で 3000 が使用中の場合は MARTIN_HOST_PORT で変更できる。
+    # api からは常に compose 内の martin:3000 へ接続するため、変更はホスト直アクセスだけに影響する。
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${MARTIN_HOST_PORT:-3000}:3000"
     volumes:
       - ./martin/martin.yaml:/config/martin.yaml:ro
     depends_on:
@@ -109,7 +111,9 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-}
       # URL 系はすべて localhost = dev 専用の値。本番 (CloudFront/ALB 配下) では
       # 公開 HTTPS URL を注入する (一覧と信頼境界は docs/reverse-proxy.md)
-      API_PUBLIC_URL: http://localhost:8080
+      # TileJSONをブラウザが取得する公開Webオリジンへ揃える。APIコンテナの直公開URLを
+      # 返すとwebのCSP connect-src 'self'を外れ、MapLibreのタイル取得が拒否される。
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:5173}
       WEB_ORIGIN: http://localhost:5173
       # iss クレームはブラウザから見た Keycloak の URL、JWKS の取得はコンテナ間ネットワーク経由
       OIDC_ISSUER: http://localhost:8081/realms/gis
@@ -143,6 +147,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8080/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
 
   worker-gis:
     restart: unless-stopped
@@ -257,8 +267,10 @@ services:
     ports:
       - "${WEB_HOST_PORT:-5173}:80"
     depends_on:
-      - api
-      - martin
+      api:
+        condition: service_healthy
+      martin:
+        condition: service_healthy
 
 volumes:
   postgres-data:

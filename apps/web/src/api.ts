@@ -39,7 +39,9 @@ import type {
   FeedbackThreadSearchQuery,
   FeedbackThreadStatusPatchRequest,
   ProjectMember,
+  ReviewPerspectiveDefinition,
   ReviewSession,
+  ReviewSessionCreateRequest,
   ReviewSessionPatchRequest,
   ReviewRetentionPolicy,
   ReviewRetentionPolicyPatchRequest,
@@ -468,6 +470,14 @@ export async function deleteProjectMember(projectId: string, userId: string): Pr
 
 export async function getReviewSessions(projectId: string, status?: ReviewSession["status"]): Promise<ReviewSession[]> {
   return unwrap(await client.GET("/api/review-sessions", { params: { query: { projectId, status } } }));
+}
+
+export async function getReviewPerspectiveDefinitions(projectId: string): Promise<ReviewPerspectiveDefinition[]> {
+  return unwrap(await client.GET("/api/review-perspectives", { params: { query: { projectId } } }));
+}
+
+export async function createReviewSession(request: ReviewSessionCreateRequest): Promise<ReviewSession> {
+  return unwrap(await client.POST("/api/review-sessions", { body: request }));
 }
 
 export async function getReviewSession(id: string): Promise<ReviewSession> {

@@ -20,6 +20,32 @@ internal val reviewSessionStatuses = setOf("draft", "open", "closed")
 /** セッション内での観点の状態。FUTURE / OUT_OF_SCOPE は UI でグレーアウトして表示する */
 internal val reviewPerspectiveStatuses = setOf("ACTIVE", "FUTURE", "OUT_OF_SCOPE")
 
+fun Database.listReviewPerspectiveDefinitions(): List<ReviewPerspectiveDefinitionDto> =
+    dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            """
+            SELECT code, label, description, display_order
+            FROM app.review_perspectives
+            ORDER BY display_order, code
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            ReviewPerspectiveDefinitionDto(
+                                code = rs.getString("code"),
+                                label = rs.getString("label"),
+                                description = rs.getString("description"),
+                                displayOrder = rs.getInt("display_order")
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
 fun Database.listReviewSessions(query: ReviewSessionListQuery): PagedList<ReviewSessionDto> =
     dataSource.connection.use { connection ->
         val filters = mutableListOf("s.project_id = ?::uuid")
@@ -196,7 +222,12 @@ fun Database.updateReviewSession(id: String, request: JsonObject, audit: AuditTr
 
 internal data class ReviewPerspectiveInput(val code: String, val status: String, val guidance: String?)
 
-internal data class ReviewScopeInput(val pageId: String, val description: String?, val reviewable: Boolean)
+internal data class ReviewScopeInput(
+    val pageId: String,
+    val route: String?,
+    val description: String?,
+    val reviewable: Boolean
+)
 
 private fun Database.withChildren(
     connection: Connection,
@@ -251,7 +282,7 @@ private fun listScopesForSessions(
     sessionIds: List<String>
 ): Map<String, List<ReviewScopeDto>> = connection.prepareStatement(
     """
-    SELECT review_session_id::text AS session_id, id::text, page_id, description, reviewable, display_order
+    SELECT review_session_id::text AS session_id, id::text, page_id, route, description, reviewable, display_order
     FROM app.review_scopes
     WHERE review_session_id = ANY(?::uuid[])
     ORDER BY display_order, page_id
@@ -265,6 +296,7 @@ private fun listScopesForSessions(
                     ReviewScopeDto(
                         id = rs.getString("id"),
                         pageId = rs.getString("page_id"),
+                        route = rs.getString("route"),
                         description = rs.getString("description"),
                         reviewable = rs.getBoolean("reviewable"),
                         displayOrder = rs.getInt("display_order")
@@ -311,17 +343,18 @@ private fun replaceScopes(connection: Connection, sessionId: String, scopes: Lis
     if (scopes.isEmpty()) return
     connection.prepareStatement(
         """
-        INSERT INTO app.review_scopes (review_session_id, page_id, description, reviewable, display_order)
-        VALUES (?::uuid, ?, ?, ?, ?)
+        INSERT INTO app.review_scopes (review_session_id, page_id, route, description, reviewable, display_order)
+        VALUES (?::uuid, ?, ?, ?, ?, ?)
         """.trimIndent()
     ).use { stmt ->
         scopes.forEachIndexed { index, scope ->
             stmt.setString(1, sessionId)
             stmt.setString(2, scope.pageId)
-            setNullableString(stmt, 3, scope.description)
-            stmt.setBoolean(4, scope.reviewable)
+            setNullableString(stmt, 3, scope.route)
+            setNullableString(stmt, 4, scope.description)
+            stmt.setBoolean(5, scope.reviewable)
             // 表示順はリクエストの配列順 (顧客に見せる並びをそのまま保存する)
-            stmt.setInt(5, (index + 1) * 10)
+            stmt.setInt(6, (index + 1) * 10)
             stmt.addBatch()
         }
         stmt.executeBatch()
@@ -389,14 +422,18 @@ internal fun readScopeInputs(request: JsonObject): List<ReviewScopeInput> {
         }
         ReviewScopeInput(
             pageId = readRequiredText(entry, "pageId"),
+            route = readOptionalText(entry, "route"),
             description = readOptionalText(entry, "description"),
             // 既定は「レビュー対象」。対象外の画面を明示的に並べたいときだけ false にする
             reviewable = readOptionalBoolean(entry, "reviewable") ?: true
         )
     }
-    val duplicated = inputs.groupingBy { it.pageId }.eachCount().filterValues { it > 1 }.keys
+    val duplicated = inputs.groupingBy { it.pageId to it.route }.eachCount().filterValues { it > 1 }.keys
     if (duplicated.isNotEmpty()) {
-        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "scopes[].pageId is duplicated: $duplicated")
+        throw ApiException(
+            io.ktor.http.HttpStatusCode.BadRequest,
+            "scopes[] contains duplicated pageId and route: $duplicated"
+        )
     }
     return inputs
 }

@@ -1,19 +1,27 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
 import { captureViewport, type ViewportEvidence } from "./capture";
+import { useFeedbackPluginContext } from "./plugin-context";
 import type { FeedbackTarget } from "./types";
-import { errorMessage } from "../utils";
 
-export type ReviewMode = "idle" | "picking" | "capturing" | "composing";
+export type FeedbackMode = "idle" | "picking" | "capturing" | "composing";
 
 export type PickedFeedbackTarget = {
   target: FeedbackTarget;
   evidence: ViewportEvidence | null;
-  /** 証跡の生成に失敗した場合の理由 (指摘自体は残せるので投稿は止めない)。 */
   captureError: string | null;
 };
 
-type ReviewContextValue = {
-  mode: ReviewMode;
+type FeedbackState = {
+  mode: FeedbackMode;
   picked: PickedFeedbackTarget | null;
   activeThreadId: string | null;
   startPicking: () => void;
@@ -23,48 +31,54 @@ type ReviewContextValue = {
   reset: () => void;
 };
 
-const ReviewContext = createContext<ReviewContextValue | null>(null);
+const FeedbackStateContext = createContext<FeedbackState | null>(null);
 
-/**
- * DOM と MapLibre のどちらから対象が選ばれても、同じ 1 回の証跡取得へ合流させる。
- * 世代番号でキャンセル後に完了した非同期キャプチャが Composer を再表示する競合も防ぐ。
- */
-export function ReviewProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<ReviewMode>("idle");
+export function FeedbackStateProvider({ children }: { children: ReactNode }) {
+  const { appVersion, projectId } = useFeedbackPluginContext();
+  const [mode, setMode] = useState<FeedbackMode>("idle");
   const [picked, setPicked] = useState<PickedFeedbackTarget | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const modeRef = useRef<ReviewMode>("idle");
+  const modeRef = useRef<FeedbackMode>("idle");
   const generation = useRef(0);
+  const activeThreadProjectId = useRef<string | null>(null);
 
-  const transition = useCallback((next: ReviewMode) => {
+  const transition = useCallback((next: FeedbackMode) => {
     modeRef.current = next;
     setMode(next);
   }, []);
-
   const reset = useCallback(() => {
     generation.current += 1;
     setPicked(null);
     transition("idle");
   }, [transition]);
-
   const startPicking = useCallback(() => {
     generation.current += 1;
     setPicked(null);
+    activeThreadProjectId.current = null;
     setActiveThreadId(null);
     transition("picking");
   }, [transition]);
-
   const openThread = useCallback(
     (threadId: string) => {
       generation.current += 1;
       setPicked(null);
+      activeThreadProjectId.current = projectId;
       setActiveThreadId(threadId);
       transition("idle");
     },
-    [transition]
+    [projectId, transition]
   );
+  const closeThread = useCallback(() => {
+    activeThreadProjectId.current = null;
+    setActiveThreadId(null);
+  }, []);
 
-  const closeThread = useCallback(() => setActiveThreadId(null), []);
+  useEffect(() => {
+    generation.current += 1;
+    setPicked(null);
+    setActiveThreadId((current) => activeThreadProjectId.current === projectId ? current : null);
+    transition("idle");
+  }, [projectId, transition]);
 
   const selectTarget = useCallback(
     async (target: FeedbackTarget) => {
@@ -74,26 +88,33 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
       let evidence: ViewportEvidence | null = null;
       let captureError: string | null = null;
       try {
-        evidence = await captureViewport();
+        evidence = await captureViewport({ appVersion });
       } catch (error) {
-        captureError = errorMessage(error);
+        captureError = error instanceof Error ? error.message : String(error);
       }
       if (generation.current !== activeGeneration) return;
       setPicked({ target, evidence, captureError });
       transition("composing");
     },
-    [transition]
+    [appVersion, transition]
   );
-
   const value = useMemo(
     () => ({ mode, picked, activeThreadId, startPicking, selectTarget, openThread, closeThread, reset }),
     [activeThreadId, closeThread, mode, openThread, picked, reset, selectTarget, startPicking]
   );
-  return <ReviewContext.Provider value={value}>{children}</ReviewContext.Provider>;
+  return <FeedbackStateContext.Provider value={value}>{children}</FeedbackStateContext.Provider>;
 }
 
-export function useReview() {
-  const context = useContext(ReviewContext);
-  if (!context) throw new Error("useReview must be used within ReviewProvider");
+export function useFeedbackState(): FeedbackState {
+  const context = useContext(FeedbackStateContext);
+  if (!context) throw new Error("フィードバックSDKはFeedbackPluginProviderの内側で使用してください");
   return context;
+}
+
+export function useFeedbackPlugin() {
+  const { mode, startPicking, openThread, closeThread } = useFeedbackState();
+  return useMemo(
+    () => ({ mode, startPicking, openThread, closeThread }),
+    [closeThread, mode, openThread, startPicking]
+  );
 }

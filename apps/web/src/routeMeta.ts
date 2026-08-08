@@ -3,6 +3,8 @@ import type { BusinessTab } from "./appTypes";
 // ルート定義に持たせる画面メタ情報。権限ガードと画面タイトル、
 // ヘッダータブのハイライトはすべてこの staticData を正として一元的に扱う。
 export type ScreenMeta = {
+  /** URL構造から独立した、フィードバック対象画面の安定ID。 */
+  pageId: string;
   tab: BusinessTab;
   title: string;
   requiredSystemRole?: "admin";
@@ -52,4 +54,13 @@ export const tabDetailPath = {
   lands: "/lands/$id",
   buildings: "/buildings/$id",
   parties: "/parties/$id"
+} as const;
+
+export const screenPageIds = {
+  zones: { list: "zones.list", detail: "zones.detail" },
+  lands: { list: "lands.list", detail: "lands.detail" },
+  buildings: { list: "buildings.list", detail: "buildings.detail" },
+  parties: { list: "parties.list", detail: "parties.detail" },
+  review: { list: "review.sessions" },
+  admin: { list: "admin.users" }
 } as const;

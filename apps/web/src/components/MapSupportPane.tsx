@@ -1,4 +1,5 @@
 import type { DragEvent } from "react";
+import { feedbackMapAttribute } from "@web-gis/feedback-plugin";
 import {
   Eye,
   EyeOff,
@@ -13,7 +14,6 @@ import {
 } from "lucide-react";
 import type { BusinessLinks, Feature, Layer } from "../contracts";
 import type { LayerListItem } from "../appTypes";
-import { feedbackMapAttribute } from "../review";
 import { formatValue } from "../utils";
 import { BusinessLinksPanel } from "./BusinessLinksPanel";
 import { FeatureEditor } from "./FeatureEditor";

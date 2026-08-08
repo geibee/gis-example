@@ -108,8 +108,8 @@ export function ReviewGuide({ session, selectedPerspective, onSelectPerspective 
           <ul className="review-scope-list">
             {reviewableScopes.map((scope) => (
               <li key={scope.id}>
-                <code>{scope.pageId}</code>
-                {scope.description ? <span> — {scope.description}</span> : null}
+                <span>{scope.description ?? scope.pageId}</span>
+                <code>{scope.route ?? `${scope.pageId}（すべて）`}</code>
               </li>
             ))}
           </ul>
@@ -119,8 +119,8 @@ export function ReviewGuide({ session, selectedPerspective, onSelectPerspective 
               <ul className="review-scope-list review-scope-excluded">
                 {excludedScopes.map((scope) => (
                   <li key={scope.id}>
-                    <code>{scope.pageId}</code>
-                    {scope.description ? <span> — {scope.description}</span> : null}
+                    <span>{scope.description ?? scope.pageId}</span>
+                    <code>{scope.route ?? `${scope.pageId}（すべて）`}</code>
                   </li>
                 ))}
               </ul>

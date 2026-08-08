@@ -94,7 +94,7 @@ API バージョニングと状態 migration を要求し、レビュー用途�
 座標を px ではなく 0〜1 の相対値で持つのは、画面サイズ差にある程度耐えさせるため。
 地図では DOM 要素が存在しないため、「画面のこの辺」ではなく「この地物について」の意味を保持する。
 
-実装は `apps/web/src/review/target.ts` (`resolveScreenTarget` / `resolveMapTarget`)。
+実装は `packages/feedback-plugin/src/target.ts` (`resolveScreenTarget` / `resolveMapTarget`)。
 
 ---
 
@@ -103,7 +103,7 @@ API バージョニングと状態 migration を要求し、レビュー用途�
 MapLibre 込みキャプチャが本基盤最大の技術的不確実性であるため、最初にスパイクを実施した。
 
 - 検証ページ: `apps/web/spike/review-capture/` (本番バンドル対象外)
-- 実装: `apps/web/src/review/capture.ts` (`captureViewport`)
+- 実装: `packages/feedback-plugin/src/capture.ts` (`captureViewport`)
 - 環境: Chromium (Playwright 1.56 同梱)、ビューポート 1440x900、html-to-image 1.11.13、maplibre-gl 5.x
 
 再現手順:
@@ -218,7 +218,7 @@ npm --workspace apps/web run dev
 ```text
 Project           projectId / name / organizationId / status
 ReviewSession     reviewSessionId / projectId / title / description / startAt / endAt / status / createdBy
-ReviewScope       reviewScopeId / reviewSessionId / pageId / description / reviewable
+ReviewScope       reviewScopeId / reviewSessionId / pageId / route / description / reviewable
 Perspective       perspectiveId / code (BUSINESS_FLOW, INFORMATION, USABILITY, MAP_OPERATION,
                   UI_DESIGN, PERFORMANCE, AUTHORIZATION, ERROR_HANDLING …)
 SessionPerspective  reviewSessionId / perspectiveId / status (ACTIVE|FUTURE|OUT_OF_SCOPE) / guidance
@@ -231,12 +231,15 @@ Evidence          evidenceId / threadId / screenshotPath / viewportWidth / viewp
 
 - 画面ごとに観点を変えたい場合は `ReviewScopePerspective` で上書きする
 - `Evidence` の各項目は `captureViewport()` の戻り値 (`ViewportEvidence`) と 1:1 で対応する
+- `ReviewScope.pageId` は `zones.detail` のようなURL非依存の画面種別ID、`route` は
+  `/zones/{id}` のようなルートテンプレートとする。候補は業務APIから実データを列挙せず、ホストが
+  SDKへ渡すルート一覧から生成する。管理画面はチェックボックスを初期全選択にし、パスの自由入力を要求しない。
 - 監査は既存 `app.audit_logs` に載せる。最低限、Thread 作成 / Message 投稿 / 編集 /
   Resolve / Reopen / ReviewSession 変更 / ReviewScope 変更 / 権限変更を記録する
 
 ### 6.1 targetMetadata
 
-`apps/web/src/review/types.ts` の `FeedbackTarget` をそのまま JSON で格納する。
+`packages/feedback-plugin/src/types.ts` の `FeedbackTarget` をそのまま JSON で格納する。
 
 ```json
 { "type": "UI_ELEMENT", "feedbackTargetId": "contract-expiration-date", "relativeX": 0.63, "relativeY": 0.41 }
@@ -293,8 +296,8 @@ MVP は `OPEN` / `RESOLVED` の 2 値から始め、必要になれば
 通常操作を邪魔しないよう Overlay として実装し、業務画面側に個別実装を極力入れない。
 
 ```text
-ReviewProvider / ReviewGuide / FeedbackOverlay / FeedbackTarget
-FeedbackMapAdapter / FeedbackDrawer / FeedbackThread / ScreenshotCapture
+FeedbackPluginProvider / ReviewGuide / FeedbackOverlay / FeedbackTarget
+FeedbackMapLibreAdapter / FeedbackDrawer / FeedbackThread / ScreenshotCapture
 ```
 
 Overlay 自身の DOM には `data-review-exclude` を付ける (証跡に自分が写り込まないようにする)。
@@ -338,6 +341,7 @@ Overlay 自身の DOM には `data-review-exclude` を付ける (証跡に自分
 実装済み (Phase 1):
 
 ```http
+GET   /api/review-perspectives?projectId=... # セッション管理画面用の観点マスタ (REVIEW_READ)
 GET   /api/review-sessions?projectId=...     # 観点・対象画面を含む (REVIEW_READ)
 GET   /api/review-sessions/{id}              # 同上 (REVIEW_READ)
 POST  /api/review-sessions                   # 観点・対象画面をまとめて指定 (REVIEW_MANAGE)
@@ -414,7 +418,7 @@ POST  /api/review-notifications/retry?projectId=... # 失敗配信の手動再�
 | 0 | Screenshot スパイク (DOM + MapLibre 合成) | **完了** (第 4 章) |
 | 1 | ReviewSession / Perspective / ACTIVE・FUTURE・OUT_OF_SCOPE / ReviewGuide / ReviewScope | **完了** |
 | 2 | Feedback Mode / 画面位置クリック / 観点選択 / コメント入力 / 証跡保存 / Thread 作成 | **完了** |
-| 3 | `data-feedback-id` の付与 / FeedbackMapAdapter / コメントピン表示 | **完了** |
+| 3 | `data-feedback-id` の付与 / FeedbackMapLibreAdapter / コメントピン表示 | **完了** |
 | 4 | Thread Drawer / Message 一覧 / Reply / OPEN・RESOLVED / Reopen | **完了** |
 | 5 | 管理画面 (一覧・フィルタ・証跡確認・セッション別/観点別集計) | **完了** |
 | 6 | AuditLog / Project・Session アクセス制御 / 証跡アクセス制御 / 編集履歴 / 保存期間 | **完了** |
@@ -426,19 +430,20 @@ POST  /api/review-notifications/retry?projectId=... # 失敗配信の手動再�
 
 | 実装 | 置き場所 | Phase |
 |---|---|---|
-| ビューポート証跡の生成 | `apps/web/src/review/capture.ts` | 0 |
-| コメント対象の解決 (UI / 画面座標 / 地物 / 地点) | `apps/web/src/review/target.ts` | 0 |
+| ビューポート証跡の生成 | `packages/feedback-plugin/src/capture.ts` | 0 |
+| コメント対象の解決 (UI / 画面座標 / 地物 / 地点) | `packages/feedback-plugin/src/target.ts` | 0 |
 | 地図の WebGL 設定の配線と固定 | `apps/web/src/components/MapPane.tsx` + `capture.test.ts` | 0 |
 | スキーマ (セッション・観点マスタ・観点状態・対象画面) | `db/migration/V5__review_sessions.sql` | 1 |
+| 対象画面の安定ID・具体ルート分離 | `db/migration/V9__review_scope_routes.sql` | 1 |
 | セッション API (一覧・詳細・作成・更新) | `ReviewQueries.kt` / `routes/ReviewRoutes.kt` | 1 |
 | 認可 (`REVIEW_READ` / `REVIEW_MANAGE`) | `Authorization.kt` ([authorization.md](authorization.md)) | 1 |
-| レビューガイド画面 | `apps/web/src/components/ReviewGuide.tsx` / `screens/ReviewScreen.tsx` | 1 |
+| レビューガイド・セッション管理画面 | `ReviewGuide.tsx` / `ReviewSessionManager.tsx` / `screens/ReviewScreen.tsx` | 1 |
 | スキーマ (スレッド・メッセージ・証跡) | `db/migration/V6__feedback_threads.sql` | 2 |
 | 投稿 API (multipart) と証跡配信 | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 2 |
 | 認可 (`REVIEW_COMMENT`) | `Authorization.kt` | 2 |
-| フィードバックオーバーレイ | `apps/web/src/components/FeedbackOverlay.tsx` | 2 |
+| フィードバックオーバーレイ | `packages/feedback-plugin/src/FeedbackOverlay.tsx` | 2 |
 | 安定 ID と画面コメントピン | `FeedbackPins.tsx` / 各業務 Workspace | 3 |
-| 地図対象解決と地図コメントピン | `FeedbackMapAdapter.tsx` / `MapPane.tsx` | 3 |
+| 地図対象解決と地図コメントピン | `FeedbackMapLibreAdapter.tsx` / `MapPane.tsx` | 3 |
 | スレッド返信・解決・再開 API | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 4 |
 | Thread Drawer / Message 一覧 / Reply / Status | `FeedbackThreadDrawer.tsx` | 4 |
 | プロジェクト横断検索・セッション別/観点別集計 API | `FeedbackQueries.kt` / `routes/FeedbackRoutes.kt` | 5 |
@@ -453,10 +458,15 @@ POST  /api/review-notifications/retry?projectId=... # 失敗配信の手動再�
 
 ### 11.1 実装時の設計判断 (設計案からの変更点)
 
-- **観点・対象画面の専用エンドポイントは作らなかった。** `POST /api/review-sessions/{id}/perspectives`
+- **セッション内の観点・対象画面を部分更新する専用エンドポイントは作らなかった。**
+  候補表示用の `GET /api/review-perspectives` はDBマスタを返すが、`POST /api/review-sessions/{id}/perspectives`
   等に分けず、`ReviewSession` の一部として作成・更新する。「今回のレビューで何を見てもらうか」は
   原子的に決まるべき集合で、部分更新を許すと「何を外したか」が曖昧になるため。
   `PATCH` ではキーを指定したときだけ全置換する。
+- **対象画面のURLを安定IDとして扱わない。** ホストのルーターファイル付近で画面種別IDと
+  `/zones/{id}` 形式のルート一覧を定義し、ルーター・SDK・管理画面で共有する。SDKは現在の実URLを
+  テンプレートへ解決し、APIも投稿の実URLをReviewScopeのテンプレートへ照合する。旧セッションの
+  具体URL・パス形式も読み取り互換を保つ。
 - **専用ロールは切らなかった。** 設計案の Reviewer / ReviewManager は既存の project
   `viewer` / `editor` に対応させた (対応表は [authorization.md](authorization.md))。
   顧客側メンバーを開発側と分離して管理する必要が出た時点で専用ロールを検討する。
@@ -472,8 +482,8 @@ POST  /api/review-notifications/retry?projectId=... # 失敗配信の手動再�
   比較する値なので、ローカル時刻の解釈揺れを持ち込まない。既存 API の `createdAt`
   (PostgreSQL 既定表記) とは表記が異なるが、同一 DTO 内では ISO-8601 に揃えている。
 - **地図と DOM のクリック経路を分離した。** MapLibre の Canvas には `data-feedback-map` を付け、
-  document の capture listener は地図クリックを横取りしない。`FeedbackMapAdapter` が同じ
-  `ReviewProvider` へ対象を渡すため、証跡取得・キャンセル・Composer は DOM と地図で共通になる。
+  document の capture listener は地図クリックを横取りしない。`FeedbackMapLibreAdapter` が同じ
+  `FeedbackPluginProvider` へ対象を渡すため、証跡取得・キャンセル・Composer は DOM と地図で共通になる。
 - **画面座標ピンは route が一致するときだけ表示する。** 相対座標だけでは別画面へ誤表示できるため、
   証跡なしの `SCREEN_POSITION` は表示しない。一方 `UI_ELEMENT` は安定 ID が現在 DOM に存在すれば
   route をまたいで共通ナビゲーション等へ正しく再接続できる。

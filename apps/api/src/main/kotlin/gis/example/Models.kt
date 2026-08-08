@@ -408,11 +408,23 @@ data class ReviewPerspectiveDto(
     val guidance: String? = null
 )
 
+/** セッション作成・編集画面で選択するレビュー観点マスタ。 */
+@Serializable
+data class ReviewPerspectiveDefinitionDto(
+    val code: String,
+    val label: String,
+    val description: String? = null,
+    val displayOrder: Int
+)
+
 /** セッション内でレビュー対象となる画面・機能 */
 @Serializable
 data class ReviewScopeDto(
     val id: String,
+    /** ホストアプリが定義する画面種別の安定 ID (例: zones.detail) */
     val pageId: String,
+    /** 対象となる具体的なルート。NULL は同じ画面種別の全ルートを表す */
+    val route: String? = null,
     val description: String? = null,
     val reviewable: Boolean,
     val displayOrder: Int
@@ -488,7 +500,7 @@ data class FeedbackThreadDto(
     val perspectiveLabel: String,
     /** UI_ELEMENT / SCREEN_POSITION / MAP_FEATURE / MAP_POSITION */
     val targetType: String,
-    /** FeedbackTarget (apps/web/src/review/types.ts) をそのまま保持する */
+    /** FeedbackTarget (packages/feedback-plugin/src/types.ts) をそのまま保持する */
     val targetMetadata: JsonObject,
     val evidence: ReviewEvidenceDto? = null,
     val status: String,

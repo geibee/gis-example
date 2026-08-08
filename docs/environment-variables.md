@@ -57,12 +57,14 @@ ECS タスク定義を作成するときの完全なインプットとして、�
 | `REVIEW_TEAMS_WEBHOOK_URL` | 任意 (設定すると Teams チャネルが利用可能) | なし | **Secrets Manager** |
 | `REVIEW_ISSUE_WEBHOOK_URL` | 任意 (設定すると Issue 生成チャネルが利用可能) | なし | **Secrets Manager** |
 | `REVIEW_ISSUE_WEBHOOK_TOKEN` | 任意 (Issue Webhook の Bearer token) | なし | **Secrets Manager** |
-| `API_PUBLIC_URL` | 任意 (本番は明示) | `http://localhost:8080` | タスク定義 / SSM |
-| `WEB_ORIGIN` | 任意 (本番は明示。未設定時も anyHost には開放しない) | `http://localhost:5173` | タスク定義 / SSM |
+| `API_PUBLIC_URL` | 任意 (本番は明示) | API単体は `http://localhost:8080`、composeはCSPと同一オリジンの `http://localhost:5173` | タスク定義 / SSM |
+| `WEB_ORIGINS` | 任意 (複数SPAを許可する場合に推奨。カンマ区切りの完全なorigin。指定時は `WEB_ORIGIN` より優先) | なし | タスク定義 / SSM |
+| `WEB_ORIGIN` | 任意 (`WEB_ORIGINS` 未設定時の後方互換な単一値。本番はどちらかを明示。未指定時も anyHost には開放しない) | `http://localhost:5173` | タスク定義 / SSM |
 | `OIDC_ISSUER` | **必須** (未設定は起動失敗) | なし (compose が注入) | タスク定義 / SSM |
 | `OIDC_AUDIENCE` | **必須** (未設定は起動失敗) | なし (compose が注入) | タスク定義 / SSM |
 | `OIDC_JWKS_URL` | 任意 | `$OIDC_ISSUER/protocol/openid-connect/certs` | タスク定義 / SSM |
 | `AUTH_ADMIN_EMAILS` | 任意 (初期 system admin のブートストラップ用。カンマ区切り) | なし | SSM |
+| `API_ROUTE_MODE` | 任意 (`full` \| `review-sidecar`) | `full` | タスク定義。`review-sidecar` はレビュー／フィードバック系ルートと `/api/me` だけを公開し、分析ランナーを起動しない |
 | `ANALYSIS_RUNNER_MODE` | 任意 (**本番は `external` 推奨** — 分析ランナーを独立サービスへ分離。`in-process` \| `external` 以外は起動失敗) | `in-process` (API 内デーモンスレッド) | タスク定義。詳細は [jobs-architecture.md](jobs-architecture.md) |
 | `JOB_QUEUE_MODE` | 任意 (**本番は `sqs` 推奨**。`polling` \| `sqs` 以外は起動失敗) | `polling` (ワーカーの DB ポーリング) | タスク定義。詳細は [jobs-architecture.md](jobs-architecture.md) |
 | `SQS_ANALYSIS_QUEUE_URL` | `JOB_QUEUE_MODE=sqs` のとき**必須** (未設定は起動失敗) | なし (compose の sqs プロファイルは ElasticMQ の URL) | タスク定義 / SSM |
@@ -78,12 +80,29 @@ ECS タスク定義を作成するときの完全なインプットとして、�
 | `ANALYSIS_RECEIVE_WAIT_SECONDS` | 任意 (SQS long polling の待ち時間) | `10` | タスク定義 |
 | `ANALYSIS_VISIBILITY_EXTENSION_SECONDS` | 任意 (ハートビートごとに延長する visibility timeout) | `120` | タスク定義 |
 | `ANALYSIS_TEST_CLAIM_HOLD_MILLIS` | **テスト専用** (claim 直後に実行を保留する。kill 回復の統合テスト用 — 本番で設定しない) | `0` | — |
+
 | `LOG_FORMAT` | 任意 (**本番は `json` 必須** — CloudWatch Logs Insights でのフィールド検索の前提。`text` \| `json` 以外は起動失敗) | `text` (人間可読) | タスク定義。詳細は [observability.md](observability.md) |
 | `HEALTH_READINESS_TIMEOUT_MS` | 任意 (`/health/ready` の DB 疎通確認の応答期限。ALB ヘルスチェックのタイムアウトより短くする) | `2000` | タスク定義 |
+
+`WEB_ORIGINS` / `WEB_ORIGIN` は `scheme://host[:port]` だけを受け付ける。path、query、userinfo、
+`http` / `https` 以外のscheme、不完全なURLは起動時に拒否する。例:
+
+```text
+WEB_ORIGINS=https://sales.example.com,https://assets.example.com
+```
+
+両方を設定した場合は `WEB_ORIGINS` が許可リストのSSoTとなる。通知リンクは複数候補から
+決められないため、複数SPA構成では `REVIEW_APP_URL` も明示する。
 
 `ANALYSIS_*` / `JOB_QUEUE_MODE` / `SQS_*` は分析ワーカー (`bin/analysis-worker` — api と
 同イメージの別エントリポイント) にも同じ名前で適用される。API 側は `ANALYSIS_RUNNER_MODE=external`
 のとき `ANALYSIS_*` を読まない (ジョブ実行の設計は [jobs-architecture.md](jobs-architecture.md))。
+
+`API_ROUTE_MODE=review-sidecar` は透過プロキシではない。同じAPIイメージを別コンテナとして起動し、
+Gatewayのpath routingまたはSDKの `apiBaseUrl` で明示的に送る。JWT検証・DBメンバーシップ認可・
+監査・証跡保管は通常APIと同じ実装を使う。通常APIと同時起動する場合、通知outboxを二重にpoll
+しないよう通常API側を `REVIEW_NOTIFICATION_RUNNER_MODE=external` にし、sidecar側だけを
+`in-process` にするか、両方を `external` にして専用通知workerを1つ起動する。
 
 ## worker-gis (apps/worker-gis — Python)
 
@@ -121,7 +140,7 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 
 ## web (apps/web — ビルド時のみ)
 
-ソース: `src/api.ts` / `src/auth.ts` / `src/review/capture.ts` の `import.meta.env`。Vite の `VITE_*` は
+ソース: `src/api.ts` / `src/auth.ts` / `src/App.tsx` の `import.meta.env`。Vite の `VITE_*` は
 **ビルド時に JS へ埋め込まれる**ため、実行時の環境変数では変更できない。
 環境ごとにイメージを分けるか、ビルドパイプラインで環境別に `--build-arg` /
 `.env.production` を与える。**シークレットを `VITE_*` に入れないこと** (配布物に平文で残る)。
@@ -163,7 +182,7 @@ Keycloak の本番モード運用 (ECS) か Cognito への移行を別途判断�
 | `UPLOAD_STORAGE` / `S3_BUCKET` / `S3_REGION` | アップロード保存先の切替。`s3` にする場合は `--profile s3` で MinIO を同時起動する | `local` / `gis-uploads` / `us-east-1` |
 | `JOB_QUEUE_MODE` / `ANALYSIS_RUNNER_MODE` | ジョブ実行基盤の切替 ([jobs-architecture.md](jobs-architecture.md))。`sqs` / `external` にする場合は `--profile sqs` で ElasticMQ と analysis-worker を同時起動する | `polling` / `in-process` |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | 開発 MinIO のルート資格情報 (`--profile s3` のときのみ使用。api / worker の `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` としても配線) | `minio` / `minio-secret` |
-| `POSTGRES_HOST_PORT` / `WEB_HOST_PORT` | ホスト側ポートの競合回避 | `5432` / `5173` |
+| `POSTGRES_HOST_PORT` / `MARTIN_HOST_PORT` / `WEB_HOST_PORT` | ホスト側ポートの競合回避。`MARTIN_HOST_PORT` を変えてもコンテナ間の `martin:3000` は変わらない | `5432` / `3000` / `5173` |
 
 CI / verify 用の変数 (`VERIFY_*`, `SMOKE_*`, `FUZZ_*`) は各スクリプトのヘッダコメントを参照。
 

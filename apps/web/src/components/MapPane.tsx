@@ -1,6 +1,11 @@
 import { type ComponentProps, type MutableRefObject, useEffect, useRef, useState } from "react";
 import maplibregl, { type MapLayerMouseEvent, type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import {
+  captureReadyCanvasContextAttributes,
+  FeedbackMapLibreAdapter,
+  useFeedbackPlugin
+} from "@web-gis/feedback-plugin";
 import { getAccessToken } from "../auth";
 import { baseStyle, defaultMapZoom, imperialPalaceCenter, layerColors } from "../constants";
 import {
@@ -10,10 +15,8 @@ import {
   syncConditionSearchHighlight,
   syncMapLayerOrder
 } from "../mapUtils";
-import type { FeedbackThread, FeatureSearchResult, Layer } from "../contracts";
+import type { FeatureSearchResult, Layer } from "../contracts";
 import type { MapPaneApi } from "../appTypes";
-import { captureReadyCanvasContextAttributes, useReview } from "../review";
-import { FeedbackMapAdapter } from "./FeedbackMapAdapter";
 import { MapSupportPane } from "./MapSupportPane";
 
 type SupportPaneProps = Omit<ComponentProps<typeof MapSupportPane>, "mapContainerRef">;
@@ -28,7 +31,6 @@ type MapPaneProps = SupportPaneProps & {
   layerById: Map<string, Layer>;
   onPickFeature: (layer: Layer, featureId: string) => void;
   onNotice: (message: string) => void;
-  reviewThreads: FeedbackThread[];
 };
 
 export default function MapPane({
@@ -39,7 +41,6 @@ export default function MapPane({
   layerById,
   onPickFeature,
   onNotice,
-  reviewThreads,
   ...supportPaneProps
 }: MapPaneProps) {
   const { open, baseMapVisible, visibleLayerIds } = supportPaneProps;
@@ -50,7 +51,7 @@ export default function MapPane({
   const initializedLayerBounds = useRef(false);
   const seenLayerIds = useRef<Set<string>>(new Set());
   const [mapReady, setMapReady] = useState(false);
-  const { mode: reviewMode } = useReview();
+  const { mode: reviewMode } = useFeedbackPlugin();
 
   useEffect(() => {
     apiRef.current = {
@@ -248,11 +249,10 @@ export default function MapPane({
     <>
       <MapSupportPane mapContainerRef={mapContainerRef} {...supportPaneProps} />
       {mapReady && mapRef.current ? (
-        <FeedbackMapAdapter
+        <FeedbackMapLibreAdapter
           map={mapRef.current}
           layers={layers}
           styleLayersByLayerId={styleLayersByLayerId.current}
-          threads={reviewThreads}
         />
       ) : null}
     </>

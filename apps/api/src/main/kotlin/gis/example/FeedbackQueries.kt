@@ -15,7 +15,7 @@ import java.time.OffsetDateTime
 /** スレッドの状態。MVP は 2 値から始める (docs/prototype-review.md 6.2) */
 internal val feedbackThreadStatuses = setOf("OPEN", "RESOLVED")
 
-/** コメント対象の種別 (apps/web/src/review/types.ts の FeedbackTarget と対で保つ) */
+/** コメント対象の種別 (packages/feedback-plugin/src/types.ts の FeedbackTarget と対で保つ) */
 internal val feedbackTargetTypes = setOf("UI_ELEMENT", "SCREEN_POSITION", "MAP_FEATURE", "MAP_POSITION")
 
 /** 証跡の保存に必要なメタデータ (画像本体は UploadStorage 側)。 */
@@ -39,6 +39,7 @@ data class FeedbackThreadInput(
     val targetType: String,
     val targetMetadata: JsonObject,
     val pageId: String?,
+    val pageRoute: String?,
     val body: String,
     val evidence: ReviewEvidenceInput?
 )
@@ -119,7 +120,9 @@ fun Database.createFeedbackThread(
     val id = withTransaction { connection ->
         val evidenceId = input.evidence?.let { insertEvidence(connection, input.reviewSessionId, it) }
         // 投稿時の画面に対応する ReviewScope を引き当てる (対象外の画面からの投稿もあるので任意)
-        val scopeId = input.pageId?.let { pageId -> findScopeId(connection, input.reviewSessionId, pageId) }
+        val scopeId = input.pageId?.let { pageId ->
+            findScopeId(connection, input.reviewSessionId, pageId, input.pageRoute)
+        }
         val threadId = connection.prepareStatement(
             """
             INSERT INTO app.feedback_threads (
@@ -737,14 +740,64 @@ private fun insertFeedbackMessageVersion(
     }
 }
 
-private fun findScopeId(connection: Connection, reviewSessionId: String, pageId: String): String? =
-    connection.prepareStatement(
-        "SELECT id::text FROM app.review_scopes WHERE review_session_id = ?::uuid AND page_id = ?"
+private fun findScopeId(
+    connection: Connection,
+    reviewSessionId: String,
+    pageId: String,
+    pageRoute: String?
+): String? {
+    // 証跡の route は実URL、ReviewScope.route は `/lands/{id}` のようなルートテンプレート。
+    // 旧形式の具体URL・route未指定も読み取り互換として残す。
+    val pathname = pageRoute?.substringBefore('?')?.substringBefore('#')
+    data class Candidate(val id: String, val pageId: String, val route: String?)
+    val candidates = connection.prepareStatement(
+        """
+        SELECT id::text, page_id, route
+        FROM app.review_scopes
+        WHERE review_session_id = ?::uuid
+          AND (page_id = ? OR (? IS NOT NULL AND page_id = ?))
+        """.trimIndent()
     ).use { stmt ->
         stmt.setString(1, reviewSessionId)
         stmt.setString(2, pageId)
-        stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        setNullableString(stmt, 3, pathname)
+        setNullableString(stmt, 4, pathname)
+        stmt.executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(Candidate(rs.getString("id"), rs.getString("page_id"), rs.getString("route")))
+            }
+        }
     }
+    return candidates.mapNotNull { candidate ->
+        val rank = when {
+            candidate.pageId == pageId && pathname != null && candidate.route == pathname -> 0
+            candidate.pageId == pageId && pathname != null &&
+                candidate.route != null && reviewRouteTemplateMatches(candidate.route, pathname) -> 1
+            candidate.pageId == pageId && candidate.route == null -> 2
+            candidate.pageId == pathname && (candidate.route == null || candidate.route == pathname) -> 3
+            else -> null
+        }
+        rank?.let { it to candidate.id }
+    }.minByOrNull { it.first }?.second
+}
+
+/** `{name}` を1つの非空パスセグメントとして照合する。 */
+internal fun reviewRouteTemplateMatches(template: String, pathname: String): Boolean {
+    fun normalizedSegments(value: String): List<String> {
+        val normalized = value.substringBefore('?').substringBefore('#').let {
+            if (it.length > 1) it.trimEnd('/') else it
+        }
+        return if (normalized == "/") emptyList() else normalized.removePrefix("/").split('/')
+    }
+    val templateSegments = normalizedSegments(template)
+    val pathSegments = normalizedSegments(pathname)
+    if (templateSegments.size != pathSegments.size) return false
+    val parameter = Regex("^\\{[A-Za-z_][A-Za-z0-9_]*}$")
+    return templateSegments.indices.all { index ->
+        val expected = templateSegments[index]
+        if (parameter.matches(expected)) pathSegments[index].isNotEmpty() else expected == pathSegments[index]
+    }
+}
 
 private fun listMessagesForThreads(
     connection: Connection,

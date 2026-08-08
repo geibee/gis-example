@@ -10,7 +10,7 @@ import type {
   ReviewNotificationRetryResult,
   ReviewSession
 } from "../contracts";
-import { makeFeedbackThread, makeReviewSession } from "../testing/fixtures";
+import { makeFeedbackThread, makeMe, makeReviewSession } from "../testing/fixtures";
 import { renderWithProviders } from "../testing/renderWithProviders";
 import { server } from "../testing/server";
 
@@ -89,6 +89,115 @@ describe("ReviewScreen", () => {
     expect(
       await screen.findByText("このプロジェクトにはまだレビューセッションがありません。")
     ).toBeInTheDocument();
+  });
+
+  it("editor が受付中のレビューセッションを画面から作成できる", async () => {
+    let sessions: ReviewSession[] = [];
+    let requestBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>(sessions)),
+      http.post("*/api/review-sessions", async ({ request }) => {
+        requestBody = await request.json() as Record<string, unknown>;
+        const created = makeReviewSession({
+          id: "rs-created",
+          title: String(requestBody.title),
+          description: String(requestBody.description),
+          status: "open",
+          perspectives: [
+            {
+              code: "BUSINESS_FLOW",
+              label: "業務フロー",
+              description: null,
+              displayOrder: 10,
+              status: "ACTIVE",
+              guidance: null
+            }
+          ],
+          scopes: [
+            {
+              id: "sc-created",
+              pageId: "zones.detail",
+              route: "/zones/{id}",
+              description: "区域詳細",
+              reviewable: true,
+              displayOrder: 10
+            }
+          ]
+        });
+        sessions = [created];
+        return HttpResponse.json<ReviewSession>(created, { status: 201 });
+      })
+    );
+    const { user } = renderWithProviders({ path: "/review" });
+
+    await user.click(await screen.findByRole("button", { name: "新規作成" }));
+    const dialog = screen.getByRole("dialog", { name: "レビューセッションの作成" });
+    await user.type(within(dialog).getByLabelText(/タイトル/), "第1回 ローカルレビュー");
+    await user.type(within(dialog).getByLabelText("説明"), "画面から作成したセッション");
+    await user.selectOptions(within(dialog).getByLabelText("状態"), "open");
+    await user.selectOptions(within(dialog).getAllByLabelText("扱い")[0], "ACTIVE");
+    const scopeCheckboxes = within(dialog).getAllByRole("checkbox");
+    expect(scopeCheckboxes).toHaveLength(10);
+    expect(scopeCheckboxes.every((checkbox) => (checkbox as HTMLInputElement).checked)).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "すべて解除" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /区域詳細.*\/zones\/\{id\}/ }));
+    await user.click(within(dialog).getByRole("button", { name: "セッションを作成" }));
+
+    await waitFor(() => expect(requestBody).not.toBeNull());
+    expect(requestBody).toMatchObject({
+      projectId: "p1",
+      title: "第1回 ローカルレビュー",
+      description: "画面から作成したセッション",
+      status: "open",
+      perspectives: [{ code: "BUSINESS_FLOW", status: "ACTIVE", guidance: null }],
+      scopes: [{
+        pageId: "zones.detail",
+        route: "/zones/{id}",
+        description: "区域詳細",
+        reviewable: true
+      }]
+    });
+    expect(await screen.findByRole("heading", { name: "第1回 ローカルレビュー" })).toBeInTheDocument();
+  });
+
+  it("editor が選択中セッションの内容と受付状態を編集できる", async () => {
+    let session = makeReviewSession();
+    let requestBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([session])),
+      http.patch("*/api/review-sessions/:id", async ({ request }) => {
+        requestBody = await request.json() as Record<string, unknown>;
+        session = { ...session, title: String(requestBody.title), status: "closed" };
+        return HttpResponse.json<ReviewSession>(session);
+      })
+    );
+    const { user } = renderWithProviders({ path: "/review" });
+
+    await user.click(await screen.findByRole("button", { name: "編集" }));
+    const dialog = screen.getByRole("dialog", { name: "レビューセッションの編集" });
+    const title = within(dialog).getByLabelText(/タイトル/);
+    await user.clear(title);
+    await user.type(title, "第1回 レビュー（受付終了）");
+    await user.selectOptions(within(dialog).getByLabelText(/状態/), "closed");
+    await user.click(within(dialog).getByRole("button", { name: "変更を保存" }));
+
+    await waitFor(() => expect(requestBody).not.toBeNull());
+    expect(requestBody).toMatchObject({ title: "第1回 レビュー（受付終了）", status: "closed" });
+    expect(await screen.findByRole("heading", { name: "第1回 レビュー（受付終了）" })).toBeInTheDocument();
+    expect(within(guide()).getByText("受付終了")).toBeInTheDocument();
+  });
+
+  it("viewer にはセッション管理操作を表示しない", async () => {
+    server.use(
+      http.get("*/api/me", () =>
+        HttpResponse.json(makeMe({ memberships: [{ projectId: "p1", role: "viewer" }] }))
+      )
+    );
+    renderWithProviders({ path: "/review" });
+
+    await screen.findByRole("heading", { name: "第1回 業務フローレビュー" });
+    expect(screen.queryByRole("button", { name: "新規作成" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "編集" })).not.toBeInTheDocument();
   });
 
   it("プロジェクト集計と選択セッションのフィードバック一覧を表示・絞り込みできる", async () => {

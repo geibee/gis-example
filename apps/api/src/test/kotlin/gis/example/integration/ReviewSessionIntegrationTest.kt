@@ -122,9 +122,10 @@ class ReviewSessionIntegrationTest {
             {"code": "PERFORMANCE", "status": "OUT_OF_SCOPE", "guidance": "性能検証フェーズで確認します"}
           ],
           "scopes": [
-            {"pageId": "/lands", "description": "案件一覧"},
-            {"pageId": "/lands/detail", "description": "案件詳細"},
-            {"pageId": "/admin", "description": "管理画面", "reviewable": false}
+            {"pageId": "lands.list", "route": "/lands", "description": "案件一覧"},
+            {"pageId": "lands.detail", "route": "/lands/land-1", "description": "案件詳細"},
+            {"pageId": "lands.detail", "route": "/lands/land-2", "description": "別案件詳細"},
+            {"pageId": "admin.users", "route": "/admin", "description": "管理画面", "reviewable": false}
           ]
         }
     """.trimIndent()
@@ -137,6 +138,30 @@ class ReviewSessionIntegrationTest {
         }
         assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
         return body(response.bodyAsText())
+    }
+
+    @Test
+    fun `レビュー観点マスタはDBの表示順で返り viewer も読める`() = withApp { client ->
+        val response = client.get("/api/review-perspectives?projectId=$defaultProject") {
+            header(HttpHeaders.Authorization, viewerBearer)
+        }
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        val perspectives = Json.parseToJsonElement(response.bodyAsText()).jsonArray.map { it.jsonObject }
+        assertEquals("BUSINESS_FLOW", perspectives.first().getValue("code").jsonPrimitive.content)
+        assertEquals("業務フロー", perspectives.first().getValue("label").jsonPrimitive.content)
+        assertTrue(
+            perspectives.zipWithNext().all { (left, right) ->
+                left.getValue("displayOrder").jsonPrimitive.content.toInt() <=
+                    right.getValue("displayOrder").jsonPrimitive.content.toInt()
+            }
+        )
+
+        assertEquals(
+            HttpStatusCode.Forbidden,
+            client.get("/api/review-perspectives?projectId=$defaultProject") {
+                header(HttpHeaders.Authorization, outsiderBearer)
+            }.status
+        )
     }
 
     @Test
@@ -157,14 +182,18 @@ class ReviewSessionIntegrationTest {
             "表示ラベルはマスタ (app.review_perspectives) から解決する"
         )
         assertEquals(
-            listOf("/lands", "/lands/detail", "/admin"),
+            listOf("lands.list", "lands.detail", "lands.detail", "admin.users"),
             created.getValue("scopes").jsonArray.map { it.jsonObject.getValue("pageId").jsonPrimitive.content },
             "対象画面はリクエストの並び順を保持する"
         )
         assertEquals(
+            listOf("/lands", "/lands/land-1", "/lands/land-2", "/admin"),
+            created.getValue("scopes").jsonArray.map { it.jsonObject.getValue("route").jsonPrimitive.content }
+        )
+        assertEquals(
             false,
             created.getValue("scopes").jsonArray.map { it.jsonObject }
-                .single { it.getValue("pageId").jsonPrimitive.content == "/admin" }
+                .single { it.getValue("pageId").jsonPrimitive.content == "admin.users" }
                 .getValue("reviewable").jsonPrimitive.content.toBoolean()
         )
 

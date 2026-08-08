@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Building2,
@@ -11,16 +12,23 @@ import {
   Users
 } from "lucide-react";
 import { useAuth } from "react-oidc-context";
+import {
+  FeedbackOverlay,
+  FeedbackPluginProvider,
+  useFeedbackPlugin,
+  type FeedbackPluginNotification
+} from "@web-gis/feedback-plugin";
 import { AppShellProvider, useAppShell } from "./appShell";
+import { getAccessToken, notifyUnauthorized, tryRenewAccessToken } from "./auth";
 import { MapStateProvider } from "./mapState";
-import { FeedbackOverlay } from "./components/FeedbackOverlay";
 import { MapPaneHost } from "./components/MapPaneHost";
-import { ReviewProvider, useReview } from "./review";
+import { notifyError, notifySuccess } from "./notifications";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
 import { Toaster } from "./ui/Toaster";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
+import { feedbackRoutes } from "./appRoutes";
 
 // ルートレイアウト。認証・レイアウト・ルーター配置のみを担い、
 // サーバ状態は TanStack Query (src/queries/)、画面固有の状態は各 src/screens/、
@@ -28,20 +36,47 @@ import type { Me } from "./contracts";
 export default function App() {
   return (
     <AppShellProvider>
-      <ReviewProvider>
+      <FeedbackSdkHost>
         <MapStateProvider>
           <AppLayout />
         </MapStateProvider>
-      </ReviewProvider>
+      </FeedbackSdkHost>
     </AppShellProvider>
   );
+}
+
+function FeedbackSdkHost({ children }: { children: ReactNode }) {
+  const { selectedProject } = useAppShell();
+  const queryClient = useQueryClient();
+  const currentPath = useRouterState({ select: (state) => state.location.pathname });
+  return (
+    <FeedbackPluginProvider
+      apiBaseUrl={(import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
+      projectId={selectedProject}
+      appVersion={import.meta.env.VITE_APP_VERSION ?? "dev"}
+      routes={feedbackRoutes}
+      currentPath={currentPath}
+      getAccessToken={getAccessToken}
+      refreshAccessToken={tryRenewAccessToken}
+      onNotification={handleFeedbackNotification}
+      queryClient={queryClient}
+    >
+      {children}
+    </FeedbackPluginProvider>
+  );
+}
+
+function handleFeedbackNotification(notification: FeedbackPluginNotification) {
+  if (notification.type === "success") notifySuccess(notification.message);
+  else if (notification.type === "error") notifyError(notification.message);
+  else notifyUnauthorized();
 }
 
 function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
   const { me, projects, selectedProject, setSelectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
-  const { openThread } = useReview();
+  const { openThread } = useFeedbackPlugin();
 
   // URL (マッチ中ルートの staticData) を唯一の正としてタブ強調・タイトルを導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
@@ -69,10 +104,15 @@ function AppLayout() {
       return;
     }
     if (linkedProjectId && !projects.some((project) => project.id === linkedProjectId)) return;
+    // projectId付きリンクは先にホスト側のプロジェクト文脈を切り替え、次のrenderで
+    // SDKへthreadIdを渡す。異なるprojectIdのキャッシュ／Drawerを一瞬開かない。
+    if (linkedProjectId && linkedProjectId !== selectedProject) {
+      setSelectedProject(linkedProjectId);
+      return;
+    }
     const linkKey = `${linkedProjectId ?? ""}:${linkedThreadId}`;
     if (handledReviewLink.current === linkKey) return;
     handledReviewLink.current = linkKey;
-    if (linkedProjectId && linkedProjectId !== selectedProject) setSelectedProject(linkedProjectId);
     openThread(linkedThreadId);
   }, [activeTab, linkedProjectId, linkedThreadId, openThread, projects, selectedProject, setSelectedProject]);
 

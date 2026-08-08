@@ -45,8 +45,9 @@ nginx を経由する経路としない経路が混在する構成は段数が�
 
 | 変数 | 対象 | 用途 | dev 既定 | 本番での値 (例) |
 |---|---|---|---|---|
-| `API_PUBLIC_URL` | api | TileJSON の絶対 URL 生成 | `http://localhost:8080` | `https://gis.example.com` |
-| `WEB_ORIGIN` | api | CORS 許可オリジン | `http://localhost:5173` | `https://gis.example.com` |
+| `API_PUBLIC_URL` | api | TileJSON の絶対 URL 生成 | composeは `http://localhost:5173` | `https://gis.example.com` |
+| `WEB_ORIGINS` | api | 複数SPA向けCORS許可オリジン (カンマ区切り、`WEB_ORIGIN` より優先) | — | `https://gis.example.com,https://sales.example.com` |
+| `WEB_ORIGIN` | api | 後方互換な単一CORS許可オリジン | `http://localhost:5173` | `https://gis.example.com` |
 | `OIDC_ISSUER` | api | JWT の iss 検証 (必須・既定なし) | — | `https://auth.example.com/realms/gis` |
 | `OIDC_JWKS_URL` | api | JWKS 取得先 (未設定時は issuer から導出) | — | (通常は不要) |
 | `TRUSTED_PROXY_COUNT` | api | X-Forwarded-* の信頼段数 | `0` | 上表参照 |
@@ -61,6 +62,8 @@ nginx を経由する経路としない経路が混在する構成は段数が�
   `http://localhost:5173` 固定)。本番 IdP では、クライアント `gis-web` の
   redirectUris / webOrigins / post.logout.redirect.uris に本番の HTTPS オリジンを登録する
   (SPA 側の redirect_uri は `window.location.origin` 由来のためコード変更は不要)
+- `API_PUBLIC_URL` はブラウザから見えるWebオリジンへ揃える。APIコンテナの内部URLや
+  別オリジンを返すと、TileJSON内のタイルURLがCSPの `connect-src 'self'` を外れる。
 
 ## セキュリティヘッダの分担
 

@@ -11,6 +11,7 @@ export const keys = {
   projects: ["projects"] as const,
   reviewSessions: {
     all: ["review-sessions"] as const,
+    perspectiveDefinitions: (projectId: string) => ["review-sessions", "perspective-definitions", projectId] as const,
     lists: () => ["review-sessions", "list"] as const,
     list: (projectId: string, status?: string) => ["review-sessions", "list", projectId, status ?? null] as const,
     detail: (id: string) => ["review-sessions", "detail", id] as const

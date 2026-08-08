@@ -51,9 +51,13 @@ export type ZoneLayerOperation = Schemas["ZoneLayerOperation"];
 
 // ---------------------------------------------------------------- レビュー (docs/prototype-review.md)
 export type ReviewSession = Schemas["ReviewSession"];
+export type ReviewSessionCreateRequest = Schemas["ReviewSessionCreateRequest"];
 export type ReviewSessionPatchRequest = Schemas["ReviewSessionPatchRequest"];
 export type ReviewPerspective = Schemas["ReviewPerspective"];
+export type ReviewPerspectiveDefinition = Schemas["ReviewPerspectiveDefinition"];
+export type ReviewPerspectiveWriteRequest = Schemas["ReviewPerspectiveWriteRequest"];
 export type ReviewScope = Schemas["ReviewScope"];
+export type ReviewScopeWriteRequest = Schemas["ReviewScopeWriteRequest"];
 export type FeedbackThread = Schemas["FeedbackThread"];
 export type FeedbackMessage = Schemas["FeedbackMessage"];
 export type FeedbackMessageCreateRequest = Schemas["FeedbackMessageCreateRequest"];

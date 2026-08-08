@@ -17,6 +17,7 @@ import gis.example.authorizedRoutes
 import gis.example.createReviewSession
 import gis.example.getReviewSession
 import gis.example.listReviewSessions
+import gis.example.listReviewPerspectiveDefinitions
 import gis.example.updateReviewSession
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -30,6 +31,11 @@ fun Route.reviewRoutes(deps: AppDependencies) {
     val db = deps.db
 
     authorizedRoutes(db) {
+        // 観点はDBマスタを正とし、管理画面へコード・表示名・説明・順序を提供する。
+        get("/api/review-perspectives", ProjectFromQuery(Action.REVIEW_READ)) {
+            call.respond(db.listReviewPerspectiveDefinitions())
+        }
+
         // レビュー対象者 (viewer) もガイドを読むため READ 側は REVIEW_READ
         get("/api/review-sessions", ProjectFromQuery(Action.REVIEW_READ)) {
             val params = call.request.queryParameters

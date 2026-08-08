@@ -19,6 +19,7 @@ import type {
   ProjectMember,
   ReviewRetentionPolicy,
   ReviewNotificationSettings,
+  ReviewPerspectiveDefinition,
   ReviewSession,
   UserAccount,
   Zone,
@@ -44,6 +45,34 @@ export const defaultHandlers = [
   http.get("*/api/me", () => HttpResponse.json<Me>(makeMe())),
   http.get("*/api/projects", () => HttpResponse.json<Project[]>([makeProject()])),
   http.get("*/api/layers", () => HttpResponse.json<Layer[]>([])),
+  http.get("*/api/review-perspectives", () =>
+    HttpResponse.json<ReviewPerspectiveDefinition[]>([
+      {
+        code: "BUSINESS_FLOW",
+        label: "業務フロー",
+        description: "一連の業務が想定どおり進められるか",
+        displayOrder: 10
+      },
+      {
+        code: "MAP_OPERATION",
+        label: "地図操作",
+        description: "地図と業務情報の連動を確認する",
+        displayOrder: 40
+      },
+      {
+        code: "UI_DESIGN",
+        label: "デザイン・配色",
+        description: null,
+        displayOrder: 50
+      },
+      {
+        code: "PERFORMANCE",
+        label: "性能",
+        description: null,
+        displayOrder: 60
+      }
+    ])
+  ),
   http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([makeReviewSession()])),
   http.get("*/api/review-sessions/:id/threads", () => HttpResponse.json<FeedbackThread[]>([])),
   http.get("*/api/threads", () => HttpResponse.json<FeedbackThread[]>([], { headers: { "X-Total-Count": "0" } })),
