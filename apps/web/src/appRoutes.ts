@@ -1,4 +1,4 @@
-import { defineFeedbackRoutes } from "@web-gis/feedback-plugin";
+import { defineFeedbackManifest } from "@feedback/core";
 import type { ComponentType } from "react";
 import { screenPageIds, tabBasePath, type ScreenMeta } from "./routeMeta";
 
@@ -64,22 +64,35 @@ export const screenDefinitions: readonly ScreenDefinition[] = [
   }
 ];
 
-/** SDKへ渡し、レビュー管理画面にもそのまま表示するルート契約。 */
-export const feedbackRoutes = defineFeedbackRoutes(
-  screenDefinitions.flatMap((screen) => [
+/** Feedback ServiceへCI登録し、consumer 1のSDKにも利用する画面manifest。 */
+export const feedbackApplicationManifest = defineFeedbackManifest({
+  schemaVersion: "1",
+  applicationKey: "web-gis",
+  displayName: "Web GIS MVP",
+  manifestVersion: "1",
+  routes: screenDefinitions.flatMap((screen) => [
     {
-      pageId: screen.meta.pageId,
-      path: screen.basePath,
+      pageKey: screen.meta.pageId,
+      template: screen.basePath,
       label: screen.listLabel,
       group: "一覧・管理画面"
     },
     ...(screen.detailMeta
       ? [{
-          pageId: screen.detailMeta.pageId,
-          path: `${screen.basePath}/{id}`,
+          pageKey: screen.detailMeta.pageId,
+          template: `${screen.basePath}/{id}`,
           label: screen.detailMeta.title,
-          group: "詳細画面"
+          group: "詳細画面",
+          parameters: { id: { persistence: "store" as const } }
         }]
       : [])
   ])
-);
+});
+
+/** Phase 4まで維持する旧SDK互換route。正本はfeedbackApplicationManifestとする。 */
+export const feedbackRoutes = feedbackApplicationManifest.routes.map((route) => ({
+  pageId: route.pageKey,
+  path: route.template,
+  label: route.label,
+  ...(route.group ? { group: route.group } : {})
+}));

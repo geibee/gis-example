@@ -51,7 +51,7 @@ classify_paths() {
         NEED_WORKER=1 ;;
       apps/web/*)
         NEED_WEB=1 ;;
-      packages/feedback-plugin/*)
+      contracts/feedback/* | packages/feedback-core/* | packages/feedback-react/* | packages/feedback-maplibre/* | packages/feedback-plugin/*)
         NEED_WEB=1 ;;
       infra/postgres/*)
         # DB スキーマ・シードは api / worker の共有契約
@@ -171,6 +171,22 @@ verify_web() {
 
   # lockfile は npm workspaces のルートにあるため、ルートで npm ci を実行する
   npm ci
+  # 独立 Feedback 契約と package 境界。下流 package が declaration を解決できる順で build する。
+  npm --workspace @feedback/contracts run typecheck
+  npm --workspace @feedback/contracts run test
+  npm --workspace @feedback/contracts run build
+  npm --workspace @feedback/core run typecheck
+  npm --workspace @feedback/core run test
+  npm --workspace @feedback/core run build
+  npm --workspace @feedback/react run typecheck
+  npm --workspace @feedback/react run test
+  npm --workspace @feedback/react run build
+  npm --workspace @feedback/maplibre run typecheck
+  npm --workspace @feedback/maplibre run test
+  npm --workspace @feedback/maplibre run build
+  bash scripts/check-feedback-contracts.sh
+  bash scripts/check-feedback-packages.sh
+  # consumer 1 の互換 package。Phase 4 完了までは既存契約とのドリフトも継続検査する。
   npm --workspace @web-gis/feedback-plugin run typecheck
   npm --workspace @web-gis/feedback-plugin run test
   npm --workspace @web-gis/feedback-plugin run build

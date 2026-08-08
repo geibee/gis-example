@@ -3,12 +3,18 @@
   "private": true,
   "workspaces": [
     "apps/web",
+    "contracts/feedback",
+    "packages/feedback-core",
+    "packages/feedback-react",
+    "packages/feedback-maplibre",
     "packages/feedback-plugin"
   ],
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
     "preview:web": "npm --workspace apps/web run preview",
+    "build:feedback-sdk": "npm --workspace @feedback/contracts run build && npm --workspace @feedback/core run build && npm --workspace @feedback/react run build && npm --workspace @feedback/maplibre run build",
+    "test:feedback-sdk": "npm --workspace @feedback/core run test && npm --workspace @feedback/react run test && npm --workspace @feedback/maplibre run test",
     "build:feedback-plugin": "npm --workspace @web-gis/feedback-plugin run build",
     "test:feedback-plugin": "npm --workspace @web-gis/feedback-plugin run test"
   }
