@@ -9,3 +9,4 @@ import { createFeedbackTransport, type FeedbackHostAdapter } from "@feedback/cor
 
 token は host adapter から受け取り、401 refresh は single-flight で実行します。書き込み時の
 `Idempotency-Key` と更新時の `If-Match` は transport option で明示します。
+manifest から location を解決するとき、未登録 query と `discard` 指定 query は Service へ送る前に除外します。

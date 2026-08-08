@@ -37,7 +37,7 @@ done
 
 if rg -n '@web-gis|apps/api/openapi|projectId' \
   contracts/feedback/src packages/feedback-core/src packages/feedback-react/src packages/feedback-maplibre/src \
-  packages/feedback-admin-react/src apps/feedback-admin/src; then
+  packages/feedback-admin-react/src apps/feedback-admin/src apps/feedback-conformance-consumer/src; then
   echo "[feedback-contract] FAIL: 独立packageにWeb GIS固有契約が混入しています" >&2
   exit 1
 fi

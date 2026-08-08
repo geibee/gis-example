@@ -51,7 +51,7 @@ export function resolveFeedbackLocation(
       routeTemplate: route.template,
       pathParameters,
       ...(route.queryParameters
-        ? { queryParameters: pickQueryParameters(search, Object.keys(route.queryParameters)) }
+        ? { queryParameters: pickQueryParameters(search, route.queryParameters) }
         : {})
     };
   }
@@ -73,7 +73,9 @@ export function validateFeedbackLocation(
   if (names.length !== Object.keys(location.pathParameters).length || names.some((name) => !(name in location.pathParameters))) {
     throw new Error("locationのpathParametersがroute templateと一致しません");
   }
-  const allowedQuery = new Set(Object.keys(route.queryParameters ?? {}));
+  const allowedQuery = new Set(Object.entries(route.queryParameters ?? {})
+    .filter(([, policy]) => policy.persistence !== "discard")
+    .map(([name]) => name));
   if (Object.keys(location.queryParameters ?? {}).some((name) => !allowedQuery.has(name))) {
     throw new Error("locationにmanifest未登録のquery parameterが含まれています");
   }
@@ -119,14 +121,17 @@ function matchTemplate(template: string, pathname: string): Record<string, strin
   return result;
 }
 
-function pickQueryParameters(search: string, allowed: readonly string[]): Record<string, string> {
+function pickQueryParameters(
+  search: string,
+  policies: NonNullable<ManifestRoute["queryParameters"]>
+): Record<string, string> {
   const result: Record<string, string> = {};
-  const allowedSet = new Set(allowed);
   for (const pair of search.replace(/^\?/, "").split("&")) {
     if (!pair) continue;
     const separator = pair.indexOf("=");
     const name = decode(separator >= 0 ? pair.slice(0, separator) : pair);
-    if (!allowedSet.has(name) || name in result) continue;
+    const policy = policies[name];
+    if (!policy || policy.persistence === "discard" || name in result) continue;
     result[name] = decode(separator >= 0 ? pair.slice(separator + 1) : "");
   }
   return result;

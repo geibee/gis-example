@@ -52,6 +52,8 @@ classify_paths() {
         NEED_FEEDBACK=1 ;;
       apps/feedback-admin/*)
         NEED_WEB=1 ;;
+      apps/feedback-conformance-consumer/*)
+        NEED_WEB=1 ;;
       apps/worker-gis/*)
         NEED_WORKER=1 ;;
       apps/web/*)
@@ -219,6 +221,7 @@ verify_web() {
   npm --workspace @feedback/admin-react run build
   bash scripts/check-feedback-contracts.sh
   bash scripts/check-feedback-packages.sh
+  bash scripts/check-feedback-conformance.sh
   # consumer 1 の互換 package。Phase 4 完了までは既存契約とのドリフトも継続検査する。
   npm --workspace @web-gis/feedback-plugin run typecheck
   npm --workspace @web-gis/feedback-plugin run test
@@ -233,6 +236,9 @@ verify_web() {
   npm --workspace @feedback/admin-console run typecheck
   npm --workspace @feedback/admin-console run test
   npm --workspace @feedback/admin-console run build
+  npm --workspace @feedback/conformance-consumer run typecheck
+  npm --workspace @feedback/conformance-consumer run test
+  npm --workspace @feedback/conformance-consumer run build
   log "web PASS"
 }
 

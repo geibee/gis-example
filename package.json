@@ -4,6 +4,7 @@
   "workspaces": [
     "apps/web",
     "apps/feedback-admin",
+    "apps/feedback-conformance-consumer",
     "contracts/feedback",
     "packages/feedback-core",
     "packages/feedback-react",

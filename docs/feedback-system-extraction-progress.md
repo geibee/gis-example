@@ -36,6 +36,9 @@
 - v1 利用時の Web GIS 管理 route を独立 Admin Console link へ置換
 - `feedback-legacy-migration`: 匿名 snapshot の dry-run/copy/reconcile/rollback。session/thread/message/history/
   evidence/audit/outbox を写し、ID、display number、SHA-256、個別の evidence expiry を維持する
+- `apps/feedback-conformance-consumer`: native History router、在庫・承認画面、mock token exchange、site workspace を
+  使う consumer 2。Web GIS 固有依存なしで投稿、DOM pin、deep link、workspace state 分離を検証する
+- 互換 matrix、upgrade、operations、security guide と consumer 2 fail-closed dependency guard
 
 ## 互換期間として意図的に残しているもの
 
@@ -52,6 +55,5 @@
 
 - token exchange broker 自体のホスト session 検証・mTLS・短寿命 token 発行 (Service 側の token 検証は実装済み)
 
-ローカルの Phase 4 実装は完了しているが、実データ copy、旧 API の read-only 化、traffic 切替、旧 DB/object の
-削除は未実施である。これらは外部依存文書の個別承認後に行う。次のリポジトリ内作業は Phase 5 の consumer 2
-fixture と conformance/upgrade/operations/security guide である。
+Phase 0〜5 のリポジトリ内実装は完了している。実データ copy、旧 API の read-only 化、traffic 切替、旧 DB/object
+の削除、remote repository/registry/実 consumer への公開は未実施であり、外部依存文書の個別承認後に行う。

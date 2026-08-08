@@ -12,7 +12,7 @@ const manifest = defineFeedbackManifest({
       template: "/orders/{orderId}",
       label: "注文詳細",
       parameters: { orderId: { persistence: "hash" } },
-      queryParameters: { tab: { persistence: "store" } }
+      queryParameters: { tab: { persistence: "store" }, token: { persistence: "discard" } }
     },
     {
       pageKey: "orders.new",

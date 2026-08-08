@@ -20,3 +20,4 @@ Feedback Service、証跡previewを使う場合だけ `img-src blob:` を許可�
 既定DOM captureは `data-feedback-exclude` を除外し、`data-feedback-mask` を同梱CSSでマスクします。
 cross-origin画像/fontはCORS対応または除外が必要です。captureを不要にする場合は
 `features.evidenceCapture: false`、独自方式は `adapter.captureEvidence` を使用します。
+DOM/screen pin は現在のmanifest locationと page/route/path/queryが一致するthreadだけを表示します。

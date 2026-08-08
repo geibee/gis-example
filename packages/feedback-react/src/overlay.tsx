@@ -100,6 +100,7 @@ export function FeedbackOverlay({ deepLinkThreadId, className }: FeedbackOverlay
   }, [canComment, feedback.features.contextMenu, feedback.location, posting, session]);
 
   if (feedback.state !== "ready" || !feedback.location || !session) return null;
+  const visibleThreads = threads.filter((thread) => feedbackThreadMatchesLocation(thread, feedback.location!));
   const content = (
     <div className={`feedback-overlay-root${className ? ` ${className}` : ""}`} data-feedback-overlay="">
       {canComment && posting !== "deny" ? (
@@ -119,8 +120,8 @@ export function FeedbackOverlay({ deepLinkThreadId, className }: FeedbackOverlay
       {canComment && posting === "deny" ? (
         <p className="feedback-posting-notice" role="status">{feedback.messages.postingDenied}</p>
       ) : null}
-      <DomPins threads={threads} onOpen={(id) => void openThread(id, false)} />
-      <ScreenPins threads={threads} onOpen={(id) => void openThread(id, false)} />
+      <DomPins threads={visibleThreads} onOpen={(id) => void openThread(id, false)} />
+      <ScreenPins threads={visibleThreads} onOpen={(id) => void openThread(id, false)} />
       {composeTarget ? (
         <Composer
           target={composeTarget}
@@ -146,6 +147,21 @@ export function FeedbackOverlay({ deepLinkThreadId, className }: FeedbackOverlay
   );
   const target = feedback.portalTarget ?? (typeof document === "undefined" ? null : document.body);
   return target ? createPortal(content, target) : content;
+}
+
+export function feedbackThreadMatchesLocation(
+  thread: Pick<Thread, "location">,
+  location: Schemas["FeedbackLocationV1"]
+): boolean {
+  return thread.location.pageKey === location.pageKey &&
+    thread.location.routeTemplate === location.routeTemplate &&
+    equalParameters(thread.location.pathParameters, location.pathParameters) &&
+    equalParameters(thread.location.queryParameters ?? {}, location.queryParameters ?? {});
+}
+
+function equalParameters(left: Record<string, string>, right: Record<string, string>): boolean {
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => left[key] === right[key]);
 }
 
 function Composer({

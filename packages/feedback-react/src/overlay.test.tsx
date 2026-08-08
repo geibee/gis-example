@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeedbackHostAdapter, FeedbackTransport } from "@feedback/core";
-import { FeedbackOverlay, createLocalStorageParticipantAdapter } from "./overlay";
+import { FeedbackOverlay, createLocalStorageParticipantAdapter, feedbackThreadMatchesLocation } from "./overlay";
 import { FeedbackProvider } from "./index";
 
 const session = {
@@ -52,6 +52,21 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("FeedbackOverlay", () => {
+  it("別locationの同じDOM keyへpinを混在させない", () => {
+    expect(feedbackThreadMatchesLocation(thread, {
+      schemaVersion: "1",
+      pageKey: "orders.detail",
+      routeTemplate: "/orders/{id}",
+      pathParameters: { id: "O-1" }
+    })).toBe(true);
+    expect(feedbackThreadMatchesLocation(thread, {
+      schemaVersion: "1",
+      pageKey: "orders.detail",
+      routeTemplate: "/orders/{id}",
+      pathParameters: { id: "O-2" }
+    })).toBe(false);
+  });
+
   it("capture失敗時もコメントだけを投稿する", async () => {
     const posted: unknown[] = [];
     const adapter = createAdapter({ captureEvidence: vi.fn(async () => { throw new Error("capture blocked"); }) });
