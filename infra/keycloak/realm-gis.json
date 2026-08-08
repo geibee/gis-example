@@ -31,6 +31,16 @@
             "access.token.claim": "true",
             "id.token.claim": "false"
           }
+        },
+        {
+          "name": "feedback-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "feedback-service",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
         }
       ]
     }

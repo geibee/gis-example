@@ -33,6 +33,117 @@ services:
       timeout: 5s
       retries: 20
 
+  # Web GIS の PostGIS から物理分離した Feedback Service 専用 PostgreSQL。
+  # `--profile feedback` のときだけ起動し、PostGIS/init.sql/業務 seed は一切マウントしない
+  feedback-postgres:
+    profiles: ["feedback"]
+    restart: unless-stopped
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${FEEDBACK_POSTGRES_DB:-feedback}
+      POSTGRES_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
+      POSTGRES_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+    ports:
+      - "127.0.0.1:${FEEDBACK_POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - feedback-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${FEEDBACK_POSTGRES_USER:-feedback} -d ${FEEDBACK_POSTGRES_DB:-feedback}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  feedback-service:
+    profiles: ["feedback"]
+    restart: unless-stopped
+    build:
+      context: ../apps/feedback-service
+    environment:
+      FEEDBACK_PORT: "8090"
+      FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
+      FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
+      FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      FEEDBACK_OIDC_ISSUER: http://localhost:8081/realms/gis
+      FEEDBACK_OIDC_AUDIENCE: feedback-service
+      FEEDBACK_OIDC_JWKS_URL: http://keycloak:8080/realms/gis/protocol/openid-connect/certs
+      FEEDBACK_ALLOW_INSECURE_HTTP: "1"
+      FEEDBACK_EVIDENCE_STORAGE: local
+      FEEDBACK_EVIDENCE_DIR: /data/evidence
+      FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+    ports:
+      - "127.0.0.1:${FEEDBACK_SERVICE_HOST_PORT:-8090}:8090"
+    volumes:
+      - feedback-evidence-data:/data/evidence
+    depends_on:
+      feedback-postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+  # Phase 3 の管理 UI ができるまでの one-shot provisioning CLI。
+  # application/workspace/認可を Feedback DB にだけ登録し、Web GIS DB は参照しない
+  feedback-bootstrap:
+    profiles: ["feedback"]
+    restart: "no"
+    build:
+      context: ../apps/feedback-service
+    command: ["/app/bin/feedback-bootstrap"]
+    environment:
+      FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
+      FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
+      FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      FEEDBACK_BOOTSTRAP_TENANT_KEY: local
+      FEEDBACK_BOOTSTRAP_TENANT_DISPLAY_NAME: ローカル開発
+      FEEDBACK_BOOTSTRAP_APPLICATION_KEY: web-gis
+      FEEDBACK_BOOTSTRAP_APPLICATION_DISPLAY_NAME: Web GIS
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_KEY: local
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_BASE_URL: http://localhost:5173
+      FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS: http://localhost:5173
+      FEEDBACK_BOOTSTRAP_EXTERNAL_WORKSPACE_KEY: 00000000-0000-0000-0000-000000000000
+      FEEDBACK_BOOTSTRAP_WORKSPACE_DISPLAY_NAME: デモプロジェクト
+      FEEDBACK_BOOTSTRAP_ISSUER: http://localhost:8081/realms/gis
+      FEEDBACK_BOOTSTRAP_SUBJECT: a0000000-0000-4000-8000-000000000001
+      FEEDBACK_BOOTSTRAP_EMAIL: admin@gis.example
+      FEEDBACK_BOOTSTRAP_DISPLAY_NAME: GIS Admin
+      FEEDBACK_BOOTSTRAP_PERMISSIONS: feedback.read,feedback.comment,feedback.manage,feedback.admin
+    depends_on:
+      feedback-postgres:
+        condition: service_healthy
+
+  feedback-notification-worker:
+    profiles: ["feedback"]
+    restart: unless-stopped
+    build:
+      context: ../apps/feedback-service
+    command: ["/app/bin/feedback-notification-worker"]
+    environment:
+      FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
+      FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
+      FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      FEEDBACK_WEBHOOK_SIGNING_SECRET: ${FEEDBACK_WEBHOOK_SIGNING_SECRET:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+    depends_on:
+      feedback-bootstrap:
+        condition: service_completed_successfully
+
+  feedback-retention-worker:
+    profiles: ["feedback"]
+    restart: unless-stopped
+    build:
+      context: ../apps/feedback-service
+    command: ["/app/bin/feedback-retention-worker"]
+    environment:
+      FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
+      FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
+      FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      FEEDBACK_EVIDENCE_STORAGE: local
+      FEEDBACK_EVIDENCE_DIR: /data/evidence
+    volumes:
+      - feedback-evidence-data:/data/evidence
+    depends_on:
+      feedback-bootstrap:
+        condition: service_completed_successfully
+
   # 開発用シードの one-shot 投入 (Flyway マイグレーション適用後に app テーブルへ投入する)。
   # 各シードはセンチネル行で冪等化済みのため、up を繰り返しても再適用しない。
   # 本番構成ではこのサービスを含めないこと
@@ -275,3 +386,5 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  feedback-postgres-data:
+  feedback-evidence-data:

@@ -15,19 +15,32 @@
 - `@feedback/maplibre`: runtime source/feature ID をホストの安定 key へ変換する任意 adapter
 - Web GIS consumer 1: `screenDefinitions` から v1 application manifest を生成し、旧 SDK route も同じ正本から派生
 - 品質ゲート: 専用 OpenAPI lint、生成型 drift、JSON Schema fixture、package dependency 境界、`npm pack` 内容検査
+- `apps/feedback-service`: Web GIS API と別の Ktor application、専用 Docker image、専用 `feedback` Flyway history
+- 独立 DB: tenant/application/environment/workspace/membership、session/thread/message/history/evidence、
+  retention、audit、idempotency、notification outbox を通常 PostgreSQL だけで管理
+- 独立認証認可: feedback 専用 OIDC audience/claim mapping、別 issuer の短寿命 exchange token 検証、
+  DB membership と token scope の積集合、`feedback.read/comment/manage/admin`、resource ID 経由の cross-workspace 404
+- private evidence: local/S3 adapter、content-type/magic/size/SHA-256 検証、認可付き read
+- deployment 分離: HTTP API、HMAC 署名 notification worker、policy 競合を lock する retention/orphan worker、
+  one-shot provisioning CLI を同一 image の別 command で提供
+- notification endpoint の AES-256-GCM 暗号化、現行鍵/旧鍵を併用する段階的 key rotation
+- backend 品質ゲート: dedicated OpenAPI と routing tree の双方向同期、全 resource route の permission/scope 宣言、
+  PostGIS を含まない空 PostgreSQL への migration/tenant 分離統合テスト
 
 ## 互換期間として意図的に残しているもの
 
 - `@web-gis/feedback-plugin` と `/api/review-*`・`/api/threads/*` は consumer 1 の旧 API 互換層
-- `apps/api` の review table は Web GIS の `projects/users` と同じ DB・Flyway history を利用する
+- consumer 1 はまだ `apps/api` の review table (`projects/users` と同じ DB・Flyway history) を読み書きする
 - 管理 UI、browser CSV export、通知 adapter は `apps/web` / `apps/api` に残る
 - `API_ROUTE_MODE=review-sidecar` は独立 Service ではなく route profile のまま
 
 これらを新 package へ見せないため、`scripts/check-feedback-contracts.sh` が
 `@web-gis`、`apps/api/openapi.yaml`、`projectId` の混入と React/MapLibre の逆依存を fail-closed で検査する。
 
-## 次の段階
+## Phase 2 で残っているもの
 
-Phase 2 では Kotlin の独立 application と専用 Flyway history を追加する。空 PostgreSQL で起動し、
-PostGIS、`app.projects`、`app.users`、Web GIS OIDC audience を要求しないことを統合試験で保証する。
-その実装が完了するまでは、現行 DB の外部キー削除・旧 API の write 停止・データ移行を行わない。
+- token exchange broker 自体のホスト session 検証・mTLS・短寿命 token 発行 (Service 側の token 検証は実装済み)
+- API 実 response を OpenAPI schema へ適合させる DB あり contract test
+
+これらと Phase 4 の consumer 切替が完了するまでは、現行 DB の外部キー削除・旧 API の write 停止・
+データ移行を行わない。次は DB あり contract test を完成させた後、Web GIS を新 API へ dual-read/コピー移行する。

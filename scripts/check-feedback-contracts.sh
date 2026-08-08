@@ -40,6 +40,11 @@ if rg -n '@web-gis|apps/api/openapi|projectId' \
   echo "[feedback-contract] FAIL: 独立packageにWeb GIS固有契約が混入しています" >&2
   exit 1
 fi
+if rg -n '@web-gis|apps/api/openapi|projectId|app\.projects|app\.users|gis_data|org\.postgis|ST_[A-Za-z]+' \
+  apps/feedback-service/src/main; then
+  echo "[feedback-contract] FAIL: 独立 Feedback Service に Web GIS / PostGIS 固有依存が混入しています" >&2
+  exit 1
+fi
 if rg -n 'maplibre' packages/feedback-react/package.json packages/feedback-react/src; then
   echo "[feedback-contract] FAIL: @feedback/react がMapLibreへ依存しています" >&2
   exit 1

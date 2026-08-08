@@ -10,6 +10,10 @@
 現行機能の設計履歴と業務要件は [prototype-review.md](prototype-review.md) を正とし、本書では特に
 「レビュー対象ソフトウェア」と「レビューシステム」の境界に焦点を当てる。
 
+外部サービス、外部アカウント、資格情報、公開操作、本番環境、他システムとの調整を必要とする作業は
+[`feedback-system-external-dependencies.md`](feedback-system-external-dependencies.md) へ分離する。
+本書はローカル fixture で実装・検証できる範囲を扱い、外部依存文書に記載された操作を暗黙に許可しない。
+
 ### 1.1 結論
 
 現状は、同一リポジトリ・同一 PostgreSQL・同一 OIDC issuer / audience・同一プロジェクト体系を
@@ -173,9 +177,10 @@ Feedback Service は以下を自身のリソースとして所有する必要が
 | `feedback.manage` | session 管理、resolve / reopen、Export、保存方針管理 |
 | `feedback.admin` | application、environment、manifest、membership、通知接続の管理 |
 
-OIDC 直接検証を標準アダプターとし、issuer、audience、subject claim、display-name claim を設定可能にする。
-異なる IdP や audience を使うホストには、ホスト backend または専用 sidecar が mTLS で token exchange を
-呼び出し、短寿命の feedback-scoped JWT を取得する。任意の `X-User-Id` や `X-Role` を直接信用しない。
+OIDC 直接検証と token exchange は認証 adapter の境界として定義し、ローカル Keycloak、テスト鍵、mock broker で
+契約を検証する。実 IdP、mTLS 証明書、token signing key、ホスト backend への接続は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#4-oidc-と-token-exchange) で扱う。
+任意の `X-User-Id` や `X-Role` を直接信用しない。
 
 ### 3.6 High: 管理 UI と Export が Web GIS アプリに残っている
 
@@ -198,9 +203,9 @@ OIDC 直接検証を標準アダプターとし、issuer、audience、subject cl
 
 ### 3.7 High: npm package と optional dependency の境界が不十分
 
-`@web-gis/feedback-plugin` は `publishConfig.access=restricted` を持つ一方、`private: true` であり、registry へ
-publish できない。package contract test も `npm pack` した tarball を別ディレクトリへ install するところまでは
-検証していない。
+`@web-gis/feedback-plugin` は配布可能な package 境界になっておらず、package contract test も `npm pack` した
+tarball を別ディレクトリへ install するところまでは検証していない。registry の選定、`private: true` の解除、
+publish は [`外部依存・人手承認作業`](feedback-system-external-dependencies.md#3-package-配布とリポジトリ) で扱う。
 
 また MapLibre を使わない一般 SPA にも `maplibre-gl` が peer dependency として要求される。package root が
 MapLibre adapter まで export しているため、bundler の tree-shaking と型解決にも依存する。
@@ -294,12 +299,14 @@ API と SDK の major/minor 契約変更として session selector を追加す�
 
 ### 3.13 Medium: sidecar 固有の運用契約と適合試験がない
 
-現状は sidecar 専用 image、compose profile、Helm/ECS 定義、capabilities endpoint、専用 OpenAPI、fresh DB test が
-ない。また通常 API と sidecar を同時起動すると、通知 worker の重複起動を環境変数運用で避ける必要がある。
+現状は sidecar 専用 image、compose profile、capabilities endpoint、専用 OpenAPI、fresh DB test がない。
+また通常 API と sidecar を同時起動すると、通知 worker の重複起動を環境変数運用で避ける必要がある。
 
 独立 Feedback Service は 1 image とし、HTTP API と notification worker は command または deployment を分ける。
 起動時に不要な GIS/job dependency を構築しない。`/health/live`、`/health/ready`、`/feedback/v1/capabilities` を
 提供し、DB、object storage、契約 version を観測できるようにする。
+実際の ECS / Kubernetes 等への配備は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#7-deployment-と運用基盤) で扱う。
 
 ### 3.14 主なコード上の根拠
 
@@ -397,8 +404,7 @@ feedback-system/
     service/          # Kotlin
     admin-web/        # React
   deploy/
-    compose/
-    ecs-or-helm/
+    compose/             # ローカル fixture
   conformance/
     react-host/
     maplibre-host/
@@ -440,8 +446,9 @@ type FeedbackApplicationManifestV1 = {
 - session は作成時に `manifestVersion` を記録し、後から対象一覧を再現できるようにする。
 - server は重複 page key、重複 template、不正 parameter、未知 schema version を拒否する。
 
-登録方法は管理 API と CI の両方を用意する。production では application admin token を使った CI 登録を推奨し、
-ブラウザ SDK に manifest 更新権限を与えない。
+登録方法は管理 API と CI の両方に対応できる契約にする。ローカルでは fixture token で検証し、ブラウザ SDK に
+manifest 更新権限を与えない。production CI と application admin token の作成・登録は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#7-deployment-と運用基盤) で扱う。
 
 ### 6.2 Environment と deep link
 
@@ -592,7 +599,9 @@ SDK の `html-to-image` 実装は既定 adapter とし、必須実装にはし�
 deep link を持つ。本文や evidence URL は接続設定で明示的に許可した場合だけ含める。
 
 Webhook は HMAC または非対称署名、timestamp、delivery ID を付与する。少なくとも一度配送とし、受信側は delivery ID で
-冪等化する。外部通知は引き続き transactional outbox から行い、feedback transaction 内で外部 HTTP を呼ばない。
+冪等化する。配送契約と outbox はローカル HTTP fixture で検証し、feedback transaction 内で外部 HTTP を呼ばない。
+実在する通知先、secret、疎通・配送操作は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#6-notificationwebhook外部-export) で扱う。
 
 ## 7. Feedback API v1
 
@@ -694,9 +703,9 @@ idempotency_records
 
 ### 8.2 保存ストレージ
 
-本番は S3 互換 object storage を標準とし、local filesystem は開発・単一ホスト用途に限定する。保存 adapter は
-`store/open/delete` と object metadata を契約にし、DB transaction 失敗時の orphan cleanup、削除失敗時の再試行、
-retention 延長との競合を検証する。
+保存 adapter は `store/open/delete` と object metadata を契約にし、local filesystem fixture で DB transaction 失敗時の
+orphan cleanup、削除失敗時の再試行、retention 延長との競合を検証する。S3 互換サービス、bucket、IAM、実 evidence の
+操作は [`外部依存・人手承認作業`](feedback-system-external-dependencies.md#5-object-storage) で扱う。
 
 ## 9. フロントエンド package 境界
 
@@ -734,19 +743,18 @@ retention 延長との競合を検証する。
 
 ## 10. 認証・認可・セキュリティ
 
-### 10.1 直接 OIDC モード
+### 10.1 認証 adapter のローカル契約
 
-- Feedback Service が設定済み issuer の JWKS で JWT を検証する。
-- issuer ごとに audience、subject claim、email/display-name claim を定義する。
+- 直接 OIDC adapter は issuer、audience、subject claim、email/display-name claim を設定可能にする。
 - application/environment が許可する issuer 以外を拒否する。
 - user JIT 登録は membership を自動付与しない。既定 deny とする。
+- token exchange adapter は短寿命かつ audience 限定の feedback-scoped JWT だけを受け付ける。
+- ローカル Keycloak、テスト鍵、mock broker で JWT/JWKS、claim mapping、失効・拒否を検証する。
 
-### 10.2 Token exchange モード
+### 10.2 外部認証基盤との接続
 
-- browser はホスト backend / sidecar へ同一 origin の token endpoint を呼ぶ。
-- broker はホストセッションを検証し、中央 Feedback Service と mTLS で通信する。
-- 返す JWT は短寿命とし、tenant/application/environment/workspace、feedback permission、actor を audience 限定で持つ。
-- 業務 API 用 access token を中央 Feedback Service へ転送しない構成を選べるようにする。
+実 IdP の設定、JWKS 接続、mTLS 証明書、token signing key、host session broker の配備は本書の実装範囲外とし、
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#4-oidc-と-token-exchange) で扱う。
 
 ### 10.3 CSP と browser security
 
@@ -794,7 +802,7 @@ SDK の導入要件として次を明示する。
 - REST と TanStack Query を公開 component から分離する。
 - HostAdapter、transport、capture、navigation、identity、locale、portal の拡張点を実装する。
 - MapLibre を optional package へ移す。
-- `private: true` を外し、restricted registry 用 package metadata と changelog を整備する。
+- package metadata と changelog を整備する。registry が人手承認されるまでは `private: true` を維持する。
 
 完了条件:
 
@@ -810,24 +818,24 @@ SDK の導入要件として次を明示する。
 - Kotlin の独立 application/module と専用 Flyway を作成する。
 - tenant/application/environment/workspace/membership を実装する。
 - session/thread/message/evidence/retention/audit を現行実装から移植する。
-- OIDC adapter、token exchange 検証、private object storage を実装する。
-- API と notification worker の deployment を分離する。
+- OIDC adapter、token exchange interface、private storage adapter をローカル fixture で実装・検証する。
+- API と notification worker の process entry point を分離する。
 
 完了条件:
 
-- 空の通常 PostgreSQL と object storage だけで service を起動できる。
+- 空の通常 PostgreSQL と local storage fixture だけで service を起動できる。
 - PostGIS、`gis_data`、Web GIS migration、Web GIS project/user table を要求しない。
 - 専用 OpenAPI と routing tree が双方向同期する。
 - 全 route に feedback permission と resource scope が宣言される。
 - evidence、監査、retention、message history の現行保証を維持する。
 
-### Phase 3: Admin Console と外部連携
+### Phase 3: Admin Console と外部連携契約
 
 実施内容:
 
 - session、scope、perspective、thread、evidence、retention、membership、manifest の独立管理 UI を作成する。
 - server-side CSV/XLSX export を実装する。
-- webhook/outbox と Email/Teams/Issue adapter を Feedback Service へ移す。
+- webhook/outbox と通知 adapter interface を実装し、ローカル HTTP fixture で検証する。
 - 管理者 deep link から対象アプリへ遷移できるようにする。
 
 完了条件:
@@ -837,6 +845,9 @@ SDK の導入要件として次を明示する。
 - evidence や secret を webhook へ既定で送らない。
 - 配送署名、retry、dead-letter 相当の管理、監査が検証される。
 
+実在する Email / Teams / Issue tracker / webhook との接続は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#6-notificationwebhook外部-export) で扱う。
+
 ### Phase 4: Web GIS を consumer へ移行
 
 実施内容:
@@ -845,35 +856,34 @@ SDK の導入要件として次を明示する。
 - project ID を `externalWorkspaceKey` として対応付ける。
 - SDK Provider を新 HostAdapter/API へ切り替える。
 - 管理 route は Admin Console link または `admin-react` へ置換する。
-- session/thread/message/evidence/audit/outbox を移行する。
+- session/thread/message/evidence/audit/outbox の mapping と copy tool を実装する。
 - 互換期間は旧 API を read-only または dual-read adapter で維持する。
 
 完了条件:
 
-- 現行の投稿、DOM/MapLibre pin、返信、編集、resolve、証跡、ガイド、Export、通知に機能差分がない。
-- 既存 thread ID、display number、message history、evidence retention を保持する。
+- 匿名化 fixture で投稿、DOM/MapLibre pin、返信、編集、resolve、証跡、ガイド、Export、通知に機能差分がない。
+- 匿名化 fixture の thread ID、display number、message history、evidence retention を保持する。
 - 既存 permalink は redirect または互換 resolver で対象画面と thread を開ける。
-- dual-write を採用する場合は照合レポートが 0 差分になってから切り替える。
+- copy/dual-read/redirect の dry-run とロールバック手順を fixture で検証できる。
 
-ロールバック:
+実データの移行、dual-write、write 停止、切替、削除は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#8-データ移行と-consumer-2) で扱う。
 
-- DB migration はコピー方式を基本とし、旧 DB を即時削除しない。
-- 切替前に旧 API を再選択できる feature flag を用意する。
-- evidence blob は移行完了と checksum 照合まで旧参照を保持する。
-
-### Phase 5: 別システムによる適合確認と正式公開
+### Phase 5: consumer 2 fixture による適合確認と公開準備
 
 実施内容:
 
-- Web GIS と画面・業務・認証構成が異なる React SPA を consumer 2 として導入する。
-- private registry へ pre-release を publish する。
+- Web GIS と画面・業務・認証構成が異なる React SPA fixture を consumer 2 として導入する。
 - conformance suite、upgrade guide、operations guide、security guide を整備する。
 
 完了条件:
 
 - consumer 2 が Web GIS の DB、OIDC audience、project role、route code を参照せず利用できる。
 - application/environment/workspace の分離と cross-tenant deny を統合テストで確認する。
-- package と API の互換 matrix、サポート期間、廃止手順が公開される。
+- package と API の互換 matrix、サポート期間、廃止手順が公開可能な状態になる。
+
+remote repository、registry、実在する consumer 2 への接続と正式公開は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md) で扱う。
 
 ## 12. テストと品質ゲート
 
@@ -910,15 +920,15 @@ SDK の導入要件として次を明示する。
 
 ### 12.4 Backend standalone
 
-- 空 PostgreSQL への全 migration 適用、既存 feedback DB の upgrade、schema convergence。
+- 破棄可能な test PostgreSQL への全 migration 適用、既存 schema fixture の upgrade、schema convergence。
 - PostGIS extension と Web GIS table が存在しない状態での起動。
-- OIDC issuer/audience/claim mapping と token exchange。
+- ローカル Keycloak/テスト鍵による OIDC issuer/audience/claim mapping と mock token exchange。
 - tenant/application/environment/workspace の cross-boundary access deny。
 - 1 workspace 1 open session の並行更新。
 - thread number、message version、idempotency の並行処理。
 - private evidence、range/size/content-type、retention、orphan cleanup。
 - audit allow/deny/read/export と機微値 mask。
-- outbox claim、retry、署名、重複配送、poison delivery。
+- ローカル HTTP fixture に対する outbox claim、retry、署名、重複配送、poison delivery。
 - CORS の単一・複数・不正・未許可 origin。
 
 ### 12.5 Consumer conformance
@@ -928,7 +938,7 @@ SDK の導入要件として次を明示する。
 - parameter policy により機微な値が保存・Export・監査へ漏れない。
 - SDK の投稿から Admin Console の一覧・証跡・deep link まで往復できる。
 - Export URL が対象アプリを開き、指定 thread を自動表示する。
-- OIDC を共有する consumer と token exchange consumer の双方を検証する。
+- ローカル認証 fixture で OIDC を共有する consumer と mock token exchange consumer の双方を検証する。
 
 ## 13. 運用・リリース契約
 
@@ -939,8 +949,10 @@ SDK の導入要件として次を明示する。
   既定で記録しない。
 - metric は API latency/error、投稿成功、capture failure、storage failure、outbox lag、delivery failure、purge backlog を持つ。
 - tenant ごとの保存容量、投稿数、export 数、rate limit を観測する。
-- backup/restore は DB と object storage の整合点、evidence checksum、outbox 再送を含めて訓練する。
-- secret は環境変数または secret manager から注入し、manifest や npm package に含めない。
+- secret は環境変数から注入する契約とし、fixture 値を manifest や npm package に含めない。
+
+実環境の deployment、monitoring、secret manager、backup/restore、外部公開は
+[`外部依存・人手承認作業`](feedback-system-external-dependencies.md#7-deployment-と運用基盤) で扱う。
 
 ## 14. 実装時に変更してはいけない性質
 
@@ -963,7 +975,7 @@ SDK の導入要件として次を明示する。
 1. 中央集約型 Feedback Service を採用する。
 2. 業務通信の透過インターセプトは採用しない。
 3. Feedback Service は専用 DB または専用 database/schema と専用 Flyway history を所有する。
-4. OIDC 直接検証を標準、mTLS token exchange を異なる認証基盤向けの拡張とする。
+4. OIDC 直接検証を標準、mTLS token exchange を異なる認証基盤向けの拡張とする。実接続は外部依存文書で扱う。
 5. Admin Console を正式な管理 UI とし、埋め込み管理 UI は任意 package とする。
 6. v1 は application/environment/workspace ごとに open session を最大 1 件とする。
 7. scope 外投稿の既定は警告付き許可とし、session policy で deny へ変更可能にする。

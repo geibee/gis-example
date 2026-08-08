@@ -30,6 +30,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       api: ${{ steps.detect.outputs.api }}
+      feedback: ${{ steps.detect.outputs.feedback }}
       worker: ${{ steps.detect.outputs.worker }}
       web: ${{ steps.detect.outputs.web }}
     steps:
@@ -59,6 +60,24 @@ jobs:
       - name: 統合 verify (api スコープ)
         env:
           VERIFY_SCOPE: api
+        run: bash scripts/verify.sh
+
+  feedback:
+    name: feedback verify (Kotlin)
+    needs: scope
+    if: needs.scope.outputs.feedback == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: 独立 Feedback Service verify
+        env:
+          VERIFY_SCOPE: feedback
         run: bash scripts/verify.sh
 
   worker:
@@ -159,6 +178,42 @@ jobs:
           PGPASSWORD: gis
         run: bash scripts/verify.sh
 
+  feedback-integration:
+    name: feedback integration (plain PostgreSQL)
+    needs: scope
+    if: needs.scope.outputs.feedback == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: feedback
+          POSTGRES_PASSWORD: feedback
+          POSTGRES_DB: feedback
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U feedback -d feedback"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: 空の通常 PostgreSQL で独立性を検証
+        env:
+          VERIFY_SCOPE: feedback
+          VERIFY_INTEGRATION: "1"
+          FEEDBACK_DATABASE_URL: jdbc:postgresql://localhost:5432/feedback
+          FEEDBACK_DATABASE_USER: feedback
+          FEEDBACK_DATABASE_PASSWORD: feedback
+        run: bash scripts/verify.sh
+
   web:
     name: web verify (TypeScript)
     needs: scope
@@ -180,7 +235,7 @@ jobs:
   # (スコープ外でスキップされたジョブは成功扱い、失敗・キャンセルのみ落とす)
   verify-result:
     name: verify 結果集約
-    needs: [scope, api, worker, web, api-integration, worker-integration]
+    needs: [scope, api, feedback, worker, web, api-integration, feedback-integration, worker-integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

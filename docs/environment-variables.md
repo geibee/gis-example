@@ -104,6 +104,76 @@ Gatewayのpath routingまたはSDKの `apiBaseUrl` で明示的に送る。JWT�
 しないよう通常API側を `REVIEW_NOTIFICATION_RUNNER_MODE=external` にし、sidecar側だけを
 `in-process` にするか、両方を `external` にして専用通知workerを1つ起動する。
 
+## feedback-service (apps/feedback-service — Ktor)
+
+Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flyway history で動作する。
+`DATABASE_*` や `OIDC_*` は共有せず、すべて `FEEDBACK_*` の独立設定を使う。
+
+| 名称 | 必須 | dev 既定 (未設定時) | 本番の供給元 |
+|---|---|---|---|
+| `FEEDBACK_PORT` | 任意 | `8090` | タスク定義 |
+| `FEEDBACK_DATABASE_URL` | 任意 (本番は明示) | `jdbc:postgresql://localhost:5432/feedback` | タスク定義 (専用 RDS/PostgreSQL) |
+| `FEEDBACK_DATABASE_USER` | 任意 (本番は明示) | `PGUSER` → `feedback` | Secrets Manager |
+| `FEEDBACK_DATABASE_PASSWORD` | **必須** (`PGPASSWORD` でも可。既定値なし) | なし (compose が注入) | **Secrets Manager** |
+| `FEEDBACK_DATABASE_POOL_SIZE` | 任意 | `10` | タスク定義 |
+| `FEEDBACK_DATABASE_CONNECTION_TIMEOUT_MS` | 任意 | `10000` | タスク定義 |
+| `FEEDBACK_DATABASE_STATEMENT_TIMEOUT_MS` | 任意 | `30000` | タスク定義 |
+| `FEEDBACK_OIDC_ISSUER` | **API では必須** | なし (compose が注入) | タスク定義 / SSM |
+| `FEEDBACK_OIDC_AUDIENCE` | **API では必須** | なし (compose は `feedback-service`) | タスク定義 / SSM |
+| `FEEDBACK_OIDC_JWKS_URL` | 任意 | `$issuer/.well-known/jwks.json` | タスク定義 / SSM |
+| `FEEDBACK_OIDC_SUBJECT_CLAIM` | 任意 | `sub` | タスク定義 |
+| `FEEDBACK_OIDC_DISPLAY_NAME_CLAIM` | 任意 | `name` | タスク定義 |
+| `FEEDBACK_OIDC_EMAIL_CLAIM` | 任意 | `email` | タスク定義 |
+| `FEEDBACK_ALLOW_INSECURE_HTTP` | 任意 (**dev 専用**) | 未設定 (`https` 必須、`localhost` だけ例外) | —。本番で `1` にしない |
+| `FEEDBACK_TOKEN_EXCHANGE_ISSUER` | broker token 検証を有効にするとき必須 | なし (未設定なら直接 OIDC のみ) | タスク定義 / SSM |
+| `FEEDBACK_TOKEN_EXCHANGE_AUDIENCE` | exchange issuer 設定時**必須** | なし | タスク定義 / SSM |
+| `FEEDBACK_TOKEN_EXCHANGE_JWKS_URL` | 任意 | `$exchangeIssuer/.well-known/jwks.json` | タスク定義 / SSM |
+| `FEEDBACK_TOKEN_EXCHANGE_ACTOR_ISSUERS` | exchange issuer 設定時**必須** | なし | 許可する元 IdP issuer のカンマ区切り |
+| `FEEDBACK_TOKEN_EXCHANGE_MAX_LIFETIME_SECONDS` | 任意 | `300` (許容範囲 30..900) | タスク定義 |
+| `FEEDBACK_EVIDENCE_MAX_BYTES` | 任意 | `10485760` (10MiB) | タスク定義 |
+| `FEEDBACK_WRITE_RATE_LIMIT_PER_MINUTE` | 任意 | `120` (tenant/principal 単位、1..10000) | タスク定義 |
+| `FEEDBACK_EVIDENCE_STORAGE` | 任意 (**本番は `s3`**) | `local` | タスク定義 |
+| `FEEDBACK_EVIDENCE_DIR` | `local` のとき任意 | `/data/evidence` | タスク定義 / volume |
+| `FEEDBACK_S3_BUCKET` | `s3` のとき**必須** | なし | タスク定義 / SSM |
+| `FEEDBACK_S3_REGION` | 任意 | AWS SDK 既定チェーン | タスク定義 |
+| `FEEDBACK_S3_ENDPOINT_URL` | 任意 (**dev の S3 互換 storage 専用**) | なし | — |
+| `FEEDBACK_S3_KEY_PREFIX` | 任意 | `evidence/` | タスク定義 |
+| `FEEDBACK_NOTIFICATION_POLL_MS` | notification worker で任意 | `2000` | タスク定義 |
+| `FEEDBACK_NOTIFICATION_MAX_ATTEMPTS` | notification worker で任意 | `5` | タスク定義 |
+| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | notification worker では**必須** | なし (compose が注入) | **Secrets Manager** |
+| `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | API/notification worker で**必須** | なし (base64 で 32 byte) | **Secrets Manager** |
+| `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY_PREVIOUS` | key rotation 中だけ任意 | なし (base64 で 32 byte) | **Secrets Manager** |
+| `FEEDBACK_RETENTION_POLL_MS` | retention worker で任意 | `3600000` | タスク定義 |
+| `FEEDBACK_ORPHAN_GRACE_SECONDS` | retention worker で任意 | `3600` (最小 300) | タスク定義 |
+
+`application_environments.allowed_origins` が CORS allowlist の正本であり、API 起動環境変数で
+origin を上書きしない。S3 認証は AWS SDK の既定チェーン (本番は ECS タスクロール) を使う。
+API、notification worker、retention worker は同じ image から、それぞれ `bin/feedback-service`、
+`bin/feedback-notification-worker`、`bin/feedback-retention-worker` を command で選ぶ。
+
+exchange token は別 issuer/audience の署名・`iat`/`exp` と最大 lifetime を検証し、
+`actor_issuer` / `actor_sub`、`feedback_tenant/application/environment/workspace`、
+`feedback_permissions` claim を必須とする。実効権限は DB membership と token permission の積集合であり、
+token scope 外の resource は許可しない。broker でのホスト session 検証・mTLS・token 発行鍵の保護は
+broker 側の責務であり、業務 API token を Feedback Service へ転送しない。
+
+Phase 3 の管理 UI/API が完成するまで、初期 tenant/application/environment/workspace/membership は
+one-shot の `bin/feedback-bootstrap` で登録する。次の変数は bootstrap command だけが読む。
+
+| 名称 | 必須 | 説明 |
+|---|---|---|
+| `FEEDBACK_BOOTSTRAP_TENANT_KEY` / `FEEDBACK_BOOTSTRAP_TENANT_DISPLAY_NAME` | 必須 | tenant の安定 key と表示名 |
+| `FEEDBACK_BOOTSTRAP_APPLICATION_KEY` / `FEEDBACK_BOOTSTRAP_APPLICATION_DISPLAY_NAME` | 必須 | application の安定 key と表示名 |
+| `FEEDBACK_BOOTSTRAP_ENVIRONMENT_KEY` / `FEEDBACK_BOOTSTRAP_ENVIRONMENT_BASE_URL` | 必須 | environment key と deep link の基底 URL |
+| `FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS` | 必須 | CORS 許可 origin (カンマ区切り) |
+| `FEEDBACK_BOOTSTRAP_EXTERNAL_WORKSPACE_KEY` / `FEEDBACK_BOOTSTRAP_WORKSPACE_DISPLAY_NAME` | 必須 | ホスト側 workspace key と表示名 |
+| `FEEDBACK_BOOTSTRAP_ISSUER` / `FEEDBACK_BOOTSTRAP_SUBJECT` | 必須 | 最初の管理主体を特定する OIDC issuer/subject |
+| `FEEDBACK_BOOTSTRAP_EMAIL` / `FEEDBACK_BOOTSTRAP_DISPLAY_NAME` | 任意 | 管理主体の表示属性 |
+| `FEEDBACK_BOOTSTRAP_PERMISSIONS` | 必須 | `feedback.read/comment/manage/admin` のカンマ区切り |
+
+bootstrap は冪等だが、同じ `applicationKey` を別 tenant に割り当てる操作は拒否する。production では
+one-shot task の環境変数として渡し、常駐 API タスクへ `FEEDBACK_BOOTSTRAP_*` を設定しない。
+
 ## worker-gis (apps/worker-gis — Python)
 
 ソース: `src/worker.py` の `os.getenv`。DB 接続は libpq 標準の `PG*` 変数。
@@ -178,6 +248,9 @@ Keycloak の本番モード運用 (ECS) か Cognito への移行を別途判断�
 | 名称 | 説明 | dev 既定 |
 |---|---|---|
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 開発 PostgreSQL の資格情報。api / worker / martin / seed にも同じ値が配線される | `gis` / `gis` / `gis` |
+| `FEEDBACK_POSTGRES_DB` / `FEEDBACK_POSTGRES_USER` / `FEEDBACK_POSTGRES_PASSWORD` | `--profile feedback` の専用通常 PostgreSQL。Web GIS DB と共有しない | `feedback` / `feedback` / `feedback` |
+| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | dev webhook の HMAC 署名 key | `feedback-dev-signing-secret-32chars` |
+| `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | dev notification endpoint の暗号鍵 (base64) | `infra/.env.example` の開発専用値 |
 | `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` | 開発 Keycloak の管理者 | `admin` / `admin` |
 | `UPLOAD_STORAGE` / `S3_BUCKET` / `S3_REGION` | アップロード保存先の切替。`s3` にする場合は `--profile s3` で MinIO を同時起動する | `local` / `gis-uploads` / `us-east-1` |
 | `JOB_QUEUE_MODE` / `ANALYSIS_RUNNER_MODE` | ジョブ実行基盤の切替 ([jobs-architecture.md](jobs-architecture.md))。`sqs` / `external` にする場合は `--profile sqs` で ElasticMQ と analysis-worker を同時起動する | `polling` / `in-process` |

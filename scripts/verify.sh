@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # verify.sh — リポジトリ統合 verify ゲート (fail-closed)
 #
-# api (Kotlin) / worker (Python) / web (TypeScript) の変更スコープを判定し、
+# api (Kotlin) / feedback (独立 Kotlin) / worker (Python) / web (TypeScript) の変更スコープを判定し、
 # 該当スコープの build / lint / typecheck / test を実行する。手動でも CI でも同じ入口を使う:
 #
 #   bash scripts/verify.sh                     # 変更スコープを自動判定 (基準: origin/main)
@@ -15,7 +15,7 @@
 #   - PostGIS を要する統合テスト・E2E は本スクリプトの対象外 (将来 nightly に配置する)
 #
 # Env:
-#   VERIFY_SCOPE        auto | all | api | worker | web   (default: auto)
+#   VERIFY_SCOPE        auto | all | api | feedback | worker | web   (default: auto)
 #   VERIFY_BASE_REF     auto 判定の基準 ref                (default: origin/main)
 #   VERIFY_DETECT_ONLY  1 ならスコープ判定だけ行い GITHUB_OUTPUT に出力して終了
 #   VERIFY_INTEGRATION  1 なら軽量ゲートの代わりに統合ティアを実行する。
@@ -34,6 +34,7 @@ fail() { echo "[verify] FAIL: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- スコープ判定
 NEED_API=0
+NEED_FEEDBACK=0
 NEED_WORKER=0
 NEED_WEB=0
 
@@ -47,11 +48,15 @@ classify_paths() {
         NEED_API=1; NEED_WEB=1 ;;
       apps/api/*)
         NEED_API=1 ;;
+      apps/feedback-service/*)
+        NEED_FEEDBACK=1 ;;
       apps/worker-gis/*)
         NEED_WORKER=1 ;;
       apps/web/*)
         NEED_WEB=1 ;;
-      contracts/feedback/* | packages/feedback-core/* | packages/feedback-react/* | packages/feedback-maplibre/* | packages/feedback-plugin/*)
+      contracts/feedback/*)
+        NEED_FEEDBACK=1; NEED_WEB=1 ;;
+      packages/feedback-core/* | packages/feedback-react/* | packages/feedback-maplibre/* | packages/feedback-plugin/*)
         NEED_WEB=1 ;;
       infra/postgres/*)
         # DB スキーマ・シードは api / worker の共有契約
@@ -60,14 +65,15 @@ classify_paths() {
         ;; # ドキュメントのみの変更は検証対象外
       *)
         # 分類できないパス (ルート設定 / scripts / .github など) は全部検証する
-        NEED_API=1; NEED_WORKER=1; NEED_WEB=1 ;;
+        NEED_API=1; NEED_FEEDBACK=1; NEED_WORKER=1; NEED_WEB=1 ;;
     esac
   done
 }
 
 case "$SCOPE" in
-  all)    NEED_API=1; NEED_WORKER=1; NEED_WEB=1 ;;
+  all)    NEED_API=1; NEED_FEEDBACK=1; NEED_WORKER=1; NEED_WEB=1 ;;
   api)    NEED_API=1 ;;
+  feedback) NEED_FEEDBACK=1 ;;
   worker) NEED_WORKER=1 ;;
   web)    NEED_WEB=1 ;;
   auto)
@@ -75,24 +81,25 @@ case "$SCOPE" in
       changed=$( { git diff --name-only "$base"; git ls-files --others --exclude-standard; } | sort -u )
       if [[ -z "$changed" ]]; then
         log "変更なし ($BASE_REF と同一) — 全スコープを検証します"
-        NEED_API=1; NEED_WORKER=1; NEED_WEB=1
+        NEED_API=1; NEED_FEEDBACK=1; NEED_WORKER=1; NEED_WEB=1
       else
         classify_paths <<<"$changed"
-        log "変更ファイル ($(wc -l <<<"$changed") 件) から判定: api=$NEED_API worker=$NEED_WORKER web=$NEED_WEB"
+        log "変更ファイル ($(wc -l <<<"$changed") 件) から判定: api=$NEED_API feedback=$NEED_FEEDBACK worker=$NEED_WORKER web=$NEED_WEB"
       fi
     else
       log "基準 ref '$BASE_REF' を解決できません — 全スコープを検証します"
-      NEED_API=1; NEED_WORKER=1; NEED_WEB=1
+      NEED_API=1; NEED_FEEDBACK=1; NEED_WORKER=1; NEED_WEB=1
     fi
     ;;
-  *) fail "不明な VERIFY_SCOPE: $SCOPE (auto | all | api | worker | web)" ;;
+  *) fail "不明な VERIFY_SCOPE: $SCOPE (auto | all | api | feedback | worker | web)" ;;
 esac
 
 if [[ "${VERIFY_DETECT_ONLY:-0}" == "1" ]]; then
-  log "detect-only: api=$NEED_API worker=$NEED_WORKER web=$NEED_WEB"
+  log "detect-only: api=$NEED_API feedback=$NEED_FEEDBACK worker=$NEED_WORKER web=$NEED_WEB"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {
       echo "api=$NEED_API"
+      echo "feedback=$NEED_FEEDBACK"
       echo "worker=$NEED_WORKER"
       echo "web=$NEED_WEB"
     } >>"$GITHUB_OUTPUT"
@@ -105,7 +112,7 @@ fi
 # 数百 ms で終わるため変更スコープによらず毎回実行する
 bash scripts/check-dev-seed-isolation.sh
 
-if [[ $NEED_API -eq 0 && $NEED_WORKER -eq 0 && $NEED_WEB -eq 0 ]]; then
+if [[ $NEED_API -eq 0 && $NEED_FEEDBACK -eq 0 && $NEED_WORKER -eq 0 && $NEED_WEB -eq 0 ]]; then
   log "PASS: 検証対象の変更なし (ドキュメントのみ)"
   exit 0
 fi
@@ -127,6 +134,27 @@ verify_api() {
     # 軽量ゲート: build = compile (警告エラー化) + test (単体テスト)
     gradle build --no-daemon
     log "api PASS"
+  fi
+  popd >/dev/null
+}
+
+# ---------------------------------------------------- feedback-service (Kotlin)
+verify_feedback() {
+  log "=== feedback (apps/feedback-service) ==="
+  command -v gradle >/dev/null 2>&1 \
+    || fail "gradle が見つかりません (fail-closed: feedback 変更は gradle なしで合格にできない)"
+
+  pushd apps/feedback-service >/dev/null
+  if [[ "$INTEGRATION" == "1" ]]; then
+    [[ -n "${FEEDBACK_DATABASE_URL:-}" ]] \
+      || fail "FEEDBACK_DATABASE_URL が未設定です (通常 PostgreSQL の独立統合テストに必要)"
+    [[ -n "${FEEDBACK_DATABASE_USER:-}" && -n "${FEEDBACK_DATABASE_PASSWORD:-}" ]] \
+      || fail "FEEDBACK_DATABASE_USER / FEEDBACK_DATABASE_PASSWORD が未設定です"
+    gradle integrationTest --no-daemon
+    log "feedback integration PASS"
+  else
+    gradle build --no-daemon
+    log "feedback PASS"
   fi
   popd >/dev/null
 }
@@ -201,7 +229,8 @@ verify_web() {
 }
 
 [[ $NEED_API    -eq 1 ]] && verify_api
+[[ $NEED_FEEDBACK -eq 1 ]] && verify_feedback
 [[ $NEED_WORKER -eq 1 ]] && verify_worker
 [[ $NEED_WEB    -eq 1 ]] && verify_web
 
-log "PASS: 統合 verify 完了 (api=$NEED_API worker=$NEED_WORKER web=$NEED_WEB)"
+log "PASS: 統合 verify 完了 (api=$NEED_API feedback=$NEED_FEEDBACK worker=$NEED_WORKER web=$NEED_WEB)"
