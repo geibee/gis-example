@@ -1,12 +1,15 @@
 {
   "name": "@feedback/contracts",
   "version": "1.0.0-alpha.1",
-  "private": false,
+  "description": "フィードバックサービス v1 の OpenAPI、JSON Schema、TypeScript 契約",
+  "private": true,
   "type": "module",
   "files": [
     "dist",
     "openapi.yaml",
-    "schemas"
+    "schemas",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",

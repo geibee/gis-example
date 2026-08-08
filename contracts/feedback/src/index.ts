@@ -1,4 +1,4 @@
-import type { components } from "./generated";
+import type { components } from "./generated.js";
 
 export const feedbackApiVersion = "1.0" as const;
 export const feedbackApiMajorVersion = 1 as const;
@@ -17,4 +17,4 @@ export type FeedbackSessionV1 = components["schemas"]["FeedbackSessionV1"];
 export type FeedbackThreadV1 = components["schemas"]["FeedbackThreadV1"];
 export type FeedbackMessageV1 = components["schemas"]["FeedbackMessageV1"];
 
-export type { components, operations, paths } from "./generated";
+export type { components, operations, paths } from "./generated.js";

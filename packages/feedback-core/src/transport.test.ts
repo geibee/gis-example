@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFeedbackTransport, FeedbackCompatibilityError } from "./transport";
+import { createFeedbackTransport, FeedbackCompatibilityError, FeedbackTransportError } from "./transport";
 
 const jsonResponse = (value: unknown, status = 200, etag: string | null = null) => ({
   ok: status >= 200 && status < 300,
@@ -51,5 +51,51 @@ describe("FeedbackTransport", () => {
       })
     });
     await expect(transport.getCapabilities()).rejects.toBeInstanceOf(FeedbackCompatibilityError);
+  });
+
+  it.each([403, 404, 409, 412, 413, 429, 500])("HTTP %iをProblem Details付きで保持する", async (status) => {
+    const transport = createFeedbackTransport({
+      baseUrl: "/feedback/v1",
+      getAccessToken: async () => "token",
+      fetch: async () => jsonResponse({
+        type: `/problems/status-${status}`,
+        title: "Error",
+        status,
+        code: `status.${status}`,
+        requestId: "request-1"
+      }, status)
+    });
+    const error = await transport.request("/resource").catch((caught) => caught);
+    expect(error).toBeInstanceOf(FeedbackTransportError);
+    expect(error).toMatchObject({ status, problem: { code: `status.${status}` } });
+  });
+
+  it("Idempotency-KeyとIf-Matchを送りbinary証跡を読む", async () => {
+    const calls: Array<{ url: string; headers?: Record<string, string> }> = [];
+    const transport = createFeedbackTransport({
+      baseUrl: "/feedback/v1",
+      getAccessToken: async () => "token",
+      fetch: async (url, init) => {
+        calls.push({ url, headers: init?.headers });
+        if (url.endsWith("/evidence")) {
+          return {
+            ...jsonResponse(null),
+            headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "image/png" : null },
+            arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer
+          };
+        }
+        return jsonResponse({ id: "resource" });
+      }
+    });
+    await transport.request("/resource", {
+      method: "PATCH",
+      body: { value: 1 },
+      idempotencyKey: "idempotency-00001",
+      ifMatch: '"2"'
+    });
+    const binary = await transport.requestBinary("/threads/t1/evidence");
+    expect(calls[0].headers).toMatchObject({ "Idempotency-Key": "idempotency-00001", "If-Match": '"2"' });
+    expect([...binary.bytes]).toEqual([1, 2, 3]);
+    expect(binary.contentType).toBe("image/png");
   });
 });

@@ -1,5 +1,5 @@
 import type { MapGeoJSONFeature, MapMouseEvent } from "maplibre-gl";
-import type { FeedbackTargetV1 } from "@feedback/contracts";
+import type { FeedbackTargetV1, FeedbackThreadV1 } from "@feedback/contracts";
 
 export type FeedbackMapLibreTargetOptions = {
   layers?: string[];
@@ -47,5 +47,63 @@ export function resolveMapLibreFeedbackTarget(
     featureKey,
     longitude: event.lngLat.lng,
     latitude: event.lngLat.lat
+  };
+}
+
+export type FeedbackMapLibreMarker = { remove(): void };
+
+export type FeedbackMapLibrePinMap = {
+  on(event: "styledata" | "remove", listener: () => void): void;
+  off(event: "styledata" | "remove", listener: () => void): void;
+  getLayer?(id: string): unknown;
+};
+
+export type FeedbackMapLibrePinBindingOptions = {
+  /** style reload 後に必要な host layer が存在するかを判定する。 */
+  requiredLayerIds?: readonly string[];
+  createMarker(
+    thread: FeedbackThreadV1,
+    target: Extract<FeedbackTargetV1, { kind: "map-feature" | "map-position" }>
+  ): FeedbackMapLibreMarker;
+};
+
+/** style reload・layer消滅・map unloadで marker を必ず再構築/破棄する lifecycle adapter。 */
+export function bindMapLibreFeedbackPins(
+  map: FeedbackMapLibrePinMap,
+  options: FeedbackMapLibrePinBindingOptions
+): { update(threads: readonly FeedbackThreadV1[]): void; destroy(): void } {
+  let current: readonly FeedbackThreadV1[] = [];
+  let markers: FeedbackMapLibreMarker[] = [];
+  let destroyed = false;
+  const clear = () => {
+    markers.forEach((marker) => marker.remove());
+    markers = [];
+  };
+  const render = () => {
+    clear();
+    if (destroyed) return;
+    if (options.requiredLayerIds?.some((layer) => !map.getLayer?.(layer))) return;
+    markers = current.flatMap((thread) => {
+      const target = thread.target;
+      return target.kind === "map-feature" || target.kind === "map-position"
+        ? [options.createMarker(thread, target)]
+        : [];
+    });
+  };
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    map.off("styledata", render);
+    map.off("remove", destroy);
+    clear();
+  };
+  map.on("styledata", render);
+  map.on("remove", destroy);
+  return {
+    update(threads) {
+      current = [...threads];
+      render();
+    },
+    destroy
   };
 }

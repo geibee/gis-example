@@ -1,9 +1,10 @@
 {
   "name": "@feedback/maplibre",
   "version": "1.0.0-alpha.1",
-  "private": false,
+  "description": "MapLibre向けフィードバックtarget変換とpin lifecycle adapter",
+  "private": true,
   "type": "module",
-  "files": ["dist"],
+  "files": ["dist", "README.md", "CHANGELOG.md"],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

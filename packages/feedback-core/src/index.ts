@@ -2,30 +2,31 @@ export {
   defineFeedbackManifest,
   resolveFeedbackLocation,
   validateFeedbackLocation
-} from "./manifest";
-export { assertFeedbackTarget, parseFeedbackTarget } from "./target";
+} from "./manifest.js";
+export { assertFeedbackTarget, parseFeedbackTarget } from "./target.js";
 export {
   assertCompatibleCapabilities,
   createFeedbackTransport,
   FeedbackCompatibilityError,
   FeedbackTransportError
-} from "./transport";
+} from "./transport.js";
 export type {
   FeedbackFetch,
   FeedbackFetchResponse,
   FeedbackRequestOptions,
   FeedbackResource,
+  FeedbackBinaryResource,
   FeedbackTokenGetter,
   FeedbackTokenRefresher,
   FeedbackTransport,
   FeedbackTransportOptions
-} from "./transport";
+} from "./transport.js";
 export type {
   FeedbackEvidencePayload,
   FeedbackEvidenceProvider,
   FeedbackEvidenceRequest,
   FeedbackHostAdapter
-} from "./host-adapter";
+} from "./host-adapter.js";
 export type {
   FeedbackApplicationManifestV1,
   FeedbackCapabilities,

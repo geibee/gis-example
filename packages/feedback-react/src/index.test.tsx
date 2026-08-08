@@ -41,7 +41,8 @@ describe("FeedbackProvider", () => {
         participantPolicy: { mode: "authenticated-identity" },
         evidencePolicy: { enabled: false, maxBytes: 1024, acceptedContentTypes: ["image/png"] }
       })),
-      request: vi.fn()
+      request: vi.fn(),
+      requestBinary: vi.fn()
     } as FeedbackTransport;
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(FeedbackProvider, { adapter, transport, children });
@@ -67,7 +68,8 @@ describe("FeedbackProvider", () => {
         };
       }),
       getReviewContext: vi.fn(async () => null),
-      request: vi.fn()
+      request: vi.fn(),
+      requestBinary: vi.fn()
     } as unknown as FeedbackTransport;
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(FeedbackProvider, { adapter, transport, onUnavailable, children });

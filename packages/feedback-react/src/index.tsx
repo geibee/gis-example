@@ -29,11 +29,41 @@ export type FeedbackFeatureFlags = {
 export type FeedbackMessages = {
   unavailable: string;
   loading: string;
+  launcher: string;
+  close: string;
+  submit: string;
+  reply: string;
+  resolve: string;
+  reopen: string;
+  participantName: string;
+  comment: string;
+  threads: string;
+  edit: string;
+  save: string;
+  history: string;
+  evidence: string;
+  postingWarning: string;
+  postingDenied: string;
 };
 
 export const defaultFeedbackMessages: FeedbackMessages = {
   unavailable: "フィードバック機能を一時的に利用できません",
-  loading: "フィードバック機能を準備しています"
+  loading: "フィードバック機能を準備しています",
+  launcher: "フィードバック",
+  close: "閉じる",
+  submit: "投稿する",
+  reply: "返信する",
+  resolve: "解決済みにする",
+  reopen: "再開する",
+  participantName: "投稿者名",
+  comment: "コメント",
+  threads: "フィードバック一覧",
+  edit: "編集",
+  save: "保存",
+  history: "編集履歴",
+  evidence: "証跡",
+  postingWarning: "この画面はレビュー対象外ですが、確認のうえ投稿できます",
+  postingDenied: "この画面にはフィードバックを投稿できません"
 };
 
 export type FeedbackProviderProps = {
@@ -44,6 +74,8 @@ export type FeedbackProviderProps = {
   features?: FeedbackFeatureFlags;
   portalTarget?: Element | DocumentFragment | null;
   onUnavailable?: (error: unknown) => void;
+  requestTimeoutMs?: number;
+  contextRetryCount?: number;
 };
 
 export type FeedbackRuntimeState = "loading" | "ready" | "unavailable";
@@ -72,7 +104,9 @@ export function FeedbackProvider({
   messages: messageOverrides,
   features = {},
   portalTarget = null,
-  onUnavailable
+  onUnavailable,
+  requestTimeoutMs = 5000,
+  contextRetryCount = 1
 }: FeedbackProviderProps) {
   const [state, setState] = useState<FeedbackRuntimeState>("loading");
   const [hostContext, setHostContext] = useState<FeedbackHostContextV1 | null>(null);
@@ -85,12 +119,27 @@ export function FeedbackProvider({
     setState("loading");
     setError(null);
     try {
-      await transport.getCapabilities();
-      const nextHostContext = adapter.getContext();
-      const nextLocation = adapter.getLocation();
-      const nextReviewContext = nextLocation
-        ? await transport.getReviewContext(nextHostContext, nextLocation)
-        : null;
+      const load = async () => {
+        await withTimeout(transport.getCapabilities(), requestTimeoutMs);
+        const nextHostContext = adapter.getContext();
+        const nextLocation = adapter.getLocation();
+        const nextReviewContext = nextLocation
+          ? await withTimeout(transport.getReviewContext(nextHostContext, nextLocation), requestTimeoutMs)
+          : null;
+        return { nextHostContext, nextLocation, nextReviewContext };
+      };
+      let loaded: Awaited<ReturnType<typeof load>> | null = null;
+      let lastError: unknown;
+      for (let attempt = 0; attempt <= contextRetryCount; attempt += 1) {
+        try {
+          loaded = await load();
+          break;
+        } catch (nextError) {
+          lastError = nextError;
+        }
+      }
+      if (!loaded) throw lastError;
+      const { nextHostContext, nextLocation, nextReviewContext } = loaded;
       setHostContext(nextHostContext);
       setLocation(nextLocation);
       setReviewContext(nextReviewContext);
@@ -103,7 +152,7 @@ export function FeedbackProvider({
       setState("unavailable");
       onUnavailable?.(nextError);
     }
-  }, [adapter, onUnavailable, transport]);
+  }, [adapter, contextRetryCount, onUnavailable, requestTimeoutMs, transport]);
 
   useEffect(() => {
     void refresh();
@@ -124,6 +173,20 @@ export function FeedbackProvider({
   }), [adapter, error, features, hostContext, location, messages, portalTarget, refresh, reviewContext, state, transport]);
 
   return <FeedbackContext.Provider value={value}>{children}</FeedbackContext.Provider>;
+}
+
+async function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Feedback Service request timeout")), milliseconds);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export function useFeedback(): FeedbackContextValue {
@@ -181,3 +244,7 @@ export type {
   FeedbackReviewContextV1,
   FeedbackTargetV1
 } from "@feedback/contracts";
+export { createDomEvidenceProvider } from "./capture.js";
+export type { DomCaptureRenderOptions, DomEvidenceProviderOptions } from "./capture.js";
+export { FeedbackOverlay, createLocalStorageParticipantAdapter } from "./overlay.js";
+export type { FeedbackOverlayProps, LocalStorageParticipantAdapter } from "./overlay.js";

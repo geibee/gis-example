@@ -33,6 +33,9 @@ export type FeedbackHostAdapter = {
   getAccessToken(): Promise<string | null>;
   refreshAccessToken?(): Promise<string | null>;
   getIdentity?(): Promise<FeedbackParticipant | null>;
+  /** 自己申告名の保存先。未実装時は React package がメモリ内だけで保持する。 */
+  getParticipantName?(): string | null | Promise<string | null>;
+  setParticipantName?(value: string | null): void | Promise<void>;
   navigate(location: FeedbackLocationV1, threadId: string): void | Promise<void>;
   captureEvidence?: FeedbackEvidenceProvider;
 };

@@ -16,6 +16,7 @@ export type FeedbackFetchResponse = {
   statusText: string;
   headers: { get(name: string): string | null };
   json(): Promise<unknown>;
+  arrayBuffer?(): Promise<ArrayBuffer>;
 };
 
 export type FeedbackFetch = (
@@ -34,9 +35,16 @@ export type FeedbackResource<T> = { value: T; etag: string | null };
 
 export interface FeedbackTransport {
   request<T>(path: string, options?: FeedbackRequestOptions): Promise<FeedbackResource<T>>;
+  requestBinary(path: string): Promise<FeedbackBinaryResource>;
   getCapabilities(): Promise<FeedbackCapabilities>;
   getReviewContext(context: FeedbackHostContextV1, location: FeedbackLocationV1): Promise<FeedbackReviewContextV1>;
 }
+
+export type FeedbackBinaryResource = {
+  bytes: Uint8Array;
+  contentType: string;
+  etag: string | null;
+};
 
 export type FeedbackTransportOptions = {
   baseUrl: string;
@@ -112,6 +120,28 @@ export function createFeedbackTransport(options: FeedbackTransportOptions): Feed
     return value;
   };
 
+  const requestBinary = async (path: string): Promise<FeedbackBinaryResource> => {
+    const perform = async (token: string | null) => {
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      return options.fetch(`${baseUrl}${normalizePath(path)}`, { method: "GET", headers });
+    };
+    let response = await perform(await options.getAccessToken());
+    if (response.status === 401 && options.refreshAccessToken) {
+      const refreshed = await refreshOnce();
+      if (refreshed) response = await perform(refreshed);
+    }
+    if (!response.ok) {
+      throw new FeedbackTransportError(response.status, await readProblem(response), response.statusText);
+    }
+    if (!response.arrayBuffer) throw new Error("Feedback fetch adapter が binary response に対応していません");
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType: response.headers.get("Content-Type") ?? "application/octet-stream",
+      etag: response.headers.get("ETag")
+    };
+  };
+
   const getReviewContext = async (context: FeedbackHostContextV1, location: FeedbackLocationV1) => {
     const query = encodeQuery({
       applicationKey: context.applicationKey,
@@ -127,7 +157,7 @@ export function createFeedbackTransport(options: FeedbackTransportOptions): Feed
     return (await request<FeedbackReviewContextV1>(`/review-context?${query}`)).value;
   };
 
-  return { request, getCapabilities, getReviewContext };
+  return { request, requestBinary, getCapabilities, getReviewContext };
 }
 
 export function assertCompatibleCapabilities(capabilities: FeedbackCapabilities): void {
