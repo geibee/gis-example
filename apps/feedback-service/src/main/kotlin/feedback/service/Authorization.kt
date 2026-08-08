@@ -16,16 +16,25 @@ internal val feedbackRoutePolicies: Set<RoutePolicy> = setOf(
     RoutePolicy("GET", "/sessions/{}/threads", FeedbackPermission.READ, ScopeKind.SESSION),
     RoutePolicy("POST", "/sessions/{}/threads", FeedbackPermission.COMMENT, ScopeKind.SESSION, mutate = true),
     RoutePolicy("GET", "/threads/{}", FeedbackPermission.READ, ScopeKind.THREAD),
+    RoutePolicy("GET", "/threads/{}/deep-link", FeedbackPermission.READ, ScopeKind.THREAD),
     RoutePolicy("POST", "/threads/{}/messages", FeedbackPermission.COMMENT, ScopeKind.THREAD, mutate = true),
     RoutePolicy("PATCH", "/messages/{}", FeedbackPermission.COMMENT, ScopeKind.MESSAGE, mutate = true),
     RoutePolicy("GET", "/messages/{}/versions", FeedbackPermission.READ, ScopeKind.MESSAGE),
     RoutePolicy("PATCH", "/threads/{}/status", FeedbackPermission.MANAGE, ScopeKind.THREAD, mutate = true),
     RoutePolicy("GET", "/threads/{}/evidence", FeedbackPermission.READ, ScopeKind.THREAD),
     RoutePolicy("POST", "/exports", FeedbackPermission.MANAGE, ScopeKind.WORKSPACE, mutate = true),
+    RoutePolicy("GET", "/exports/{}", FeedbackPermission.MANAGE, ScopeKind.EXPORT),
+    RoutePolicy("GET", "/exports/{}/download", FeedbackPermission.MANAGE, ScopeKind.EXPORT),
     RoutePolicy("GET", "/retention-policy", FeedbackPermission.MANAGE, ScopeKind.WORKSPACE),
     RoutePolicy("PATCH", "/retention-policy", FeedbackPermission.MANAGE, ScopeKind.WORKSPACE, mutate = true),
     RoutePolicy("GET", "/notification-settings", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE),
-    RoutePolicy("PATCH", "/notification-settings", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE, mutate = true)
+    RoutePolicy("PATCH", "/notification-settings", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE, mutate = true),
+    RoutePolicy("GET", "/memberships", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE),
+    RoutePolicy("POST", "/memberships", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE, mutate = true),
+    RoutePolicy("PATCH", "/memberships/{}", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE, mutate = true),
+    RoutePolicy("DELETE", "/memberships/{}", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE, mutate = true),
+    RoutePolicy("GET", "/notification-deliveries", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE),
+    RoutePolicy("POST", "/notification-deliveries/{}/retry", FeedbackPermission.ADMIN, ScopeKind.WORKSPACE, mutate = true)
 )
 
 data class AuthorizedContext(

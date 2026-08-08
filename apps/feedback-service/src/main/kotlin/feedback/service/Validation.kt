@@ -295,7 +295,6 @@ internal fun validateNotificationSettings(value: FeedbackNotificationSettings) {
             badRequest("webhookEndpoint は userinfo/fragment を含まない https URL で指定してください")
         }
     }
-    if (value.includeEvidence) badRequest("v1 では webhook への evidence 添付を許可していません")
 }
 
 internal fun validateRetentionPolicy(value: FeedbackRetentionPolicy) {

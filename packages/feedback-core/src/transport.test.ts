@@ -94,7 +94,11 @@ describe("FeedbackTransport", () => {
       ifMatch: '"2"'
     });
     const binary = await transport.requestBinary("/threads/t1/evidence");
-    expect(calls[0].headers).toMatchObject({ "Idempotency-Key": "idempotency-00001", "If-Match": '"2"' });
+    expect(calls[0].headers).toMatchObject({
+      "Content-Type": "application/merge-patch+json",
+      "Idempotency-Key": "idempotency-00001",
+      "If-Match": '"2"'
+    });
     expect([...binary.bytes]).toEqual([1, 2, 3]);
     expect(binary.contentType).toBe("image/png");
   });

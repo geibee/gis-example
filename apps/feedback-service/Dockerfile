@@ -8,7 +8,7 @@ FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 COPY --from=build /src/build/install/feedback-service /app
-RUN mkdir -p /data/evidence && chown -R 65532:65532 /data
+RUN mkdir -p /data/evidence /data/exports && chown -R 65532:65532 /data
 USER 65532:65532
 EXPOSE 8090
 

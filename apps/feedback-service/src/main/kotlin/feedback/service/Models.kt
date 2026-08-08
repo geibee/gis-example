@@ -59,6 +59,27 @@ data class FeedbackMe(
 )
 
 @Serializable
+data class FeedbackWorkspaceMember(
+    val userId: String,
+    val issuer: String,
+    val subject: String,
+    val email: String? = null,
+    val displayName: String? = null,
+    val permissions: List<String>,
+    val version: Int
+)
+
+@Serializable
+data class FeedbackMembershipCreateRequest(
+    val issuer: String,
+    val subject: String,
+    val permissions: List<String>
+)
+
+@Serializable
+data class FeedbackMembershipPatchRequest(val permissions: List<String>)
+
+@Serializable
 data class SessionScope(
     val pageKey: String,
     val routeTemplate: String? = null,
@@ -163,6 +184,9 @@ data class FeedbackThreadPage(
 )
 
 @Serializable
+data class FeedbackDeepLink(val url: String)
+
+@Serializable
 data class FeedbackThreadCreateRequest(
     val location: JsonObject,
     val target: JsonObject,
@@ -227,6 +251,30 @@ data class FeedbackNotificationSettings(
 )
 
 @Serializable
+data class FeedbackNotificationAttempt(
+    val retryCycle: Int,
+    val attempt: Int,
+    val status: String,
+    val responseStatus: Int? = null,
+    val error: String? = null,
+    val createdAt: String
+)
+
+@Serializable
+data class FeedbackNotificationDelivery(
+    val id: String,
+    val eventType: String,
+    val status: String,
+    val retryCycle: Int,
+    val attemptCount: Int,
+    val availableAt: String,
+    val deliveredAt: String? = null,
+    val lastError: String? = null,
+    val createdAt: String,
+    val attempts: List<FeedbackNotificationAttempt>
+)
+
+@Serializable
 data class FeedbackExportRequest(
     val applicationKey: String,
     val environmentKey: String,
@@ -243,7 +291,14 @@ data class FeedbackExportJob(
     val status: String,
     val downloadUrl: String? = null,
     val expiresAt: String? = null,
-    val createdAt: String
+    val createdAt: String,
+    val error: String? = null
+)
+
+data class StoredExport(
+    val fileName: String,
+    val contentType: String,
+    val bytes: ByteArray
 )
 
 @Serializable
@@ -298,7 +353,8 @@ enum class ScopeKind {
     WORKSPACE,
     SESSION,
     THREAD,
-    MESSAGE
+    MESSAGE,
+    EXPORT
 }
 
 data class RoutePolicy(

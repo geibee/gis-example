@@ -190,7 +190,11 @@ fun FeedbackDatabase.bootstrap(input: BootstrapInput): BootstrapResult = transac
         """
         INSERT INTO feedback.workspace_memberships (workspace_id, user_id, permissions)
         VALUES (?::uuid, ?::uuid, ?)
-        ON CONFLICT (workspace_id, user_id) DO UPDATE SET permissions = EXCLUDED.permissions
+        ON CONFLICT (workspace_id, user_id) DO UPDATE SET
+            permissions = EXCLUDED.permissions,
+            version = feedback.workspace_memberships.version + 1,
+            updated_at = now()
+        WHERE feedback.workspace_memberships.permissions IS DISTINCT FROM EXCLUDED.permissions
         """.trimIndent()
     ).use { statement ->
         statement.setString(1, workspaceId)

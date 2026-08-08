@@ -69,19 +69,21 @@ services:
       FEEDBACK_ALLOW_INSECURE_HTTP: "1"
       FEEDBACK_EVIDENCE_STORAGE: local
       FEEDBACK_EVIDENCE_DIR: /data/evidence
+      FEEDBACK_EXPORT_DIR: /data/exports
       FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
     ports:
       - "127.0.0.1:${FEEDBACK_SERVICE_HOST_PORT:-8090}:8090"
     volumes:
       - feedback-evidence-data:/data/evidence
+      - feedback-export-data:/data/exports
     depends_on:
       feedback-postgres:
         condition: service_healthy
       keycloak:
         condition: service_started
 
-  # Phase 3 の管理 UI ができるまでの one-shot provisioning CLI。
-  # application/workspace/認可を Feedback DB にだけ登録し、Web GIS DB は参照しない
+  # 初回 tenant/application/environment/workspace/admin を作る one-shot provisioning CLI。
+  # 以後の manifest/membership は Feedback Admin Console から管理する
   feedback-bootstrap:
     profiles: ["feedback"]
     restart: "no"
@@ -98,7 +100,7 @@ services:
       FEEDBACK_BOOTSTRAP_APPLICATION_DISPLAY_NAME: Web GIS
       FEEDBACK_BOOTSTRAP_ENVIRONMENT_KEY: local
       FEEDBACK_BOOTSTRAP_ENVIRONMENT_BASE_URL: http://localhost:5173
-      FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS: http://localhost:5173
+      FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:5174
       FEEDBACK_BOOTSTRAP_EXTERNAL_WORKSPACE_KEY: 00000000-0000-0000-0000-000000000000
       FEEDBACK_BOOTSTRAP_WORKSPACE_DISPLAY_NAME: デモプロジェクト
       FEEDBACK_BOOTSTRAP_ISSUER: http://localhost:8081/realms/gis
@@ -126,6 +128,23 @@ services:
       feedback-bootstrap:
         condition: service_completed_successfully
 
+  feedback-export-worker:
+    profiles: ["feedback"]
+    restart: unless-stopped
+    build:
+      context: ../apps/feedback-service
+    command: ["/app/bin/feedback-export-worker"]
+    environment:
+      FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
+      FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
+      FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      FEEDBACK_EXPORT_DIR: /data/exports
+    volumes:
+      - feedback-export-data:/data/exports
+    depends_on:
+      feedback-bootstrap:
+        condition: service_completed_successfully
+
   feedback-retention-worker:
     profiles: ["feedback"]
     restart: unless-stopped
@@ -138,11 +157,36 @@ services:
       FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       FEEDBACK_EVIDENCE_STORAGE: local
       FEEDBACK_EVIDENCE_DIR: /data/evidence
+      FEEDBACK_EXPORT_DIR: /data/exports
     volumes:
       - feedback-evidence-data:/data/evidence
+      - feedback-export-data:/data/exports
     depends_on:
       feedback-bootstrap:
         condition: service_completed_successfully
+
+  feedback-admin:
+    profiles: ["feedback"]
+    restart: unless-stopped
+    build:
+      context: ..
+      dockerfile: apps/feedback-admin/Dockerfile
+      args:
+        VITE_FEEDBACK_API_BASE: http://localhost:${FEEDBACK_SERVICE_HOST_PORT:-8090}/feedback/v1
+        VITE_FEEDBACK_ADMIN_OIDC_AUTHORITY: http://localhost:8081/realms/gis
+        VITE_FEEDBACK_ADMIN_OIDC_CLIENT_ID: feedback-admin
+        VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI: http://localhost:${FEEDBACK_ADMIN_HOST_PORT:-5174}/
+        FEEDBACK_ADMIN_APPLICATION: web-gis
+        FEEDBACK_ADMIN_ENVIRONMENT: local
+        FEEDBACK_ADMIN_WORKSPACE: 00000000-0000-0000-0000-000000000000
+        CSP_CONNECT_SRC_EXTRA: http://localhost:${FEEDBACK_SERVICE_HOST_PORT:-8090} http://localhost:8081
+    ports:
+      - "127.0.0.1:${FEEDBACK_ADMIN_HOST_PORT:-5174}:80"
+    depends_on:
+      feedback-service:
+        condition: service_started
+      keycloak:
+        condition: service_started
 
   # 開発用シードの one-shot 投入 (Flyway マイグレーション適用後に app テーブルへ投入する)。
   # 各シードはセンチネル行で冪等化済みのため、up を繰り返しても再適用しない。
@@ -376,8 +420,8 @@ services:
       args:
         VITE_FEEDBACK_API_MODE: ${VITE_FEEDBACK_API_MODE:-legacy}
         VITE_FEEDBACK_API_BASE: ${VITE_FEEDBACK_API_BASE:-/feedback/v1}
-        VITE_FEEDBACK_APPLICATION_KEY: ${VITE_FEEDBACK_APPLICATION_KEY:-web-gis}
-        VITE_FEEDBACK_ENVIRONMENT_KEY: ${VITE_FEEDBACK_ENVIRONMENT_KEY:-local}
+        FEEDBACK_APPLICATION: ${VITE_FEEDBACK_APPLICATION_KEY:-web-gis}
+        FEEDBACK_ENVIRONMENT: ${VITE_FEEDBACK_ENVIRONMENT_KEY:-local}
     # ホスト側で 5173 が使用中の場合は WEB_HOST_PORT で変更できる
     # (OIDC のリダイレクト URI と CORS は 5173 前提のため、UI を使う場合は既定のままにする)
     ports:
@@ -393,3 +437,4 @@ volumes:
   minio-data:
   feedback-postgres-data:
   feedback-evidence-data:
+  feedback-export-data:

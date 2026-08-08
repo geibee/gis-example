@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "typecheck:maplibre": "tsc --noEmit -p tsconfig.maplibre.json",
+    "typecheck:admin": "tsc --noEmit -p tsconfig.admin.json",
     "build": "vite build",
     "test": "vitest run"
   }

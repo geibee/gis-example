@@ -50,13 +50,15 @@ classify_paths() {
         NEED_API=1 ;;
       apps/feedback-service/*)
         NEED_FEEDBACK=1 ;;
+      apps/feedback-admin/*)
+        NEED_WEB=1 ;;
       apps/worker-gis/*)
         NEED_WORKER=1 ;;
       apps/web/*)
         NEED_WEB=1 ;;
       contracts/feedback/*)
         NEED_FEEDBACK=1; NEED_WEB=1 ;;
-      packages/feedback-core/* | packages/feedback-react/* | packages/feedback-maplibre/* | packages/feedback-plugin/*)
+      packages/feedback-core/* | packages/feedback-react/* | packages/feedback-maplibre/* | packages/feedback-admin-react/* | packages/feedback-plugin/*)
         NEED_WEB=1 ;;
       infra/postgres/*)
         # DB スキーマ・シードは api / worker の共有契約
@@ -212,6 +214,9 @@ verify_web() {
   npm --workspace @feedback/maplibre run typecheck
   npm --workspace @feedback/maplibre run test
   npm --workspace @feedback/maplibre run build
+  npm --workspace @feedback/admin-react run typecheck
+  npm --workspace @feedback/admin-react run test
+  npm --workspace @feedback/admin-react run build
   bash scripts/check-feedback-contracts.sh
   bash scripts/check-feedback-packages.sh
   # consumer 1 の互換 package。Phase 4 完了までは既存契約とのドリフトも継続検査する。
@@ -225,6 +230,9 @@ verify_web() {
   # フロントエンドテスト (vitest run: 単発実行。watch にしない)
   npm --workspace apps/web run test
   npm --workspace apps/web run build
+  npm --workspace @feedback/admin-console run typecheck
+  npm --workspace @feedback/admin-console run test
+  npm --workspace @feedback/admin-console run build
   log "web PASS"
 }
 

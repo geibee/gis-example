@@ -140,6 +140,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/threads/{threadId}/deep-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                threadId: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getFeedbackThreadDeepLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/threads/{threadId}/messages": {
         parameters: {
             query?: never;
@@ -246,6 +264,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/exports/{exportId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getFeedbackExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/exports/{exportId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        get: operations["downloadFeedbackExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/retention-policy": {
         parameters: {
             query?: never;
@@ -276,6 +330,79 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["patchFeedbackNotificationSettings"];
+        trace?: never;
+    };
+    "/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFeedbackWorkspaceMemberships"];
+        put?: never;
+        post: operations["createFeedbackWorkspaceMembership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memberships/{userId}": {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteFeedbackWorkspaceMembership"];
+        options?: never;
+        head?: never;
+        patch: operations["patchFeedbackWorkspaceMembership"];
+        trace?: never;
+    };
+    "/notification-deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFeedbackNotificationDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notification-deliveries/{deliveryId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliveryId: components["parameters"]["DeliveryId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryFeedbackNotificationDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -323,6 +450,24 @@ export interface components {
         FeedbackMe: {
             participant: components["schemas"]["FeedbackParticipant"];
             memberships: components["schemas"]["FeedbackMembership"][];
+        };
+        FeedbackWorkspaceMember: {
+            /** Format: uuid */
+            userId: string;
+            issuer: string;
+            subject: string;
+            email?: string | null;
+            displayName?: string | null;
+            permissions: components["schemas"]["FeedbackPermission"][];
+            version: number;
+        };
+        FeedbackMembershipCreateRequest: {
+            issuer: string;
+            subject: string;
+            permissions: components["schemas"]["FeedbackPermission"][];
+        };
+        FeedbackMembershipPatchRequest: {
+            permissions: components["schemas"]["FeedbackPermission"][];
         };
         FeedbackHostContextV1: {
             /** @constant */
@@ -484,6 +629,10 @@ export interface components {
             nextCursor?: string | null;
             totalCount?: number;
         };
+        FeedbackDeepLink: {
+            /** Format: uri */
+            url: string;
+        };
         FeedbackThreadCreateRequest: {
             location: components["schemas"]["location.schema"];
             target: components["schemas"]["target.schema"];
@@ -527,12 +676,13 @@ export interface components {
             id: string;
             /** @enum {unknown} */
             status: "queued" | "running" | "completed" | "failed";
-            /** Format: uri */
+            /** Format: uri-reference */
             downloadUrl?: string | null;
             /** Format: date-time */
             expiresAt?: string | null;
             /** Format: date-time */
             createdAt: string;
+            error?: string | null;
         };
         FeedbackRetentionPolicy: {
             evidenceRetentionDays: number | null;
@@ -547,6 +697,33 @@ export interface components {
             includeBody: boolean;
             /** @default false */
             includeEvidence: boolean;
+        };
+        FeedbackNotificationAttempt: {
+            retryCycle: number;
+            attempt: number;
+            /** @enum {unknown} */
+            status: "delivered" | "failed";
+            responseStatus?: number | null;
+            error?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        FeedbackNotificationDelivery: {
+            /** Format: uuid */
+            id: string;
+            eventType: string;
+            /** @enum {unknown} */
+            status: "pending" | "processing" | "delivered" | "failed";
+            retryCycle: number;
+            attemptCount: number;
+            /** Format: date-time */
+            availableAt: string;
+            /** Format: date-time */
+            deliveredAt?: string | null;
+            lastError?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            attempts: components["schemas"]["FeedbackNotificationAttempt"][];
         };
         /** FeedbackApplicationManifestV1 */
         "application-manifest.schema": {
@@ -637,21 +814,21 @@ export interface components {
             tenantKey: string;
             applicationKey: string;
             environmentKey: string;
-            workspaceKey: string;
+            externalWorkspaceKey: string;
             /** Format: uuid */
             sessionId: string;
             /** Format: uuid */
             threadId: string;
             actor: {
                 principalId: string;
-                displayName?: string;
-                participantName?: string;
+                displayName?: string | null;
+                participantName?: string | null;
             };
             /** Format: uri */
             deepLink: string;
             body?: string;
-            /** @default false */
-            evidenceIncluded: boolean;
+            /** Format: uri-reference */
+            evidenceUrl?: string;
         };
     };
     responses: {
@@ -746,6 +923,9 @@ export interface components {
         SessionId: string;
         ThreadId: string;
         MessageId: string;
+        ExportId: string;
+        UserId: string;
+        DeliveryId: string;
         Cursor: string;
         Limit: number;
         IdempotencyKey: string;
@@ -1107,6 +1287,31 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getFeedbackThreadDeepLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                threadId: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 登録済みenvironment/manifestから生成した対象アプリURL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackDeepLink"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     createFeedbackMessage: {
         parameters: {
             query?: never;
@@ -1293,6 +1498,59 @@ export interface operations {
             429: components["responses"]["TooManyRequests"];
         };
     };
+    getFeedbackExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description export job の現在状態 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackExportJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    downloadFeedbackExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 認可済みで保存期限内のCSV/XLSX */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getFeedbackRetentionPolicy: {
         parameters: {
             query: {
@@ -1411,6 +1669,190 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             412: components["responses"]["PreconditionFailed"];
+        };
+    };
+    listFeedbackWorkspaceMemberships: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description workspace membership 一覧 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackWorkspaceMember"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createFeedbackWorkspaceMembership: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackMembershipCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 追加したmembership */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackWorkspaceMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteFeedbackWorkspaceMembership: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description membershipを削除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["PreconditionFailed"];
+        };
+    };
+    patchFeedbackWorkspaceMembership: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["FeedbackMembershipPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新したmembership */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackWorkspaceMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+        };
+    };
+    listFeedbackNotificationDeliveries: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+                status?: "pending" | "processing" | "delivered" | "failed";
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description payload本文とsecretを含まない配送状態・試行履歴 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackNotificationDelivery"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    retryFeedbackNotificationDelivery: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header?: never;
+            path: {
+                deliveryId: components["parameters"]["DeliveryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 新しいretry cycleへ戻した配送 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackNotificationDelivery"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
 }

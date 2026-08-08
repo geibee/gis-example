@@ -20,7 +20,13 @@ log() { echo "[seed-guard] $*"; }
 fail() { echo "[seed-guard] FAIL: $*" >&2; exit 1; }
 
 # ---------------------------------------------------- 1. 本番 Dockerfile の検査
-PROD_DOCKERFILES=(apps/api/Dockerfile apps/feedback-service/Dockerfile apps/worker-gis/Dockerfile apps/web/Dockerfile)
+PROD_DOCKERFILES=(
+  apps/api/Dockerfile
+  apps/feedback-service/Dockerfile
+  apps/feedback-admin/Dockerfile
+  apps/worker-gis/Dockerfile
+  apps/web/Dockerfile
+)
 for df in "${PROD_DOCKERFILES[@]}"; do
   [[ -f "$df" ]] || fail "$df が見つかりません (本番 Dockerfile の配置が変わった場合はこのスクリプトを更新すること)"
   if hits=$(grep -inE '^[[:space:]]*(COPY|ADD)[[:space:]]' "$df" | grep -iE 'infra/|realm|seed'); then

@@ -457,7 +457,7 @@ function idempotencyKey(): string {
 }
 
 function versionEtag(version: number): string {
-  return `"${version}"`;
+  return `"v${version}"`;
 }
 
 function clamp(value: number): number {

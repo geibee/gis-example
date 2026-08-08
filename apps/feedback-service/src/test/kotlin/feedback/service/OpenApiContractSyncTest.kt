@@ -90,7 +90,8 @@ class OpenApiContractSyncTest {
                             1024,
                             "evidence/",
                             120,
-                            NotificationCipher(ByteArray(32) { 1 })
+                            NotificationCipher(ByteArray(32) { 1 }),
+                            LocalEvidenceStorage(Path.of(System.getProperty("java.io.tmpdir"), "feedback-export-route-test"))
                         )
                     )
                 }

@@ -140,6 +140,20 @@ data class EvidenceStorageSettings(
     }
 }
 
+data class ExportStorageSettings(
+    val localDirectory: Path,
+    val keyPrefix: String
+) {
+    companion object {
+        fun fromEnv(): ExportStorageSettings = ExportStorageSettings(
+            localDirectory = Path.of(System.getenv("FEEDBACK_EXPORT_DIR") ?: "/data/exports"),
+            keyPrefix = (System.getenv("FEEDBACK_EXPORT_KEY_PREFIX") ?: "exports/").let {
+                if (it.endsWith('/')) it else "$it/"
+            }
+        )
+    }
+}
+
 data class ServiceSettings(
     val port: Int,
     val evidenceMaxBytes: Long,
@@ -148,7 +162,8 @@ data class ServiceSettings(
     val oidc: OidcSettings,
     val tokenExchange: TokenExchangeSettings?,
     val notificationCipher: NotificationCipher,
-    val evidenceStorage: EvidenceStorageSettings
+    val evidenceStorage: EvidenceStorageSettings,
+    val exportStorage: ExportStorageSettings
 ) {
     companion object {
         fun fromEnv(): ServiceSettings = ServiceSettings(
@@ -160,7 +175,8 @@ data class ServiceSettings(
             oidc = OidcSettings.fromEnv(),
             tokenExchange = TokenExchangeSettings.fromEnvOrNull(),
             notificationCipher = NotificationCipher.fromEnv(),
-            evidenceStorage = EvidenceStorageSettings.fromEnv()
+            evidenceStorage = EvidenceStorageSettings.fromEnv(),
+            exportStorage = ExportStorageSettings.fromEnv()
         )
     }
 }

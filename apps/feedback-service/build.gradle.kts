@@ -34,6 +34,13 @@ val retentionWorkerStartScripts by tasks.registering(CreateStartScripts::class) 
     classpath = tasks.startScripts.get().classpath
 }
 
+val exportWorkerStartScripts by tasks.registering(CreateStartScripts::class) {
+    applicationName = "feedback-export-worker"
+    mainClass.set("feedback.service.ExportWorkerMainKt")
+    outputDir = layout.buildDirectory.dir("scripts-export-worker").get().asFile
+    classpath = tasks.startScripts.get().classpath
+}
+
 distributions {
     main {
         contents {
@@ -47,6 +54,10 @@ distributions {
             }
             into("bin") {
                 from(retentionWorkerStartScripts)
+                filePermissions { unix("rwxr-xr-x") }
+            }
+            into("bin") {
+                from(exportWorkerStartScripts)
                 filePermissions { unix("rwxr-xr-x") }
             }
         }

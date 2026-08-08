@@ -83,11 +83,12 @@ describe("Feedback JSON Schema", () => {
       tenantKey: "tenant-1",
       applicationKey: "sample-app",
       environmentKey: "production",
-      workspaceKey: "workspace-1",
+      externalWorkspaceKey: "workspace-1",
       sessionId: "00000000-0000-4000-8000-000000000002",
       threadId: "00000000-0000-4000-8000-000000000003",
       actor: { principalId: "issuer|subject" },
-      deepLink: "https://app.example/orders/1?feedbackThread=1"
+      deepLink: "https://app.example/orders/1?feedbackThread=1",
+      evidenceUrl: "/feedback/v1/threads/00000000-0000-4000-8000-000000000003/evidence"
     };
     expect(validate(event), JSON.stringify(validate.errors)).toBe(true);
     expect(validate({ ...event, eventType: "feedback.unknown.v1" })).toBe(false);

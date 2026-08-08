@@ -32,8 +32,10 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
     val database = FeedbackDatabase.create(settings.database)
     database.migrate()
     val evidenceStorage = createEvidenceStorage(settings.evidenceStorage)
+    val exportStorage = LocalEvidenceStorage(settings.exportStorage.localDirectory)
     environment.monitor.subscribe(io.ktor.server.application.ApplicationStopped) {
         evidenceStorage.close()
+        exportStorage.close()
         database.close()
     }
 
@@ -130,7 +132,8 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
                 evidenceMaxBytes = settings.evidenceMaxBytes,
                 evidenceKeyPrefix = settings.evidenceStorage.keyPrefix,
                 writeRateLimitPerMinute = settings.writeRateLimitPerMinute,
-                notificationCipher = settings.notificationCipher
+                notificationCipher = settings.notificationCipher,
+                exportStorage = exportStorage
             )
         )
     }

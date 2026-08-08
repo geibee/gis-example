@@ -88,13 +88,16 @@ export function createFeedbackTransport(options: FeedbackTransportOptions): Feed
 
   const request = async <T>(path: string, requestOptions: FeedbackRequestOptions = {}): Promise<FeedbackResource<T>> => {
     const perform = async (token: string | null) => {
+      const method = requestOptions.method ?? "GET";
       const headers: Record<string, string> = { Accept: "application/json" };
       if (token) headers.Authorization = `Bearer ${token}`;
-      if (requestOptions.body !== undefined) headers["Content-Type"] = "application/json";
+      if (requestOptions.body !== undefined) {
+        headers["Content-Type"] = method === "PATCH" ? "application/merge-patch+json" : "application/json";
+      }
       if (requestOptions.idempotencyKey) headers["Idempotency-Key"] = requestOptions.idempotencyKey;
       if (requestOptions.ifMatch) headers["If-Match"] = requestOptions.ifMatch;
       return options.fetch(`${baseUrl}${normalizePath(path)}`, {
-        method: requestOptions.method ?? "GET",
+        method,
         headers,
         ...(requestOptions.body !== undefined ? { body: JSON.stringify(requestOptions.body) } : {})
       });

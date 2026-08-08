@@ -20,6 +20,9 @@ import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.util.Date
+import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicInteger
+import com.sun.net.httpserver.HttpServer
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.client.request.get
@@ -40,6 +43,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -291,6 +295,155 @@ class StandaloneMigrationIntegrationTest {
     }
 
     @Test
+    fun `Phase3のexport membership notificationをローカルfixtureで完結できる`() {
+        val fixture = seedPhase3Fixture()
+        val exportRequest = FeedbackExportRequest(
+            applicationKey = fixture.input.applicationKey,
+            environmentKey = fixture.input.environmentKey,
+            externalWorkspaceKey = fixture.input.externalWorkspaceKey,
+            sessionId = fixture.sessionId,
+            format = "csv"
+        )
+        val exportElement = serviceJson.encodeToJsonElement(FeedbackExportRequest.serializer(), exportRequest)
+        val queued = database.createExport(
+            fixture.scope,
+            fixture.principal,
+            exportRequest,
+            "phase3-export-key-0001",
+            requestHash(exportElement)
+        )
+        val evidenceStorage = LocalEvidenceStorage(temporaryDirectory.resolve("evidence"))
+        LocalEvidenceStorage(temporaryDirectory.resolve("exports")).use { exportStorage ->
+            val worker = ExportWorker(database, exportStorage, "exports/", pollMillis = 100)
+            assertTrue(worker.runOnce())
+            val completed = database.getExportJob(queued.id)
+            assertEquals("completed", completed.status)
+            assertEquals("/feedback/v1/exports/${queued.id}/download", completed.downloadUrl)
+            val csv = database.getStoredExport(queued.id, exportStorage).bytes.toString(Charsets.UTF_8)
+            assertContains(csv, "'=SUM(1,1)")
+            assertContains(csv, "https://phase3.example/orders/ORDER-1?feedbackThread=${fixture.threadId}")
+
+            database.dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "UPDATE feedback.export_jobs SET expires_at = now() - interval '1 second' WHERE id = ?::uuid"
+                ).use { statement -> statement.setString(1, queued.id); statement.executeUpdate() }
+            }
+            val retention = RetentionWorker(
+                database = database,
+                storage = evidenceStorage,
+                exportStorage = exportStorage,
+                evidencePrefix = "evidence/",
+                pollMillis = 1000,
+                orphanGraceSeconds = 300
+            )
+            assertEquals(1, retention.purgeExpiredExports())
+            assertFailsWith<FeedbackApiException> { database.getStoredExport(queued.id, exportStorage) }
+        }
+
+        val memberPrincipal = database.resolvePrincipal(
+            fixture.input.issuer,
+            "phase3-member",
+            "member@example.invalid",
+            "Phase3 Member"
+        )
+        val createMember = FeedbackMembershipCreateRequest(
+            issuer = fixture.input.issuer,
+            subject = memberPrincipal.subject,
+            permissions = listOf("feedback.read")
+        )
+        val createMemberElement = serviceJson.encodeToJsonElement(FeedbackMembershipCreateRequest.serializer(), createMember)
+        val member = database.createWorkspaceMember(
+            fixture.scope,
+            fixture.principal,
+            createMember,
+            "phase3-membership-key-01",
+            requestHash(createMemberElement)
+        )
+        val updated = database.patchWorkspaceMember(
+            fixture.scope,
+            member.userId,
+            member.version,
+            FeedbackMembershipPatchRequest(listOf("feedback.read", "feedback.comment"))
+        )
+        assertEquals(2, updated.version)
+        database.deleteWorkspaceMember(fixture.scope, updated.userId, updated.version)
+        val admin = database.listWorkspaceMembers(fixture.scope).single()
+        assertFailsWith<FeedbackApiException> {
+            database.deleteWorkspaceMember(fixture.scope, admin.userId, admin.version)
+        }
+
+        val responses = AtomicInteger()
+        val receivedBodies = mutableListOf<String>()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/webhook") { exchange ->
+            receivedBodies += exchange.requestBody.readAllBytes().toString(Charsets.UTF_8)
+            val status = if (responses.incrementAndGet() <= 2) 500 else 204
+            exchange.sendResponseHeaders(status, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val cipher = NotificationCipher(ByteArray(32) { 7 })
+            val (_, settingsVersion) = database.getNotificationSettings(fixture.scope, cipher)
+            database.patchNotificationSettings(
+                fixture.scope,
+                settingsVersion,
+                FeedbackNotificationSettings(
+                    webhookEnabled = true,
+                    webhookEndpoint = "https://fixture.invalid/webhook",
+                    includeBody = false,
+                    includeEvidence = true
+                ),
+                cipher
+            )
+            val localEndpoint = cipher.encrypt("http://127.0.0.1:${server.address.port}/webhook")
+            database.dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    """
+                    UPDATE feedback.notification_settings
+                    SET webhook_endpoint_ciphertext = ?, webhook_endpoint_nonce = ?
+                    WHERE workspace_id = ?::uuid
+                    """.trimIndent()
+                ).use { statement ->
+                    statement.setBytes(1, localEndpoint.ciphertext)
+                    statement.setBytes(2, localEndpoint.nonce)
+                    statement.setString(3, fixture.scope.workspaceId)
+                    statement.executeUpdate()
+                }
+            }
+            val notificationWorker = NotificationWorker(
+                database = database,
+                pollMillis = 100,
+                maxAttempts = 2,
+                notificationCipher = cipher,
+                dispatcher = WebhookDispatcher(
+                    signingSecret = "phase3-fixture-signing-secret-32chars",
+                    allowLocalDestinations = true
+                )
+            )
+            assertTrue(notificationWorker.runOnce())
+            makeNotificationsAvailable(fixture.scope)
+            assertTrue(notificationWorker.runOnce())
+            val failed = database.listNotificationDeliveries(fixture.scope, "failed", 10).single()
+            assertEquals(2, failed.attempts.size)
+            val retried = database.retryNotificationDelivery(fixture.scope, failed.id)
+            assertEquals(1, retried.retryCycle)
+            assertTrue(notificationWorker.runOnce())
+            val delivered = database.listNotificationDeliveries(fixture.scope, "delivered", 10).single()
+            assertEquals(listOf(0, 0, 1), delivered.attempts.map { it.retryCycle })
+            assertEquals(listOf(1, 2, 1), delivered.attempts.map { it.attempt })
+            receivedBodies.forEach { body ->
+                assertFalse(body.contains("=SUM(1,1)"))
+                assertContains(body, "\"evidenceUrl\":\"/feedback/v1/threads/${fixture.threadId}/evidence\"")
+                assertContains(body, "\"deepLink\":\"https://phase3.example/orders/ORDER-1?feedbackThread=${fixture.threadId}\"")
+            }
+        } finally {
+            server.stop(0)
+            evidenceStorage.close()
+        }
+    }
+
+    @Test
     fun `実 HTTP は専用 OIDC と Problem Details と manifest 契約を使う`() = testApplication {
         val issuer = "https://issuer-http.example"
         val exchangeIssuer = "https://broker.example"
@@ -378,6 +531,10 @@ class StandaloneMigrationIntegrationTest {
                         region = null,
                         endpointUrl = null,
                         keyPrefix = "evidence/"
+                    ),
+                    exportStorage = ExportStorageSettings(
+                        localDirectory = temporaryDirectory.resolve("exports"),
+                        keyPrefix = "exports/"
                     )
                 )
             )
@@ -462,11 +619,67 @@ class StandaloneMigrationIntegrationTest {
             )
         }
         assertConformsTo(threadCreated, "post", "/sessions/{sessionId}/threads", 201)
+        val threadId = serviceJson.parseToJsonElement(threadCreated.bodyAsText()).jsonObject
+            .getValue("id").jsonPrimitive.content
 
         val threadList = client.get("/feedback/v1/sessions/$sessionId/threads") {
             header(HttpHeaders.Authorization, "Bearer $token")
         }
         assertConformsTo(threadList, "get", "/sessions/{sessionId}/threads", 200)
+
+        val deepLink = client.get("/feedback/v1/threads/$threadId/deep-link") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(deepLink, "get", "/threads/{threadId}/deep-link", 200)
+        assertContains(deepLink.bodyAsText(), "https://http.example/?feedbackThread=$threadId")
+
+        val exportCreated = client.post("/feedback/v1/exports") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header("Idempotency-Key", "contract-export-00001")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "applicationKey":"http-app",
+                  "environmentKey":"prod",
+                  "externalWorkspaceKey":"workspace-http",
+                  "sessionId":"$sessionId",
+                  "format":"csv",
+                  "locale":"ja-JP",
+                  "timezone":"Asia/Tokyo"
+                }
+                """.trimIndent()
+            )
+        }
+        assertConformsTo(exportCreated, "post", "/exports", 202)
+        val exportId = serviceJson.parseToJsonElement(exportCreated.bodyAsText()).jsonObject
+            .getValue("id").jsonPrimitive.content
+        LocalEvidenceStorage(temporaryDirectory.resolve("exports")).use { storage ->
+            assertTrue(ExportWorker(database, storage, "exports/", pollMillis = 100).runOnce())
+        }
+        val exportStatus = client.get("/feedback/v1/exports/$exportId") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(exportStatus, "get", "/exports/{exportId}", 200)
+        val exportDownload = client.get("/feedback/v1/exports/$exportId/download") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertEquals(HttpStatusCode.OK, exportDownload.status)
+        assertTrue(exportDownload.headers[HttpHeaders.ContentType]?.startsWith("text/csv") == true)
+
+        val memberships = client.get(
+            "/feedback/v1/memberships?applicationKey=http-app&externalWorkspaceKey=workspace-http"
+        ) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(memberships, "get", "/memberships", 200)
+
+        val deliveries = client.get(
+            "/feedback/v1/notification-deliveries?applicationKey=http-app&externalWorkspaceKey=workspace-http"
+        ) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(deliveries, "get", "/notification-deliveries", 200)
 
         val exchangeAuthorized = client.get(
             "/feedback/v1/retention-policy?applicationKey=http-app&externalWorkspaceKey=workspace-http"
@@ -562,7 +775,128 @@ class StandaloneMigrationIntegrationTest {
         return Fixture(userId, workspaceA)
     }
 
+    private fun seedPhase3Fixture(): Phase3Fixture {
+        val input = BootstrapInput(
+            tenantKey = "tenant-phase3",
+            tenantDisplayName = "Tenant Phase3",
+            applicationKey = "phase3-app",
+            applicationDisplayName = "Phase3 App",
+            environmentKey = "prod",
+            environmentBaseUrl = "https://phase3.example",
+            allowedOrigins = listOf("https://phase3.example"),
+            externalWorkspaceKey = "workspace-phase3",
+            workspaceDisplayName = "Workspace Phase3",
+            issuer = "https://phase3-issuer.example",
+            subject = "phase3-admin",
+            email = "admin@example.invalid",
+            displayName = "Phase3 Admin",
+            permissions = FeedbackPermission.entries.toSet()
+        )
+        database.bootstrap(input)
+        val principal = database.resolvePrincipal(input.issuer, input.subject, input.email, input.displayName)
+        val scope = database.resolveWorkspaceScope(
+            principal.userId,
+            input.applicationKey,
+            input.externalWorkspaceKey,
+            input.environmentKey
+        )
+        val manifest = buildJsonObject {
+            put("schemaVersion", "1")
+            put("applicationKey", input.applicationKey)
+            put("displayName", input.applicationDisplayName)
+            put("manifestVersion", "v1")
+            put("routes", buildJsonArray {
+                add(buildJsonObject {
+                    put("pageKey", "orders.detail")
+                    put("template", "/orders/{orderId}")
+                    put("label", "注文詳細")
+                    put("parameters", buildJsonObject {
+                        put("orderId", buildJsonObject { put("persistence", "store") })
+                    })
+                })
+            })
+        }
+        database.putManifest(
+            database.resolveApplicationScope(principal.userId, input.applicationKey),
+            principal,
+            validateManifest(input.applicationKey, manifest),
+            null
+        )
+        val sessionRequest = FeedbackSessionCreateRequest(
+            applicationKey = input.applicationKey,
+            environmentKey = input.environmentKey,
+            externalWorkspaceKey = input.externalWorkspaceKey,
+            manifestVersion = "v1",
+            title = "Phase3 Session",
+            scopes = listOf(SessionScope("orders.detail", "/orders/{orderId}", true)),
+            perspectives = listOf(SessionPerspective("quality", "品質", "active"))
+        )
+        val session = database.createSession(
+            scope,
+            principal,
+            sessionRequest,
+            "phase3-session-key-01",
+            requestHash(serviceJson.encodeToJsonElement(FeedbackSessionCreateRequest.serializer(), sessionRequest))
+        )
+        val opened = database.patchSession(session.id, session.version, buildJsonObject { put("status", "open") })
+        val png = byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10, 0)
+        val threadRequest = FeedbackThreadCreateRequest(
+            location = buildJsonObject {
+                put("schemaVersion", "1")
+                put("pageKey", "orders.detail")
+                put("routeTemplate", "/orders/{orderId}")
+                put("pathParameters", buildJsonObject { put("orderId", "ORDER-1") })
+            },
+            target = buildJsonObject {
+                put("schemaVersion", "1")
+                put("kind", "screen-position")
+                put("relativeX", 0.5)
+                put("relativeY", 0.5)
+            },
+            perspectiveCode = "quality",
+            body = "=SUM(1,1)",
+            evidence = EvidenceCreateRequest(
+                contentType = "image/png",
+                dataBase64 = java.util.Base64.getEncoder().encodeToString(png),
+                viewportWidth = 100,
+                viewportHeight = 100,
+                pixelRatio = 1.0,
+                capturedAt = "2026-08-09T00:00:00Z"
+            )
+        )
+        val storage = LocalEvidenceStorage(temporaryDirectory.resolve("evidence"))
+        val thread = storage.use {
+            database.createThread(
+                scope,
+                opened.id,
+                principal,
+                threadRequest,
+                "phase3-thread-key-001",
+                requestHash(serviceJson.encodeToJsonElement(FeedbackThreadCreateRequest.serializer(), threadRequest)),
+                it,
+                "evidence/",
+                1024
+            )
+        }
+        return Phase3Fixture(input, principal, scope, opened.id, thread.id)
+    }
+
+    private fun makeNotificationsAvailable(scope: ResourceScope) {
+        database.dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE feedback.notification_outbox SET available_at = now() WHERE workspace_id = ?::uuid"
+            ).use { statement -> statement.setString(1, scope.workspaceId); statement.executeUpdate() }
+        }
+    }
+
     private fun required(name: String): String = System.getenv(name) ?: error("$name が必要です")
 
     private data class Fixture(val userId: String, val workspaceA: String)
+    private data class Phase3Fixture(
+        val input: BootstrapInput,
+        val principal: FeedbackPrincipal,
+        val scope: ResourceScope,
+        val sessionId: String,
+        val threadId: String
+    )
 }

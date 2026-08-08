@@ -12,7 +12,7 @@
     "tenantKey",
     "applicationKey",
     "environmentKey",
-    "workspaceKey",
+    "externalWorkspaceKey",
     "sessionId",
     "threadId",
     "actor",
@@ -33,7 +33,7 @@
     "tenantKey": { "type": "string", "minLength": 1, "maxLength": 100 },
     "applicationKey": { "type": "string", "minLength": 1, "maxLength": 100 },
     "environmentKey": { "type": "string", "minLength": 1, "maxLength": 100 },
-    "workspaceKey": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "externalWorkspaceKey": { "type": "string", "minLength": 1, "maxLength": 200 },
     "sessionId": { "type": "string", "format": "uuid" },
     "threadId": { "type": "string", "format": "uuid" },
     "actor": {
@@ -42,12 +42,12 @@
       "required": ["principalId"],
       "properties": {
         "principalId": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "participantName": { "type": "string", "minLength": 1, "maxLength": 100 }
+        "displayName": { "type": ["string", "null"], "minLength": 1, "maxLength": 200 },
+        "participantName": { "type": ["string", "null"], "minLength": 1, "maxLength": 100 }
       }
     },
     "deepLink": { "type": "string", "format": "uri", "maxLength": 2000 },
     "body": { "type": "string", "maxLength": 20000 },
-    "evidenceIncluded": { "type": "boolean", "default": false }
+    "evidenceUrl": { "type": "string", "format": "uri-reference", "maxLength": 2000 }
   }
 }

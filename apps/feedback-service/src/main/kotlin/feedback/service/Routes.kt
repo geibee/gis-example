@@ -13,6 +13,7 @@ import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
@@ -30,7 +31,8 @@ data class FeedbackDependencies(
     val evidenceMaxBytes: Long,
     val evidenceKeyPrefix: String,
     val writeRateLimitPerMinute: Int,
-    val notificationCipher: NotificationCipher
+    val notificationCipher: NotificationCipher,
+    val exportStorage: EvidenceStorage
 )
 
 fun Route.healthRoutes(database: FeedbackDatabase) {
@@ -263,6 +265,14 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                 call.respond(thread)
             }
 
+            get("/threads/{threadId}/deep-link") {
+                val threadId = validateUuid(call.parameters["threadId"], "threadId")
+                val principal = call.feedbackPrincipal()
+                val scope = database.resolveResourceScope(principal.userId, ScopeKind.THREAD, threadId)
+                authorize(database, call, FeedbackPermission.READ, scope, hideExistence = true)
+                call.respond(database.getThreadDeepLink(threadId))
+            }
+
             post("/threads/{threadId}/messages") {
                 val threadId = validateUuid(call.parameters["threadId"], "threadId")
                 val principal = call.feedbackPrincipal()
@@ -364,6 +374,30 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                 call.respond(HttpStatusCode.Accepted, job)
             }
 
+            get("/exports/{exportId}") {
+                val exportId = validateUuid(call.parameters["exportId"], "exportId")
+                val principal = call.feedbackPrincipal()
+                val scope = database.resolveResourceScope(principal.userId, ScopeKind.EXPORT, exportId)
+                authorize(database, call, FeedbackPermission.MANAGE, scope, hideExistence = true)
+                call.respond(database.getExportJob(exportId))
+            }
+
+            get("/exports/{exportId}/download") {
+                val exportId = validateUuid(call.parameters["exportId"], "exportId")
+                val principal = call.feedbackPrincipal()
+                val scope = database.resolveResourceScope(principal.userId, ScopeKind.EXPORT, exportId)
+                val context = authorize(database, call, FeedbackPermission.MANAGE, scope, hideExistence = true)
+                val export = database.getStoredExport(exportId, dependencies.exportStorage)
+                auditMutation(database, call, context, "export.read", "export", exportId)
+                call.response.header(
+                    HttpHeaders.ContentDisposition,
+                    ContentDisposition.Attachment
+                        .withParameter(ContentDisposition.Parameters.FileName, export.fileName)
+                        .toString()
+                )
+                call.respondBytes(export.bytes, ContentType.parse(export.contentType))
+            }
+
             route("/retention-policy") {
                 get { respondRetentionPolicy(database, call, patch = false) }
                 patch { respondRetentionPolicy(database, call, patch = true) }
@@ -372,6 +406,74 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
             route("/notification-settings") {
                 get { respondNotificationSettings(database, dependencies.notificationCipher, call, patch = false) }
                 patch { respondNotificationSettings(database, dependencies.notificationCipher, call, patch = true) }
+            }
+
+            route("/memberships") {
+                get {
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    call.respond(database.listWorkspaceMembers(context.scope))
+                }
+                post {
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    val requestElement = call.receive<JsonElement>()
+                    val request = decode(requestElement, FeedbackMembershipCreateRequest.serializer())
+                    val member = database.createWorkspaceMember(
+                        context.scope,
+                        context.principal,
+                        request,
+                        validateIdempotencyKey(call.request.headers["Idempotency-Key"]),
+                        requestHash(requestElement)
+                    )
+                    auditMutation(database, call, context, "membership.create", "membership", member.userId)
+                    call.response.header(HttpHeaders.ETag, etag(member.version))
+                    call.respond(HttpStatusCode.Created, member)
+                }
+            }
+
+            route("/memberships/{userId}") {
+                patch {
+                    val userId = validateUuid(call.parameters["userId"], "userId")
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    val member = database.patchWorkspaceMember(
+                        context.scope,
+                        userId,
+                        parseEtag(call.request.headers[HttpHeaders.IfMatch]),
+                        call.receive()
+                    )
+                    auditMutation(database, call, context, "membership.patch", "membership", member.userId)
+                    call.response.header(HttpHeaders.ETag, etag(member.version))
+                    call.respond(member)
+                }
+                delete {
+                    val userId = validateUuid(call.parameters["userId"], "userId")
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    database.deleteWorkspaceMember(
+                        context.scope,
+                        userId,
+                        parseEtag(call.request.headers[HttpHeaders.IfMatch])
+                    )
+                    auditMutation(database, call, context, "membership.delete", "membership", userId)
+                    call.respond(HttpStatusCode.NoContent)
+                }
+            }
+
+            get("/notification-deliveries") {
+                val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                call.respond(
+                    database.listNotificationDeliveries(
+                        context.scope,
+                        call.request.queryParameters["status"],
+                        parseLimit(call.request.queryParameters["limit"])
+                    )
+                )
+            }
+
+            post("/notification-deliveries/{deliveryId}/retry") {
+                val deliveryId = validateUuid(call.parameters["deliveryId"], "deliveryId")
+                val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                val delivery = database.retryNotificationDelivery(context.scope, deliveryId)
+                auditMutation(database, call, context, "notification.retry", "notification-delivery", deliveryId)
+                call.respond(delivery)
             }
         }
     }

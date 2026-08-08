@@ -142,6 +142,7 @@ fun FeedbackDatabase.resolveResourceScope(
             "m.id",
             "JOIN feedback.feedback_threads r ON r.id = m.thread_id"
         )
+        ScopeKind.EXPORT -> Triple("feedback.export_jobs r", "r.id", "")
         else -> error("resource ID から解決できない scope kind です: $kind")
     }
     connection.prepareStatement(

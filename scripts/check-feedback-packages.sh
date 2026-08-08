@@ -20,6 +20,7 @@ packages=(
   @feedback/core
   @feedback/react
   @feedback/maplibre
+  @feedback/admin-react
 )
 declare -A tarballs
 
@@ -42,7 +43,7 @@ for package_name in "${packages[@]}"; do
     const [result] = JSON.parse(process.env.PACK_RESULT);
     const files = new Set(result.files.map((file) => file.path));
     const required = ["dist/index.js", "dist/index.d.ts", "package.json", "README.md", "CHANGELOG.md"];
-    if (process.env.PACKAGE_NAME === "@feedback/react") required.push("dist/styles.css");
+    if (["@feedback/react", "@feedback/admin-react"].includes(process.env.PACKAGE_NAME)) required.push("dist/styles.css");
     if (process.env.PACKAGE_NAME === "@feedback/contracts") {
       required.push("openapi.yaml", "schemas/application-manifest.schema.json", "schemas/location.schema.json", "schemas/target.schema.json", "schemas/webhook-event.schema.json");
     }
@@ -63,6 +64,7 @@ node -e '
   const core = read("packages/feedback-core/package.json");
   const react = read("packages/feedback-react/package.json");
   const maplibre = read("packages/feedback-maplibre/package.json");
+  const admin = read("packages/feedback-admin-react/package.json");
   const dependencyNames = (value) => new Set([
     ...Object.keys(value.dependencies || {}),
     ...Object.keys(value.peerDependencies || {}),
@@ -74,7 +76,7 @@ node -e '
   }
   if (dependencyNames(react).has("maplibre-gl") || dependencyNames(react).has("@feedback/maplibre")) process.exit(1);
   if (Object.keys(maplibre.peerDependencies || {}).join(",") !== "maplibre-gl") process.exit(1);
-  if (![contracts, core, react, maplibre].every((value) => value.private === true && value.version === "1.0.0-alpha.1")) process.exit(1);
+  if (![contracts, core, react, maplibre, admin].every((value) => value.private === true && value.version === "1.0.0-alpha.1")) process.exit(1);
 ' || {
   echo "[feedback-package] FAIL: optional dependencyまたはversion/private metadata境界が不正です" >&2
   exit 1
@@ -99,6 +101,7 @@ for index in "${!react_versions[@]}"; do
     npm install --ignore-scripts --no-audit --no-fund \
       "${tarballs[contracts]}" "${tarballs[core]}" "${tarballs[react]}"
     test ! -d node_modules/@feedback/maplibre
+    test ! -d node_modules/@feedback/admin-react
     test ! -d node_modules/maplibre-gl
     test -f node_modules/@feedback/react/dist/styles.css
     npm run typecheck
@@ -109,6 +112,10 @@ for index in "${!react_versions[@]}"; do
       npm install --ignore-scripts --no-audit --no-fund maplibre-gl@5.24.0 "${tarballs[maplibre]}"
       npm run typecheck:maplibre
       node --input-type=module -e 'await import("@feedback/maplibre")'
+      npm install --ignore-scripts --no-audit --no-fund "${tarballs["admin-react"]}"
+      npm run typecheck:admin
+      test -f node_modules/@feedback/admin-react/dist/styles.css
+      node --input-type=module -e 'await import("@feedback/admin-react")'
     fi
   )
   echo "[feedback-package] PASS: clean Vite React $react_version fixture"

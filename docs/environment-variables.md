@@ -138,8 +138,12 @@ Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flywa
 | `FEEDBACK_S3_REGION` | 任意 | AWS SDK 既定チェーン | タスク定義 |
 | `FEEDBACK_S3_ENDPOINT_URL` | 任意 (**dev の S3 互換 storage 専用**) | なし | — |
 | `FEEDBACK_S3_KEY_PREFIX` | 任意 | `evidence/` | タスク定義 |
+| `FEEDBACK_EXPORT_DIR` | API/export/retention worker で任意 | `/data/exports` | タスク定義 / private volume |
+| `FEEDBACK_EXPORT_KEY_PREFIX` | export worker で任意 | `exports/` | タスク定義 |
+| `FEEDBACK_EXPORT_POLL_MS` | export worker で任意 | `2000` | タスク定義 |
 | `FEEDBACK_NOTIFICATION_POLL_MS` | notification worker で任意 | `2000` | タスク定義 |
 | `FEEDBACK_NOTIFICATION_MAX_ATTEMPTS` | notification worker で任意 | `5` | タスク定義 |
+| `FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP` | 任意 (**ローカル fixture 専用**) | 未設定 (`https` と public address のみ) | —。本番で `1` にしない |
 | `FEEDBACK_WEBHOOK_SIGNING_SECRET` | notification worker では**必須** | なし (compose が注入) | **Secrets Manager** |
 | `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | API/notification worker で**必須** | なし (base64 で 32 byte) | **Secrets Manager** |
 | `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY_PREVIOUS` | key rotation 中だけ任意 | なし (base64 で 32 byte) | **Secrets Manager** |
@@ -148,8 +152,10 @@ Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flywa
 
 `application_environments.allowed_origins` が CORS allowlist の正本であり、API 起動環境変数で
 origin を上書きしない。S3 認証は AWS SDK の既定チェーン (本番は ECS タスクロール) を使う。
-API、notification worker、retention worker は同じ image から、それぞれ `bin/feedback-service`、
-`bin/feedback-notification-worker`、`bin/feedback-retention-worker` を command で選ぶ。
+API、notification worker、export worker、retention worker は同じ image から、それぞれ
+`bin/feedback-service`、`bin/feedback-notification-worker`、`bin/feedback-export-worker`、
+`bin/feedback-retention-worker` を command で選ぶ。export file は認可付き download API だけで配信し、
+API、export worker、retention worker が同じ private volume を共有する。
 
 exchange token は別 issuer/audience の署名・`iat`/`exp` と最大 lifetime を検証し、
 `actor_issuer` / `actor_sub`、`feedback_tenant/application/environment/workspace`、
@@ -234,6 +240,22 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 切替前に対象 application manifest、workspace membership、open session を Feedback DB へ provisioning する。
 問題時は同じ build pipeline で `legacy` に戻し、旧 API/DB を再選択する。
 
+## feedback-admin (apps/feedback-admin — ビルド時のみ)
+
+独立 Feedback Admin Console の `VITE_*` もビルド時に公開 bundle へ埋め込まれる。secret は設定しない。
+Web GIS と異なる OIDC client を使い、Feedback Service audience だけを取得する。
+
+| 名称 | 必須 | dev 既定 (compose) | 本番の供給元 |
+|---|---|---|---|
+| `VITE_FEEDBACK_API_BASE` | **必須** | `http://localhost:8090/feedback/v1` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_AUTHORITY` | **必須** | `http://localhost:8081/realms/gis` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_CLIENT_ID` | **必須** | `feedback-admin` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI` | 任意 | `window.location.origin + /` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_SCOPE` | 任意 | `openid profile email feedback` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_APPLICATION_KEY` | **必須** | `web-gis` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_ENVIRONMENT_KEY` | **必須** | `local` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_WORKSPACE_KEY` | **必須** | ローカル fixture UUID | ビルド引数 |
+
 ## martin (タイルサーバー)
 
 | 名称 | 必須 | dev 既定 | 本番の供給元 |
@@ -263,7 +285,7 @@ Keycloak の本番モード運用 (ECS) か Cognito への移行を別途判断�
 | `UPLOAD_STORAGE` / `S3_BUCKET` / `S3_REGION` | アップロード保存先の切替。`s3` にする場合は `--profile s3` で MinIO を同時起動する | `local` / `gis-uploads` / `us-east-1` |
 | `JOB_QUEUE_MODE` / `ANALYSIS_RUNNER_MODE` | ジョブ実行基盤の切替 ([jobs-architecture.md](jobs-architecture.md))。`sqs` / `external` にする場合は `--profile sqs` で ElasticMQ と analysis-worker を同時起動する | `polling` / `in-process` |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | 開発 MinIO のルート資格情報 (`--profile s3` のときのみ使用。api / worker の `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` としても配線) | `minio` / `minio-secret` |
-| `POSTGRES_HOST_PORT` / `MARTIN_HOST_PORT` / `WEB_HOST_PORT` | ホスト側ポートの競合回避。`MARTIN_HOST_PORT` を変えてもコンテナ間の `martin:3000` は変わらない | `5432` / `3000` / `5173` |
+| `POSTGRES_HOST_PORT` / `MARTIN_HOST_PORT` / `WEB_HOST_PORT` / `FEEDBACK_ADMIN_HOST_PORT` | ホスト側ポートの競合回避。`MARTIN_HOST_PORT` を変えてもコンテナ間の `martin:3000` は変わらない | `5432` / `3000` / `5173` / `5174` |
 
 CI / verify 用の変数 (`VERIFY_*`, `SMOKE_*`, `FUZZ_*`) は各スクリプトのヘッダコメントを参照。
 

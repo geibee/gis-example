@@ -1,6 +1,7 @@
 package feedback.service
 
 import java.sql.Connection
+import java.time.ZoneId
 import java.util.UUID
 
 fun FeedbackDatabase.getRetentionPolicy(scope: ResourceScope): Pair<FeedbackRetentionPolicy, Int> =
@@ -153,6 +154,11 @@ fun FeedbackDatabase.createExport(
     if (request.format !in setOf("csv", "xlsx")) badRequest("format は csv または xlsx を指定してください")
     validateKey(request.locale, "locale", 35)
     validateKey(request.timezone, "timezone", 100)
+    try {
+        ZoneId.of(request.timezone)
+    } catch (_: Exception) {
+        badRequest("timezone はIANA timezone IDで指定してください")
+    }
     request.sessionId?.let { sessionId ->
         connection.prepareStatement(
             "SELECT 1 FROM feedback.review_sessions WHERE id = ?::uuid AND workspace_id = ?::uuid"
