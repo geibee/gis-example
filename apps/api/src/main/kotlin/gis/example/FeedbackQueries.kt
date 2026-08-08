@@ -40,6 +40,7 @@ data class FeedbackThreadInput(
     val targetMetadata: JsonObject,
     val pageId: String?,
     val pageRoute: String?,
+    val participantName: String?,
     val body: String,
     val evidence: ReviewEvidenceInput?
 )
@@ -123,13 +124,31 @@ fun Database.createFeedbackThread(
         val scopeId = input.pageId?.let { pageId ->
             findScopeId(connection, input.reviewSessionId, pageId, input.pageRoute)
         }
+        // 同一セッションの採番を直列化し、並行投稿でも既存番号を変えず末尾へ追加する。
+        connection.prepareStatement(
+            "SELECT id FROM app.review_sessions WHERE id = ?::uuid FOR UPDATE"
+        ).use { stmt ->
+            stmt.setString(1, input.reviewSessionId)
+            stmt.executeQuery().use { rs ->
+                if (!rs.next()) throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Review session not found")
+            }
+        }
+        val displayNumber = connection.prepareStatement(
+            "SELECT coalesce(max(display_number), 0) + 1 FROM app.feedback_threads WHERE review_session_id = ?::uuid"
+        ).use { stmt ->
+            stmt.setString(1, input.reviewSessionId)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
         val threadId = connection.prepareStatement(
             """
             INSERT INTO app.feedback_threads (
                 project_id, review_session_id, review_scope_id, perspective_code,
-                target_type, target_metadata, evidence_id, created_by
+                target_type, target_metadata, evidence_id, created_by, reporter_name, page_route, display_number
             )
-            SELECT s.project_id, s.id, ?::uuid, ?, ?, ?::jsonb, ?::uuid, ?::uuid
+            SELECT s.project_id, s.id, ?::uuid, ?, ?, ?::jsonb, ?::uuid, ?::uuid, ?, ?, ?
             FROM app.review_sessions AS s
             WHERE s.id = ?::uuid
             RETURNING id::text
@@ -141,7 +160,10 @@ fun Database.createFeedbackThread(
             stmt.setString(4, input.targetMetadata.toString())
             setNullableUuidString(stmt, 5, evidenceId)
             setNullableUuidString(stmt, 6, createdBy)
-            stmt.setString(7, input.reviewSessionId)
+            setNullableString(stmt, 7, input.participantName)
+            setNullableString(stmt, 8, input.pageRoute)
+            stmt.setInt(9, displayNumber)
+            stmt.setString(10, input.reviewSessionId)
             stmt.executeQuery().use { rs ->
                 if (!rs.next()) throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Review session not found")
                 rs.getString(1)
@@ -149,26 +171,28 @@ fun Database.createFeedbackThread(
         }
         val messageId = connection.prepareStatement(
             """
-            INSERT INTO app.feedback_messages (thread_id, author_id, body)
-            VALUES (?::uuid, ?::uuid, ?)
+            INSERT INTO app.feedback_messages (thread_id, author_id, participant_name, body)
+            VALUES (?::uuid, ?::uuid, ?, ?)
             RETURNING id::text
             """.trimIndent()
         ).use { stmt ->
             stmt.setString(1, threadId)
             setNullableUuidString(stmt, 2, createdBy)
-            stmt.setString(3, input.body)
+            setNullableString(stmt, 3, input.participantName)
+            stmt.setString(4, input.body)
             stmt.executeQuery().use { rs ->
                 rs.next()
                 rs.getString(1)
             }
         }
-        insertFeedbackMessageVersion(connection, messageId, 1, input.body, createdBy)
+        insertFeedbackMessageVersion(connection, messageId, 1, input.body, createdBy, input.participantName)
         enqueueReviewNotification(
             connection = connection,
             threadId = threadId,
             messageId = messageId,
             eventType = "THREAD_CREATED",
             actorId = createdBy,
+            actorParticipantName = input.participantName,
             body = input.body
         )
         threadId
@@ -437,6 +461,7 @@ fun Database.createFeedbackMessage(
     threadId: String,
     body: String,
     authorId: String?,
+    participantName: String?,
     audit: AuditTrail
 ): FeedbackMessageDto = try {
     val messageId = withTransaction { connection ->
@@ -455,20 +480,21 @@ fun Database.createFeedbackMessage(
 
         val id = connection.prepareStatement(
             """
-            INSERT INTO app.feedback_messages (thread_id, author_id, body)
-            VALUES (?::uuid, ?::uuid, ?)
+            INSERT INTO app.feedback_messages (thread_id, author_id, participant_name, body)
+            VALUES (?::uuid, ?::uuid, ?, ?)
             RETURNING id::text
             """.trimIndent()
         ).use { stmt ->
             stmt.setString(1, threadId)
             setNullableUuidString(stmt, 2, authorId)
-            stmt.setString(3, body)
+            setNullableString(stmt, 3, participantName)
+            stmt.setString(4, body)
             stmt.executeQuery().use { rs ->
                 rs.next()
                 rs.getString(1)
             }
         }
-        insertFeedbackMessageVersion(connection, id, 1, body, authorId)
+        insertFeedbackMessageVersion(connection, id, 1, body, authorId, participantName)
         connection.prepareStatement(
             "UPDATE app.feedback_threads SET updated_at = now() WHERE id = ?::uuid"
         ).use { stmt ->
@@ -481,6 +507,7 @@ fun Database.createFeedbackMessage(
             messageId = id,
             eventType = "MESSAGE_CREATED",
             actorId = authorId,
+            actorParticipantName = participantName,
             body = body
         )
         id
@@ -500,6 +527,7 @@ fun Database.updateFeedbackMessage(
     id: String,
     body: String,
     editorId: String,
+    editorParticipantName: String?,
     audit: AuditTrail
 ): FeedbackMessageDto = try {
     val (before, after) = withTransaction { connection ->
@@ -528,7 +556,7 @@ fun Database.updateFeedbackMessage(
                 throw ApiException(io.ktor.http.HttpStatusCode.NotFound, "Feedback message not found")
             }
         }
-        insertFeedbackMessageVersion(connection, id, nextVersion, body, editorId)
+        insertFeedbackMessageVersion(connection, id, nextVersion, body, editorId, editorParticipantName)
         connection.prepareStatement(
             "UPDATE app.feedback_threads SET updated_at = now() WHERE id = ?::uuid"
         ).use { stmt ->
@@ -553,6 +581,7 @@ fun Database.getFeedbackMessageHistory(id: String): List<FeedbackMessageVersionD
         connection.prepareStatement(
             """
             SELECT v.message_id::text, v.version, v.body, v.edited_by::text, u.display_name,
+                   v.edited_by_participant_name,
                    v.created_at, v.version = max(v.version) OVER () AS current
             FROM app.feedback_message_versions AS v
             LEFT JOIN app.users AS u ON u.id = v.edited_by
@@ -571,6 +600,7 @@ fun Database.getFeedbackMessageHistory(id: String): List<FeedbackMessageVersionD
                                 body = rs.getString(3),
                                 editedBy = rs.getString(4),
                                 editedByName = rs.getString(5),
+                                editedByParticipantName = rs.getString(6),
                                 createdAt = rs.isoTimestamp("created_at") ?: error("created_at must not be null"),
                                 current = rs.getBoolean("current")
                             )
@@ -724,18 +754,22 @@ private fun insertFeedbackMessageVersion(
     messageId: String,
     version: Int,
     body: String,
-    editedBy: String?
+    editedBy: String?,
+    editedByParticipantName: String?
 ) {
     connection.prepareStatement(
         """
-        INSERT INTO app.feedback_message_versions (message_id, version, body, edited_by)
-        VALUES (?::uuid, ?, ?, ?::uuid)
+        INSERT INTO app.feedback_message_versions (
+            message_id, version, body, edited_by, edited_by_participant_name
+        )
+        VALUES (?::uuid, ?, ?, ?::uuid, ?)
         """.trimIndent()
     ).use { stmt ->
         stmt.setString(1, messageId)
         stmt.setInt(2, version)
         stmt.setString(3, body)
         setNullableUuidString(stmt, 4, editedBy)
+        setNullableString(stmt, 5, editedByParticipantName)
         stmt.executeUpdate()
     }
 }
@@ -806,7 +840,8 @@ private fun listMessagesForThreads(
     if (threadIds.isEmpty()) return emptyMap()
     return connection.prepareStatement(
         """
-        SELECT m.id::text, m.thread_id::text, m.author_id::text, u.display_name, m.body,
+        SELECT m.id::text, m.thread_id::text, m.author_id::text, u.display_name,
+               m.participant_name, m.body,
                m.created_at, m.edited_at
         FROM app.feedback_messages AS m
         LEFT JOIN app.users AS u ON u.id = m.author_id
@@ -825,7 +860,8 @@ private fun listMessagesForThreads(
                             threadId = threadId,
                             authorId = rs.getString(3),
                             authorName = rs.getString(4),
-                            body = rs.getString(5),
+                            participantName = rs.getString(5),
+                            body = rs.getString(6),
                             createdAt = rs.isoTimestamp("created_at") ?: error("created_at must not be null"),
                             editedAt = rs.isoTimestamp("edited_at")
                         )
@@ -845,7 +881,8 @@ private fun getFeedbackMessage(
     forUpdate: Boolean = false
 ): FeedbackMessageDto? = connection.prepareStatement(
     """
-    SELECT m.id::text, m.thread_id::text, m.author_id::text, u.display_name, m.body,
+    SELECT m.id::text, m.thread_id::text, m.author_id::text, u.display_name,
+           m.participant_name, m.body,
            m.created_at, m.edited_at
     FROM app.feedback_messages AS m
     LEFT JOIN app.users AS u ON u.id = m.author_id
@@ -861,7 +898,8 @@ private fun getFeedbackMessage(
             threadId = rs.getString(2),
             authorId = rs.getString(3),
             authorName = rs.getString(4),
-            body = rs.getString(5),
+            participantName = rs.getString(5),
+            body = rs.getString(6),
             createdAt = rs.isoTimestamp("created_at") ?: error("created_at must not be null"),
             editedAt = rs.isoTimestamp("edited_at")
         )
@@ -870,9 +908,11 @@ private fun getFeedbackMessage(
 
 private fun feedbackThreadColumns(): String = """
     t.id::text AS id,
+    t.display_number,
     t.project_id::text AS project_id,
     t.review_session_id::text AS review_session_id,
     t.review_scope_id::text AS review_scope_id,
+    t.page_route,
     t.perspective_code,
     p.label AS perspective_label,
     t.target_type,
@@ -880,6 +920,7 @@ private fun feedbackThreadColumns(): String = """
     t.status,
     t.created_by::text AS created_by,
     u.display_name AS created_by_name,
+    t.reporter_name,
     t.created_at,
     t.updated_at,
     e.id::text AS evidence_id,
@@ -898,9 +939,11 @@ private fun feedbackThreadColumns(): String = """
 
 private fun ResultSet.toFeedbackThreadDto(): FeedbackThreadDto = FeedbackThreadDto(
     id = getString("id"),
+    displayNumber = getInt("display_number"),
     projectId = getString("project_id"),
     reviewSessionId = getString("review_session_id"),
     reviewScopeId = getString("review_scope_id"),
+    pageRoute = getString("page_route"),
     perspectiveCode = getString("perspective_code"),
     perspectiveLabel = getString("perspective_label"),
     targetType = getString("target_type"),
@@ -924,6 +967,7 @@ private fun ResultSet.toFeedbackThreadDto(): FeedbackThreadDto = FeedbackThreadD
     status = getString("status"),
     createdBy = getString("created_by"),
     createdByName = getString("created_by_name"),
+    reporterName = getString("reporter_name"),
     createdAt = isoTimestamp("created_at") ?: error("created_at must not be null"),
     updatedAt = isoTimestamp("updated_at") ?: error("updated_at must not be null")
 )

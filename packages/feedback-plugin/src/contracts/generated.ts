@@ -931,6 +931,8 @@ export interface components {
             projectId: string;
             /** @enum {string} */
             role: "editor" | "viewer";
+            /** @description プロジェクトロールから導出した画面・機能単位の実効権限キー。 */
+            permissions: string[];
         };
         Me: {
             userId: string;
@@ -1386,6 +1388,8 @@ export interface components {
             threadId: string;
             authorId?: string | null;
             authorName?: string | null;
+            /** @description 端末側で入力した自己申告名。OIDCの認証主体・認可には使用しない。 */
+            participantName?: string | null;
             body: string;
             /** Format: date-time */
             createdAt: string;
@@ -1394,9 +1398,13 @@ export interface components {
         };
         FeedbackMessageCreateRequest: {
             body: string;
+            /** @description 共通ログイン利用時に端末側で入力した自己申告名。 */
+            participantName?: string | null;
         };
         FeedbackMessageUpdateRequest: {
             body: string;
+            /** @description 編集操作を行った端末側の自己申告名。 */
+            participantName?: string | null;
         };
         FeedbackMessageVersion: {
             messageId: string;
@@ -1404,6 +1412,7 @@ export interface components {
             body: string;
             editedBy: string | null;
             editedByName: string | null;
+            editedByParticipantName?: string | null;
             /** Format: date-time */
             createdAt: string;
             current: boolean;
@@ -1491,9 +1500,13 @@ export interface components {
         };
         FeedbackThread: {
             id: string;
+            /** @description セッション内で作成順に固定される表示番号。追加時は既存最大値の次になる。 */
+            displayNumber: number;
             projectId: string;
             reviewSessionId: string;
             reviewScopeId?: string | null;
+            /** @description 投稿対象となった具体的なURL。詳細画面IDごとのピン表示に使用する。 */
+            pageRoute?: string | null;
             perspectiveCode: string;
             perspectiveLabel: string;
             /** @enum {string} */
@@ -1507,6 +1520,8 @@ export interface components {
             status: "OPEN" | "RESOLVED";
             createdBy?: string | null;
             createdByName?: string | null;
+            /** @description 初回コメントを投稿した端末側の自己申告名。 */
+            reporterName?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -1520,6 +1535,8 @@ export interface components {
         FeedbackThreadCreateMetadata: {
             perspectiveCode: string;
             body: string;
+            /** @description 共通ログイン利用時に端末側で入力した自己申告名。 */
+            participantName?: string | null;
             /** @enum {string} */
             targetType: "UI_ELEMENT" | "SCREEN_POSITION" | "MAP_FEATURE" | "MAP_POSITION";
             target: {

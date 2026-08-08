@@ -33,9 +33,10 @@ export function FeedbackThreadDrawer({ threadId, onClose }: { threadId: string; 
 }
 
 function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; onClose: () => void }) {
-  const { notify } = useFeedbackPluginContext();
+  const { notify, participantName, saveParticipantName } = useFeedbackPluginContext();
   const meQuery = useCurrentUserQuery();
   const me = meQuery.data;
+  const [participantNameDraft, setParticipantNameDraft] = useState(participantName ?? "");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const createMessage = useCreateFeedbackMessageMutation();
@@ -49,10 +50,15 @@ function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; on
   const submitReply = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = body.trim();
-    if (!trimmed || thread.status !== "OPEN") return;
+    const submittedParticipantName = participantNameDraft.trim();
+    if (!trimmed || !submittedParticipantName || thread.status !== "OPEN") return;
     setError(null);
     try {
-      await createMessage.mutateAsync({ threadId: thread.id, request: { body: trimmed } });
+      await createMessage.mutateAsync({
+        threadId: thread.id,
+        request: { body: trimmed, participantName: submittedParticipantName }
+      });
+      saveParticipantName(submittedParticipantName);
       setBody("");
       notify({ type: "success", message: "返信を投稿しました" });
     } catch (caught) {
@@ -90,11 +96,32 @@ function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; on
       {error ? <p className="wfg-feedback-error" role="alert">{error}</p> : null}
       <ol className="wfg-feedback-message-list" aria-label="メッセージ一覧">
         {thread.messages.map((message) => (
-          <FeedbackMessageItem key={message.id} message={message} canEdit={message.authorId === me?.userId} />
+          <FeedbackMessageItem
+            key={message.id}
+            message={message}
+            participantName={participantName}
+            canEdit={message.participantName
+              ? message.participantName === participantName
+              : message.authorId === me?.userId}
+          />
         ))}
       </ol>
       {thread.status === "OPEN" ? (
         <form className="wfg-feedback-reply-form" onSubmit={(event) => void submitReply(event)}>
+          <label>
+            投稿者名
+            <input
+              type="text"
+              aria-label="投稿者名"
+              autoComplete="name"
+              maxLength={100}
+              required
+              value={participantNameDraft}
+              onChange={(event) => setParticipantNameDraft(event.target.value)}
+              placeholder="例: 山田 太郎"
+            />
+            <span className="wfg-feedback-field-help">このブラウザに保存されます。</span>
+          </label>
           <label>
             返信
             <textarea
@@ -104,7 +131,11 @@ function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; on
               placeholder="確認結果や追加情報をご記入ください"
             />
           </label>
-          <button type="submit" className="wfg-feedback-button-primary" disabled={!body.trim() || createMessage.isPending}>
+          <button
+            type="submit"
+            className="wfg-feedback-button-primary"
+            disabled={!body.trim() || !participantNameDraft.trim() || createMessage.isPending}
+          >
             {createMessage.isPending ? "返信中…" : "返信する"}
           </button>
         </form>
@@ -125,7 +156,15 @@ function FeedbackThreadContent({ thread, onClose }: { thread: FeedbackThread; on
   );
 }
 
-function FeedbackMessageItem({ message, canEdit }: { message: FeedbackMessage; canEdit: boolean }) {
+function FeedbackMessageItem({
+  message,
+  participantName,
+  canEdit
+}: {
+  message: FeedbackMessage;
+  participantName: string | null;
+  canEdit: boolean;
+}) {
   const { notify } = useFeedbackPluginContext();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
@@ -147,7 +186,10 @@ function FeedbackMessageItem({ message, canEdit }: { message: FeedbackMessage; c
     }
     setError(null);
     try {
-      await updateMessage.mutateAsync({ messageId: message.id, request: { body } });
+      await updateMessage.mutateAsync({
+        messageId: message.id,
+        request: { body, participantName }
+      });
       setEditing(false);
       notify({ type: "success", message: "コメントを編集しました" });
     } catch (caught) {
@@ -160,7 +202,7 @@ function FeedbackMessageItem({ message, canEdit }: { message: FeedbackMessage; c
   return (
     <li>
       <div className="wfg-feedback-message-heading">
-        <strong>{message.authorName ?? "退職済みユーザー"}</strong>
+        <strong>{message.participantName ?? message.authorName ?? "投稿者不明"}</strong>
         <time dateTime={message.createdAt}>{formatTimestamp(message.createdAt)}</time>
       </div>
       {editing ? (
@@ -195,6 +237,7 @@ function FeedbackMessageItem({ message, canEdit }: { message: FeedbackMessage; c
               <div>
                 <strong>版 {version.version}</strong>
                 {version.current ? <span>現在</span> : null}
+                <span>{version.editedByParticipantName ?? version.editedByName ?? "編集者不明"}</span>
                 <time dateTime={version.createdAt}>{formatTimestamp(version.createdAt)}</time>
               </div>
               <p>{version.body}</p>

@@ -26,6 +26,7 @@ import { notifyError, notifySuccess } from "./notifications";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
 import { Toaster } from "./ui/Toaster";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
+import { hasProjectPermission, reviewManagePermission } from "./permissions";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
 import { feedbackRoutes } from "./appRoutes";
@@ -77,6 +78,7 @@ function AppLayout() {
   const navigate = useNavigate();
   const { me, projects, selectedProject, setSelectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
   const { openThread } = useFeedbackPlugin();
+  const canManageReview = hasProjectPermission(me, selectedProject, reviewManagePermission);
 
   // URL (マッチ中ルートの staticData) を唯一の正としてタブ強調・タイトルを導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
@@ -99,7 +101,7 @@ function AppLayout() {
   }, [screenTitle]);
 
   useEffect(() => {
-    if (activeTab !== "review" || !linkedThreadId) {
+    if (!linkedThreadId) {
       handledReviewLink.current = "";
       return;
     }
@@ -114,7 +116,7 @@ function AppLayout() {
     if (handledReviewLink.current === linkKey) return;
     handledReviewLink.current = linkKey;
     openThread(linkedThreadId);
-  }, [activeTab, linkedProjectId, linkedThreadId, openThread, projects, selectedProject, setSelectedProject]);
+  }, [linkedProjectId, linkedThreadId, openThread, projects, selectedProject, setSelectedProject]);
 
   const navigateTab = (tab: BusinessTab) => void navigate({ to: tabBasePath[tab] });
 
@@ -145,10 +147,12 @@ function AppLayout() {
             <Users size={17} />
             関係者
           </button>
-          <button data-feedback-id="navigation.review" className={activeTab === "review" ? "active" : ""} type="button" onClick={() => navigateTab("review")}>
-            <ClipboardCheck size={17} />
-            レビュー
-          </button>
+          {canManageReview ? (
+            <button data-feedback-id="navigation.review" className={activeTab === "review" ? "active" : ""} type="button" onClick={() => navigateTab("review")}>
+              <ClipboardCheck size={17} />
+              レビュー
+            </button>
+          ) : null}
           {me?.systemRole === "admin" ? (
             <button data-feedback-id="navigation.admin" className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
               <ShieldCheck size={17} />
@@ -189,24 +193,34 @@ function AppLayout() {
   );
 }
 
-// マッチしたルートの staticData (requiredSystemRole) を見て権限を一元的に enforce するガード。
-// 個別画面に me?.systemRole の直判定を増やさなくても、ルート定義のメタ情報だけで保護される。
+// マッチしたルートの staticData を見て、system role／project permissionを一元的に強制するガード。
+// 個別画面へ権限の直判定を増やさず、ルート定義のメタ情報だけで保護する。
 function ScreenGuard({ me, children }: { me: Me | null; children: ReactNode }) {
+  const { selectedProject } = useAppShell();
   const requiredSystemRole = useRouterState({
     select: (state) => activeScreenMeta(state.matches)?.requiredSystemRole ?? null
   });
-  if (requiredSystemRole) {
+  const requiredProjectPermission = useRouterState({
+    select: (state) => activeScreenMeta(state.matches)?.requiredProjectPermission ?? null
+  });
+  if (requiredSystemRole || requiredProjectPermission) {
     // /api/me 取得完了までガード判定を保留する (未ロード時に誤リダイレクトしない)
-    if (!me) {
+    if (!me || (requiredProjectPermission && !selectedProject && me.systemRole !== "admin")) {
       return (
         <section className="tab-pane active">
           <p className="admin-hint">権限を確認しています…</p>
         </section>
       );
     }
-    if (me.systemRole !== requiredSystemRole) {
+    if (requiredSystemRole && me.systemRole !== requiredSystemRole) {
       return <Navigate to="/zones" replace />;
     }
+  }
+  if (
+    requiredProjectPermission &&
+    !hasProjectPermission(me, selectedProject, requiredProjectPermission)
+  ) {
+    return <Navigate to="/zones" replace />;
   }
   return <>{children}</>;
 }

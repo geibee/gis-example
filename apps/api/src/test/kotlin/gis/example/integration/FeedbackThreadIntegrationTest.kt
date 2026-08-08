@@ -177,11 +177,18 @@ class FeedbackThreadIntegrationTest {
         client: HttpClient,
         threadId: String,
         bearer: String,
-        text: String
+        text: String,
+        participantName: String? = null
     ): HttpResponse = client.post("/api/threads/$threadId/messages") {
         header(HttpHeaders.Authorization, bearer)
         contentType(ContentType.Application.Json)
-        setBody("""{"body":"$text"}""")
+        setBody(
+            if (participantName == null) {
+                """{"body":"$text"}"""
+            } else {
+                """{"body":"$text","participantName":"$participantName"}"""
+            }
+        )
     }
 
     private suspend fun patchStatus(
@@ -199,6 +206,7 @@ class FeedbackThreadIntegrationTest {
         {
           "perspectiveCode": "BUSINESS_FLOW",
           "body": "この項目は必要ですか？",
+          "participantName": "顧客担当A",
           "targetType": "UI_ELEMENT",
           "target": {
             "type": "UI_ELEMENT",
@@ -230,6 +238,12 @@ class FeedbackThreadIntegrationTest {
         assertEquals("UI_ELEMENT", thread.getValue("targetType").jsonPrimitive.content)
         assertEquals("OPEN", thread.getValue("status").jsonPrimitive.content)
         assertEquals("顧客レビュアー", thread.getValue("createdByName").jsonPrimitive.content)
+        assertEquals("顧客担当A", thread.getValue("reporterName").jsonPrimitive.content)
+        assertEquals(1, thread.getValue("displayNumber").jsonPrimitive.content.toInt())
+        assertEquals(
+            "/lands/L-1?projectId=$defaultProject",
+            thread.getValue("pageRoute").jsonPrimitive.content
+        )
         assertEquals(
             "contract-expiration-date",
             thread.getValue("targetMetadata").jsonObject.getValue("feedbackTargetId").jsonPrimitive.content,
@@ -243,6 +257,7 @@ class FeedbackThreadIntegrationTest {
         val messages = thread.getValue("messages").jsonArray.map { it.jsonObject }
         assertEquals(1, messages.size)
         assertEquals("この項目は必要ですか？", messages[0].getValue("body").jsonPrimitive.content)
+        assertEquals("顧客担当A", messages[0].getValue("participantName").jsonPrimitive.content)
 
         val evidence = thread.getValue("evidence").jsonObject
         assertEquals(1440, evidence.getValue("viewportWidth").jsonPrimitive.content.toInt())
@@ -370,6 +385,16 @@ class FeedbackThreadIntegrationTest {
                 pngBytes
             ).status
         )
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            postThread(
+                client,
+                sessionId,
+                viewerBearer,
+                uiTargetMetadata.replace("顧客担当A", "あ".repeat(101))
+            ).status,
+            "参加者名は100文字以内"
+        )
     }
 
     @Test
@@ -407,11 +432,12 @@ class FeedbackThreadIntegrationTest {
         val threadId = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata).bodyAsText())
             .getValue("id").jsonPrimitive.content
 
-        val reply = postMessage(client, threadId, viewerBearer, "確認結果を追記します")
+        val reply = postMessage(client, threadId, viewerBearer, "確認結果を追記します", "顧客担当B")
         assertEquals(HttpStatusCode.Created, reply.status, reply.bodyAsText())
         val message = body(reply.bodyAsText())
         assertEquals(threadId, message.getValue("threadId").jsonPrimitive.content)
         assertEquals("顧客レビュアー", message.getValue("authorName").jsonPrimitive.content)
+        assertEquals("顧客担当B", message.getValue("participantName").jsonPrimitive.content)
         assertEquals("確認結果を追記します", message.getValue("body").jsonPrimitive.content)
 
         val detail = client.get("/api/threads/$threadId") {
@@ -420,6 +446,29 @@ class FeedbackThreadIntegrationTest {
         val messages = body(detail.bodyAsText()).getValue("messages").jsonArray.map { it.jsonObject }
         assertEquals(2, messages.size)
         assertEquals("確認結果を追記します", messages.last().getValue("body").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `追加したフィードバックは既存番号を変えずセッション末尾に採番される`() = withApp { client ->
+        val sessionId = createSession(client)
+        val first = body(postThread(client, sessionId, viewerBearer, uiTargetMetadata).bodyAsText())
+        val second = body(
+            postThread(
+                client,
+                sessionId,
+                viewerBearer,
+                uiTargetMetadata.replace("この項目は必要ですか？", "二番目のコメント")
+            ).bodyAsText()
+        )
+
+        assertEquals(1, first.getValue("displayNumber").jsonPrimitive.content.toInt())
+        assertEquals(2, second.getValue("displayNumber").jsonPrimitive.content.toInt())
+        val firstAgain = body(
+            client.get("/api/threads/${first.getValue("id").jsonPrimitive.content}") {
+                header(HttpHeaders.Authorization, viewerBearer)
+            }.bodyAsText()
+        )
+        assertEquals(1, firstAgain.getValue("displayNumber").jsonPrimitive.content.toInt())
     }
 
     @Test
@@ -465,6 +514,10 @@ class FeedbackThreadIntegrationTest {
                     assertEquals(1, deliveries.count { it[1] == "ISSUE" }, "Issue はスレッドにつき1件")
                     assertEquals(3, deliveries.count { it[1] == "TEAMS" })
                     assertEquals(3, deliveries.count { it[1] == "EMAIL" })
+                    assertTrue(
+                        deliveries.filter { it[0] == "THREAD_CREATED" }.all { "顧客担当A" in it[3] },
+                        "共通ログインでも通知には端末側の参加者名を載せる"
+                    )
                     assertEquals(
                         2,
                         deliveries.count { it[2] == "fe@gis.example" },
@@ -614,7 +667,7 @@ class FeedbackThreadIntegrationTest {
             header(HttpHeaders.Authorization, viewerBearer)
             header(HttpHeaders.XRequestId, updateCallId)
             contentType(ContentType.Application.Json)
-            setBody("""{"body":"項目名を契約終了日に変更してください"}""")
+            setBody("""{"body":"項目名を契約終了日に変更してください","participantName":"顧客担当A"}""")
         }
         assertEquals(HttpStatusCode.OK, updated.status, updated.bodyAsText())
         assertEquals(
@@ -630,6 +683,7 @@ class FeedbackThreadIntegrationTest {
         val history = Json.parseToJsonElement(historyResponse.bodyAsText()).jsonArray.map { it.jsonObject }
         assertEquals(listOf(2, 1), history.map { it.getValue("version").jsonPrimitive.content.toInt() })
         assertEquals(true, history[0].getValue("current").jsonPrimitive.content.toBoolean())
+        assertEquals("顧客担当A", history[0].getValue("editedByParticipantName").jsonPrimitive.content)
         assertEquals("この項目は必要ですか？", history[1].getValue("body").jsonPrimitive.content)
 
         assertEquals(

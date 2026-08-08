@@ -229,6 +229,18 @@ class AuthzIntegrationTest {
         assertEquals(1, memberships.size)
         assertEquals(defaultProject, memberships[0].getValue("projectId").jsonPrimitive.content)
         assertEquals("viewer", memberships[0].getValue("role").jsonPrimitive.content)
+        assertEquals(
+            setOf(
+                "projects.view",
+                "layers.view",
+                "map.view",
+                "business-data.view",
+                "jobs.view",
+                "review.view",
+                "review.comment"
+            ),
+            memberships[0].getValue("permissions").jsonArray.map { it.jsonPrimitive.content }.toSet()
+        )
     }
 
     @Test

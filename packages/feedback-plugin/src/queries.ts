@@ -39,7 +39,8 @@ export function useOpenReviewSessionQuery() {
     queryKey: feedbackPluginKeys.sessions(projectId, "open"),
     queryFn: () => api.getReviewSessions(projectId, "open"),
     enabled: Boolean(projectId),
-    select: (sessions) => sessions[0] ?? null
+    // status=open はAPIにも渡すが、プロキシやテストダブルの誤応答でdraftを案内しないよう防御する。
+    select: (sessions) => sessions.find((session) => session.status === "open") ?? null
   });
 }
 

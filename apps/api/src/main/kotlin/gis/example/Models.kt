@@ -346,7 +346,9 @@ data class TileJsonDto(
 @Serializable
 data class MembershipDto(
     val projectId: String,
-    val role: String
+    val role: String,
+    /** UI の表示制御にも使う、組込みロールから導出した実効権限キー。 */
+    val permissions: List<String>
 )
 
 @Serializable
@@ -473,6 +475,8 @@ data class FeedbackMessageDto(
     val threadId: String,
     val authorId: String? = null,
     val authorName: String? = null,
+    /** 共通ログイン利用時に端末側で入力した自己申告名。認可には使用しない。 */
+    val participantName: String? = null,
     val body: String,
     val createdAt: String,
     val editedAt: String? = null
@@ -486,6 +490,7 @@ data class FeedbackMessageVersionDto(
     val body: String,
     val editedBy: String? = null,
     val editedByName: String? = null,
+    val editedByParticipantName: String? = null,
     val createdAt: String,
     val current: Boolean
 )
@@ -493,9 +498,13 @@ data class FeedbackMessageVersionDto(
 @Serializable
 data class FeedbackThreadDto(
     val id: String,
+    /** セッション内で固定される表示番号。新しいスレッドほど大きくなる。 */
+    val displayNumber: Int,
     val projectId: String,
     val reviewSessionId: String,
     val reviewScopeId: String? = null,
+    /** 投稿対象となった具体的なURL。詳細画面IDごとのピン分離に使う。 */
+    val pageRoute: String? = null,
     val perspectiveCode: String,
     val perspectiveLabel: String,
     /** UI_ELEMENT / SCREEN_POSITION / MAP_FEATURE / MAP_POSITION */
@@ -506,6 +515,8 @@ data class FeedbackThreadDto(
     val status: String,
     val createdBy: String? = null,
     val createdByName: String? = null,
+    /** 初回コメントを投稿した端末側の自己申告名。 */
+    val reporterName: String? = null,
     val createdAt: String,
     val updatedAt: String,
     val messages: List<FeedbackMessageDto> = emptyList()

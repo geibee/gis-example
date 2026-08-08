@@ -4,6 +4,7 @@ import { ReviewGuide, reviewSessionStatusLabels } from "../components/ReviewGuid
 import { FeedbackManagementPanel } from "../components/FeedbackManagementPanel";
 import { ReviewSessionManager } from "../components/ReviewSessionManager";
 import { useReviewSessionsQuery } from "../queries/reviewSessions";
+import { hasProjectPermission, reviewManagePermission } from "../permissions";
 import { errorMessage } from "../utils";
 
 // レビュー画面 (docs/prototype-review.md Phase 1〜5)。
@@ -28,8 +29,7 @@ export default function ReviewScreen() {
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
   const canManage =
-    me?.systemRole === "admin" ||
-    me?.memberships.some((membership) => membership.projectId === selectedProject && membership.role === "editor") === true;
+    hasProjectPermission(me, selectedProject, reviewManagePermission);
 
   return (
     <section className="tab-pane review-tab active">

@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FeedbackThread } from "./contracts";
+import { useFeedbackPluginContext } from "./plugin-context";
 import { useFeedbackState } from "./state";
 import { parseFeedbackTarget } from "./target";
+import { feedbackThreadMatchesPath } from "./thread-route";
 import { feedbackTargetAttribute, type FeedbackTarget } from "./types";
 
 type PinPosition = { thread: FeedbackThread; x: number; y: number };
 
 export function FeedbackPins({ threads }: { threads: FeedbackThread[] }) {
   const { openThread } = useFeedbackState();
+  const { currentPath } = useFeedbackPluginContext();
   const [layoutVersion, setLayoutVersion] = useState(0);
 
   useEffect(() => {
@@ -22,21 +25,21 @@ export function FeedbackPins({ threads }: { threads: FeedbackThread[] }) {
     };
   }, []);
 
-  const pathname = window.location.pathname;
   const pins = useMemo(
     () => threads.flatMap((thread) => {
+      if (!feedbackThreadMatchesPath(thread, currentPath)) return [];
       const target = parseFeedbackTarget(thread.targetMetadata);
       if (!target || target.type === "MAP_FEATURE" || target.type === "MAP_POSITION") return [];
-      const position = screenPinPosition(thread, target, pathname);
+      const position = screenPinPosition(thread, target, currentPath);
       return position ? [{ thread, ...position }] : [];
     }),
     // layoutVersion triggers DOM geometry reads after scroll / resize.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layoutVersion, pathname, threads]
+    [currentPath, layoutVersion, threads]
   );
   return (
     <div className="wfg-feedback-screen-pins">
-      {pins.map((pin, index) => (
+      {pins.map((pin) => (
         <button
           type="button"
           className={`wfg-feedback-pin${pin.thread.status === "RESOLVED" ? " is-resolved" : ""}`}
@@ -45,7 +48,7 @@ export function FeedbackPins({ threads }: { threads: FeedbackThread[] }) {
           key={pin.thread.id}
           onClick={() => openThread(pin.thread.id)}
         >
-          <span>{index + 1}</span>
+          <span>{pin.thread.displayNumber}</span>
         </button>
       ))}
     </div>

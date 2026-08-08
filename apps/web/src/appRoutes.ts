@@ -48,7 +48,12 @@ export const screenDefinitions: readonly ScreenDefinition[] = [
   {
     basePath: tabBasePath.review,
     listLabel: "レビュー管理",
-    meta: { pageId: screenPageIds.review.list, tab: "review", title: "レビュー" },
+    meta: {
+      pageId: screenPageIds.review.list,
+      tab: "review",
+      title: "レビュー",
+      requiredProjectPermission: "review.manage"
+    },
     loadComponent: () => import("./screens/ReviewScreen")
   },
   {

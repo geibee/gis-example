@@ -76,6 +76,7 @@ const session: ReviewSession = {
 
 const thread: FeedbackThread = {
   id: "thread-map",
+  displayNumber: 1,
   projectId: "p1",
   reviewSessionId: session.id,
   perspectiveCode: "MAP",
@@ -138,6 +139,7 @@ describe("FeedbackMapLibreAdapter", () => {
     );
 
     await waitFor(() => expect(maplibreState.markers[0]).toMatchObject({ lngLat: [139.7, 35.6] }));
+    expect(maplibreState.markers[0].element).toHaveTextContent("1");
     await act(async () => maplibreState.markers[0].element?.click());
     await waitFor(() => expect(screen.getByLabelText("開いているスレッド")).toHaveTextContent("thread-map"));
     await waitFor(() => expect(listeners.get("contextmenu")).toBeDefined());

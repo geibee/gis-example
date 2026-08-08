@@ -63,6 +63,7 @@ import java.util.UUID
 
 /** 証跡 1 枚の上限。1440x900 の PNG は実測 70KB 前後なので、既定 10MB は十分に余裕がある */
 private const val DEFAULT_EVIDENCE_MAX_BYTES = 10L * 1024 * 1024
+private const val PARTICIPANT_NAME_MAX_LENGTH = 100
 
 fun Route.feedbackRoutes(deps: AppDependencies) {
     val db = deps.db
@@ -132,6 +133,7 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
                         targetMetadata = targetMetadata,
                         pageId = readOptionalText(metadata, "pageId"),
                         pageRoute = readOptionalText(metadata, "route"),
+                        participantName = readParticipantName(metadata),
                         body = body,
                         evidence = evidence
                     ),
@@ -219,6 +221,7 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
                     threadId = call.authorizedResourceId(),
                     body = readRequiredText(request, "body"),
                     authorId = call.appPrincipal().userId,
+                    participantName = readParticipantName(request),
                     audit = call.auditTrail()
                 )
             )
@@ -239,6 +242,7 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
                     id = call.authorizedResourceId(),
                     body = readRequiredText(request, "body"),
                     editorId = call.appPrincipal().userId,
+                    editorParticipantName = readParticipantName(request),
                     audit = call.auditTrail()
                 )
             )
@@ -301,6 +305,17 @@ fun Route.feedbackRoutes(deps: AppDependencies) {
         }
     }
 }
+
+/** 端末側の自己申告名。認証・認可には使わず、表示と集計だけに使用する。 */
+private fun readParticipantName(request: JsonObject): String? =
+    readOptionalText(request, "participantName")?.also { value ->
+        if (value.length > PARTICIPANT_NAME_MAX_LENGTH) {
+            throw ApiException(
+                HttpStatusCode.BadRequest,
+                "participantName must be $PARTICIPANT_NAME_MAX_LENGTH characters or fewer"
+            )
+        }
+    }
 
 // ---------------------------------------------------------------- multipart 読み取り
 

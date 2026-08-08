@@ -10,7 +10,7 @@ import type {
   ReviewNotificationRetryResult,
   ReviewSession
 } from "../contracts";
-import { makeFeedbackThread, makeMe, makeReviewSession } from "../testing/fixtures";
+import { makeFeedbackThread, makeLand, makeMe, makeReviewSession } from "../testing/fixtures";
 import { renderWithProviders } from "../testing/renderWithProviders";
 import { server } from "../testing/server";
 
@@ -157,7 +157,7 @@ describe("ReviewScreen", () => {
         reviewable: true
       }]
     });
-    expect(await screen.findByRole("heading", { name: "第1回 ローカルレビュー" })).toBeInTheDocument();
+    expect(await within(guide()).findByRole("heading", { name: "第1回 ローカルレビュー" })).toBeInTheDocument();
   });
 
   it("editor が選択中セッションの内容と受付状態を編集できる", async () => {
@@ -190,14 +190,28 @@ describe("ReviewScreen", () => {
   it("viewer にはセッション管理操作を表示しない", async () => {
     server.use(
       http.get("*/api/me", () =>
-        HttpResponse.json(makeMe({ memberships: [{ projectId: "p1", role: "viewer" }] }))
+        HttpResponse.json(makeMe({
+          memberships: [{
+            projectId: "p1",
+            role: "viewer",
+            permissions: [
+              "projects.view",
+              "layers.view",
+              "map.view",
+              "business-data.view",
+              "jobs.view",
+              "review.view",
+              "review.comment"
+            ]
+          }]
+        }))
       )
     );
-    renderWithProviders({ path: "/review" });
+    const { router } = renderWithProviders({ path: "/review" });
 
-    await screen.findByRole("heading", { name: "第1回 業務フローレビュー" });
-    expect(screen.queryByRole("button", { name: "新規作成" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "編集" })).not.toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/zones"));
+    expect(await screen.findByRole("heading", { name: "区域" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "レビュー" })).not.toBeInTheDocument();
   });
 
   it("プロジェクト集計と選択セッションのフィードバック一覧を表示・絞り込みできる", async () => {
@@ -287,17 +301,21 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(evidenceRequests).toBe(1));
   });
 
-  it("管理一覧から会話 Drawer を開ける", async () => {
-    const thread = makeFeedbackThread();
+  it("管理一覧のパーマリンクから対象画面へ遷移して会話Drawerを開ける", async () => {
+    const thread = makeFeedbackThread({ pageRoute: "/lands/L-1" });
     server.use(
       http.get("*/api/threads", () =>
         HttpResponse.json<FeedbackThread[]>([thread], { headers: { "X-Total-Count": "1" } })
-      )
+      ),
+      http.get("*/api/lands/L-1", () => HttpResponse.json(makeLand({ id: "L-1" })))
     );
     const { user } = renderWithProviders({ path: "/review" });
     const management = await screen.findByRole("region", { name: "フィードバック管理" });
 
-    await user.click(await within(management).findByRole("button", { name: /スレッドを開く/ }));
+    const link = await within(management).findByRole("link", { name: /スレッドを開く/ });
+    expect(link).toHaveAttribute("href", expect.stringContaining("/lands/L-1?projectId=p1&threadId=ft-1"));
+    await user.click(link);
+    await waitFor(() => expect(document.title).toContain("土地詳細"));
     expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
   });
 
@@ -312,7 +330,7 @@ describe("ReviewScreen", () => {
       )
     );
 
-    renderWithProviders({ path: "/review?projectId=p1&threadId=ft-notification" });
+    renderWithProviders({ path: "/lands/L-1?projectId=p1&threadId=ft-notification" });
 
     const drawer = await screen.findByRole("dialog", { name: "フィードバックスレッド" });
     expect(await within(drawer).findByText("土地タブの名称を確認してください")).toBeInTheDocument();

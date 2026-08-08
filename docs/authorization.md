@@ -144,20 +144,12 @@ fail-closed を保つ)。
 
 ## フロントエンド (web) への申し送り
 
-現状の web は `me?.systemRole === "admin"` の直判定のみで、機能単位の出し分け基盤が
-ない。web 側チェーンで次を行う (この issue では API 契約 (openapi.yaml) を変えて
-いないため未着手):
+`/api/me` は `memberships[].permissions` として、プロジェクトロールから導出した実効権限を返す。
+web のプロジェクト機能はルート・画面メタデータに必要 Permission キーを宣言し、ルートガードと
+ボタン出し分けをこの配列から導出する。system admin はプロジェクトメンバーシップを持たなくても
+全操作を許可されるため、フロントでも `systemRole=admin` を同じ破壊不能ルールとして扱う。
 
-1. `/api/me` のレスポンスへ実効権限を追加する — openapi.yaml の `Me` スキーマに
-   `permissions: string[]` (グローバル = system admin 由来) と `memberships[].permissions:
-   string[]` (プロジェクトロール由来) を追加し、生成型を再生成する。サーバ側は
-   `AccessPolicy.permissionsOf(role)` (この issue で追加済み) から `Permission.key` を
-   列挙するだけでよい
-2. ルート・画面のメタデータ (staticData 等) に必要 Permission キーを宣言し、
-   ルートガードとボタン出し分けを `/api/me` の permissions から導出する —
-   「フロントの表示制御とサーバの認可判断が同一の権限情報源から導出される」
-   (受け入れ条件) はこれで満たす
-3. UI 出し分けはあくまで UX であり、強制は常にサーバ (PEP) が行う (現行どおり)
+UI 出し分けはあくまで UX であり、強制は常にサーバ (PEP) が行う。
 
 Permission キーは `Permission.key` (例: `business-data.edit`) を唯一の正とし、
 web 側で独自の権限文字列を定義しない。

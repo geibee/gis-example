@@ -7,6 +7,7 @@ describe("feedback export", () => {
     const session = makeReviewSession();
     const thread = makeFeedbackThread({
       reviewScopeId: session.scopes[0].id,
+      pageRoute: "/lands/L-123?view=detail",
       targetMetadata: {
         type: "UI_ELEMENT",
         feedbackTargetId: "contract.save",
@@ -19,6 +20,7 @@ describe("feedback export", () => {
           threadId: "ft1",
           authorId: "u1",
           authorName: "利用者A",
+          participantName: "顧客担当A",
           body: "=HYPERLINK(\"危険\")",
           createdAt: "2026-08-08T00:00:00Z",
           editedAt: null
@@ -35,13 +37,16 @@ describe("feedback export", () => {
       ]
     });
 
-    const csv = buildFeedbackExportCsv(session, [thread]);
+    const csv = buildFeedbackExportCsv(session, [thread], "https://gis.example.test");
 
     expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv).toContain("画面要素: contract.save");
-    expect(csv).toContain("利用者A");
+    expect(csv).toContain("顧客担当A");
     expect(csv).toContain("担当者B");
     expect(csv).toContain("'=HYPERLINK");
+    expect(csv).toContain("https://gis.example.test/lands/L-123?view=detail&");
+    expect(csv).toContain("projectId=p1");
+    expect(csv).toContain("threadId=ft-1");
   });
 
   it("1000件を超える場合はページを継続取得する", async () => {

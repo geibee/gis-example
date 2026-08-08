@@ -223,8 +223,9 @@ Perspective       perspectiveId / code (BUSINESS_FLOW, INFORMATION, USABILITY, M
                   UI_DESIGN, PERFORMANCE, AUTHORIZATION, ERROR_HANDLING …)
 SessionPerspective  reviewSessionId / perspectiveId / status (ACTIVE|FUTURE|OUT_OF_SCOPE) / guidance
 FeedbackThread    threadId / reviewSessionId / reviewScopeId / perspectiveId / targetType /
-                  targetMetadata / evidenceId / applicationVersion / status / createdBy / createdAt
-FeedbackMessage   messageId / threadId / authorId / body / createdAt / editedAt
+                  targetMetadata / evidenceId / pageRoute / displayNumber / applicationVersion /
+                  status / createdBy / reporterName / createdAt
+FeedbackMessage   messageId / threadId / authorId / participantName / body / createdAt / editedAt
 Evidence          evidenceId / threadId / screenshotPath / viewportWidth / viewportHeight /
                   scrollX / scrollY / pixelRatio / frontendVersion / route / capturedAt
 ```
@@ -234,6 +235,12 @@ Evidence          evidenceId / threadId / screenshotPath / viewportWidth / viewp
 - `ReviewScope.pageId` は `zones.detail` のようなURL非依存の画面種別ID、`route` は
   `/zones/{id}` のようなルートテンプレートとする。候補は業務APIから実データを列挙せず、ホストが
   SDKへ渡すルート一覧から生成する。管理画面はチェックボックスを初期全選択にし、パスの自由入力を要求しない。
+- `FeedbackThread.pageRoute` は `/zones/Z-1?projectId=...` のような投稿時の具体URLとする。
+  管理画面では同じ画面種別の全詳細を集約し、業務画面上のピンは具体URLが一致する詳細だけへ表示する。
+- `displayNumber` はセッション内で固定し、新規投稿は既存最大値の次に採番する。APIの一覧順が変わっても
+  既存ピン番号を繰り下げない。
+- 共通OIDCアカウントを使う場合、`reporterName` / `participantName` にlocalStorage由来の自己申告名を
+  保存する。`createdBy` / `authorId` は認証・認可・監査主体として残し、自己申告名を認可判断に使わない。
 - 監査は既存 `app.audit_logs` に載せる。最低限、Thread 作成 / Message 投稿 / 編集 /
   Resolve / Reopen / ReviewSession 変更 / ReviewScope 変更 / 権限変更を記録する
 
@@ -299,6 +306,14 @@ MVP は `OPEN` / `RESOLVED` の 2 値から始め、必要になれば
 FeedbackPluginProvider / ReviewGuide / FeedbackOverlay / FeedbackTarget
 FeedbackMapLibreAdapter / FeedbackDrawer / FeedbackThread / ScreenshotCapture
 ```
+
+### 8.3 管理一覧・証跡・パーマリンク
+
+- レビュー管理画面は選択セッションのFeedbackThreadを一覧表示し、状態・観点・証跡有無・本文で絞り込む
+- 「証跡」から、認可つき `/api/threads/{threadId}/evidence` で投稿時のPNGを表示する
+- 一覧のFBを押すと `pageRoute` へ `projectId` / `threadId` を付けたパーマリンクへ遷移し、
+  対象詳細画面とスレッドDrawerを同時に開く
+- Excel用CSVにも同じ絶対パーマリンクを出力し、集計後に元画面へ戻れるようにする
 
 Overlay 自身の DOM には `data-review-exclude` を付ける (証跡に自分が写り込まないようにする)。
 

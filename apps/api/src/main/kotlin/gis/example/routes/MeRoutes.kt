@@ -1,6 +1,7 @@
 // 自分自身の情報 (openapi.yaml tag: admin の /api/me)
 package gis.example.routes
 
+import gis.example.AccessPolicy
 import gis.example.MeDto
 import gis.example.MembershipDto
 import gis.example.RouteAuthz.AuthenticatedOnly
@@ -22,7 +23,11 @@ fun Route.meRoutes(deps: AppDependencies) = authorizedRoutes(deps.db) {
                 displayName = principal.displayName,
                 systemRole = if (principal.systemRole == SystemRole.ADMIN) "admin" else "user",
                 memberships = principal.memberships.map { (projectId, role) ->
-                    MembershipDto(projectId = projectId, role = role.name.lowercase())
+                    MembershipDto(
+                        projectId = projectId,
+                        role = role.name.lowercase(),
+                        permissions = AccessPolicy.permissionsOf(role).map { it.key }.sorted()
+                    )
                 }.sortedBy { it.projectId }
             )
         )

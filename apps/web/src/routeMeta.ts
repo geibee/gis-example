@@ -8,6 +8,8 @@ export type ScreenMeta = {
   tab: BusinessTab;
   title: string;
   requiredSystemRole?: "admin";
+  /** 選択中プロジェクトで必要な実効権限。system admin は常に許可される。 */
+  requiredProjectPermission?: string;
 };
 
 declare module "@tanstack/react-router" {

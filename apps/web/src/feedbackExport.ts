@@ -1,6 +1,7 @@
 import { parseFeedbackTarget } from "@web-gis/feedback-plugin";
 import type { FeedbackThread, FeedbackThreadSearchQuery, ReviewSession } from "./contracts";
 import { searchFeedbackThreads, type FeedbackThreadSearchResult } from "./api";
+import { buildFeedbackPermalink } from "./feedbackPermalink";
 
 const EXPORT_BATCH_SIZE = 1000;
 
@@ -22,8 +23,13 @@ export async function loadFeedbackThreadsForExport(
 }
 
 /** Excelで文字化けしないBOM付きUTF-8 CSV。1メッセージを1行にして返信も集計できる。 */
-export function buildFeedbackExportCsv(session: ReviewSession, threads: FeedbackThread[]): string {
+export function buildFeedbackExportCsv(
+  session: ReviewSession,
+  threads: FeedbackThread[],
+  baseUrl?: string
+): string {
   const headers = [
+    "FB番号",
     "レビューセッション",
     "画面",
     "ルート",
@@ -34,24 +40,27 @@ export function buildFeedbackExportCsv(session: ReviewSession, threads: Feedback
     "コメント",
     "投稿日時",
     "編集日時",
+    "パーマリンク",
     "スレッドID"
   ];
   const rows = threads.flatMap((thread) => {
     const scope = session.scopes.find((candidate) => candidate.id === thread.reviewScopeId);
-    const route = thread.evidence?.route ?? scope?.route ?? scope?.pageId ?? "";
+    const route = thread.pageRoute ?? thread.evidence?.route ?? scope?.route ?? scope?.pageId ?? "";
     const screen = scope?.description ?? scope?.pageId ?? route;
     const messages = thread.messages.length > 0 ? thread.messages : [null];
     return messages.map((message) => [
+      thread.displayNumber,
       session.title,
       screen,
       route,
       describeFeedbackTarget(thread.targetMetadata),
       thread.perspectiveLabel,
       thread.status === "RESOLVED" ? "解決済み" : "未解決",
-      message?.authorName ?? thread.createdByName ?? "退職済みユーザー",
+      message?.participantName ?? message?.authorName ?? thread.reporterName ?? thread.createdByName ?? "投稿者不明",
       message?.body ?? "",
       message?.createdAt ?? thread.createdAt,
       message?.editedAt ?? "",
+      buildFeedbackPermalink(thread, thread.projectId, baseUrl),
       thread.id
     ]);
   });

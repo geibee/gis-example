@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   Image,
+  LocateFixed,
   MessageSquareText,
   RefreshCw,
   Search,
@@ -12,7 +13,9 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import { useRouter } from "@tanstack/react-router";
 import { useAppShell } from "../appShell";
+import { hasProjectPermission, reviewManagePermission } from "../permissions";
 import type { FeedbackSummary as FeedbackSummaryDto, FeedbackThread, ReviewSession } from "../contracts";
 import {
   useFeedbackEvidenceQuery,
@@ -31,9 +34,10 @@ import {
   useUpdateReviewNotificationSettingsMutation
 } from "../queries/reviewNotifications";
 import { notifyError, notifySuccess } from "../notifications";
-import { captureExcludeAttribute, useFeedbackPlugin } from "@web-gis/feedback-plugin";
+import { captureExcludeAttribute } from "@web-gis/feedback-plugin";
 import { errorMessage } from "../utils";
 import { downloadFeedbackExportCsv, loadFeedbackThreadsForExport } from "../feedbackExport";
+import { buildFeedbackPermalink, feedbackPermalinkPath } from "../feedbackPermalink";
 
 const PAGE_SIZE = 20;
 
@@ -51,7 +55,7 @@ export function FeedbackManagementPanel({
   selectedPerspective,
   onPerspectiveChange
 }: FeedbackManagementPanelProps) {
-  const { openThread } = useFeedbackPlugin();
+  const router = useRouter();
   const { me } = useAppShell();
   const [status, setStatus] = useState<"" | "OPEN" | "RESOLVED">("");
   const [evidence, setEvidence] = useState<"" | "with" | "without">("");
@@ -82,9 +86,7 @@ export function FeedbackManagementPanel({
   const totalCount = threadsQuery.data?.totalCount ?? 0;
   const page = Math.floor(offset / PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-  const canManage =
-    me?.systemRole === "admin" ||
-    me?.memberships.some((membership) => membership.projectId === projectId && membership.role === "editor") === true;
+  const canManage = hasProjectPermission(me, projectId, reviewManagePermission);
 
   const applySearch = (event: FormEvent) => {
     event.preventDefault();
@@ -212,16 +214,22 @@ export function FeedbackManagementPanel({
       <div className="feedback-management-list" aria-label="フィードバックスレッド一覧">
         {threads.map((thread) => {
           const firstMessage = thread.messages[0];
+          const permalink = buildFeedbackPermalink(thread, projectId);
+          const permalinkPath = feedbackPermalinkPath(permalink);
           return (
             <article className="feedback-management-thread" key={thread.id}>
-              <button
-                type="button"
+              <a
                 className="feedback-management-thread-main"
                 aria-label={`スレッドを開く: ${firstMessage?.body ?? thread.perspectiveLabel}`}
-                onClick={() => openThread(thread.id)}
+                href={permalink}
+                onClick={(event) => {
+                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  router.history.push(permalinkPath);
+                }}
               >
                 <span className="feedback-management-thread-meta">
-                  <strong>{thread.perspectiveLabel}</strong>
+                  <strong>#{thread.displayNumber} {thread.perspectiveLabel}</strong>
                   <span className={`feedback-thread-status${thread.status === "RESOLVED" ? " resolved" : ""}`}>
                     {thread.status === "RESOLVED" ? "解決済み" : "未解決"}
                   </span>
@@ -231,9 +239,10 @@ export function FeedbackManagementPanel({
                   {firstMessage?.body ?? "コメント本文はありません"}
                 </span>
                 <span className="feedback-management-thread-footer">
-                  {thread.createdByName ?? "退職済みユーザー"} · {thread.messages.length}件のメッセージ
+                  {thread.reporterName ?? thread.createdByName ?? "投稿者不明"} · {thread.messages.length}件のメッセージ
+                  <span><LocateFixed size={12} /> 対象画面で開く</span>
                 </span>
-              </button>
+              </a>
               {thread.evidence ? (
                 <button
                   type="button"

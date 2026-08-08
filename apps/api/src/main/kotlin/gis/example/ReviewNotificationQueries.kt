@@ -158,7 +158,8 @@ internal fun enqueueReviewNotification(
     messageId: String?,
     eventType: String,
     actorId: String?,
-    body: String
+    body: String,
+    actorParticipantName: String? = null
 ) {
     val context = connection.prepareStatement(
         """
@@ -186,7 +187,7 @@ internal fun enqueueReviewNotification(
                 projectName = rs.getString(3),
                 sessionTitle = rs.getString(4),
                 perspectiveLabel = rs.getString(5),
-                actorName = rs.getString(6),
+                actorName = actorParticipantName ?: rs.getString(6),
                 emailEnabled = rs.getBoolean(7),
                 teamsEnabled = rs.getBoolean(8),
                 issueEnabled = rs.getBoolean(9)

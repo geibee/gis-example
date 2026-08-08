@@ -2630,6 +2630,7 @@ input[type="file"] {
   color: #1e293b;
   text-align: left;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .feedback-management-thread-main:hover .feedback-management-thread-body {
@@ -2665,6 +2666,20 @@ input[type="file"] {
 .feedback-no-evidence {
   color: #64748b;
   font-size: 11px;
+}
+
+.feedback-management-thread-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedback-management-thread-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #0f766e;
+  font-weight: 700;
 }
 
 .feedback-evidence-button {

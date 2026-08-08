@@ -32,7 +32,25 @@ export function makeMe(overrides: Partial<Me> = {}): Me {
     email: "user@example.com",
     displayName: "一般ユーザー",
     systemRole: "user",
-    memberships: [{ projectId: "p1", role: "editor" }],
+    memberships: [{
+      projectId: "p1",
+      role: "editor",
+      permissions: [
+        "projects.view",
+        "layers.view",
+        "layers.manage",
+        "map.view",
+        "features.edit",
+        "business-data.view",
+        "business-data.edit",
+        "import.run",
+        "analysis.run",
+        "jobs.view",
+        "review.view",
+        "review.comment",
+        "review.manage"
+      ]
+    }],
     ...overrides
   };
 }
@@ -195,9 +213,11 @@ export function makeReviewSession(overrides: Partial<ReviewSession> = {}): Revie
 export function makeFeedbackThread(overrides: Partial<FeedbackThread> = {}): FeedbackThread {
   return {
     id: "ft-1",
+    displayNumber: 1,
     projectId: "p1",
     reviewSessionId: "rs-1",
     reviewScopeId: "sc-1",
+    pageRoute: "/lands/L-1?projectId=p1",
     perspectiveCode: "BUSINESS_FLOW",
     perspectiveLabel: "業務フロー",
     targetType: "UI_ELEMENT",
@@ -211,6 +231,7 @@ export function makeFeedbackThread(overrides: Partial<FeedbackThread> = {}): Fee
     status: "OPEN",
     createdBy: "u1",
     createdByName: "一般ユーザー",
+    reporterName: "レビュー担当A",
     createdAt: "2026-08-12T10:15:00+09:00",
     updatedAt: "2026-08-12T10:15:00+09:00",
     messages: [
@@ -219,6 +240,7 @@ export function makeFeedbackThread(overrides: Partial<FeedbackThread> = {}): Fee
         threadId: "ft-1",
         authorId: "u1",
         authorName: "一般ユーザー",
+        participantName: "レビュー担当A",
         body: "土地タブの名称を確認してください",
         createdAt: "2026-08-12T10:15:00+09:00",
         editedAt: null

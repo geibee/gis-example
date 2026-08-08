@@ -4,6 +4,7 @@ import type { ReviewSession } from "./contracts";
 import { useDismissiblePanel } from "./dismiss";
 import { FeedbackPins } from "./FeedbackPins";
 import { FeedbackThreadDrawer } from "./FeedbackThreadDrawer";
+import { ReviewSessionIntroduction } from "./ReviewSessionIntroduction";
 import { useFeedbackPluginContext } from "./plugin-context";
 import {
   useCreateFeedbackThreadMutation,
@@ -20,10 +21,15 @@ import {
 
 export type FeedbackOverlayProps = {
   launcherLabel?: string;
+  /** レビュー開始案内の既読状態を保存するlocalStorageキー。 */
+  reviewIntroductionStorageKey?: string;
 };
 
 /** 投稿、DOMピン、スレッド閲覧をdocument.body上のPortalとして提供する。 */
-export function FeedbackOverlay({ launcherLabel = "フィードバック" }: FeedbackOverlayProps) {
+export function FeedbackOverlay({
+  launcherLabel = "フィードバック",
+  reviewIntroductionStorageKey
+}: FeedbackOverlayProps) {
   const sessionQuery = useOpenReviewSessionQuery();
   const session = sessionQuery.data ?? null;
   const threadsQuery = useFeedbackThreadsQuery(session?.id ?? null);
@@ -103,6 +109,11 @@ export function FeedbackOverlay({ launcherLabel = "フィードバック" }: Fee
     activeThreadId ? <FeedbackThreadDrawer threadId={activeThreadId} onClose={closeThread} /> : null
   ) : (
     <>
+      <ReviewSessionIntroduction
+        session={session}
+        storageKey={reviewIntroductionStorageKey}
+        visible={mode === "idle" && !activeThreadId && !contextMenu}
+      />
       {mode === "idle" ? (
         <>
           <FeedbackPins threads={threadsQuery.data ?? []} />
@@ -195,12 +206,18 @@ function FeedbackComposer({
   onClose: () => void;
 }) {
   const panelRef = useDismissiblePanel<HTMLElement>(onClose);
-  const { notify, currentPageId } = useFeedbackPluginContext();
+  const {
+    notify,
+    currentPageId,
+    participantName,
+    saveParticipantName
+  } = useFeedbackPluginContext();
   const activePerspectives = useMemo(
     () => session.perspectives.filter((perspective) => perspective.status === "ACTIVE"),
     [session.perspectives]
   );
   const [perspectiveCode, setPerspectiveCode] = useState(activePerspectives[0]?.code ?? "");
+  const [participantNameDraft, setParticipantNameDraft] = useState(participantName ?? "");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const createThread = useCreateFeedbackThreadMutation();
@@ -213,9 +230,14 @@ function FeedbackComposer({
     if (previewUrl) return () => URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
+  useEffect(() => {
+    setParticipantNameDraft(participantName ?? "");
+  }, [participantName]);
+
   const submit = async () => {
     const trimmed = body.trim();
-    if (!trimmed || !perspectiveCode) return;
+    const submittedParticipantName = participantNameDraft.trim();
+    if (!trimmed || !perspectiveCode || !submittedParticipantName) return;
     setError(null);
     const evidence = picked.evidence;
     try {
@@ -224,6 +246,7 @@ function FeedbackComposer({
         metadata: {
           perspectiveCode,
           body: trimmed,
+          participantName: submittedParticipantName,
           targetType: picked.target.type,
           target: picked.target as unknown as Record<string, unknown>,
           pageId: currentPageId ?? null,
@@ -238,6 +261,7 @@ function FeedbackComposer({
         },
         screenshot: evidence?.blob ?? null
       });
+      saveParticipantName(submittedParticipantName);
       notify({ type: "success", message: "フィードバックを投稿しました" });
       onClose();
     } catch (caught) {
@@ -283,6 +307,20 @@ function FeedbackComposer({
         ))}
       </fieldset>
       <label className="wfg-feedback-field">
+        投稿者名
+        <input
+          type="text"
+          aria-label="投稿者名"
+          autoComplete="name"
+          maxLength={100}
+          required
+          value={participantNameDraft}
+          onChange={(event) => setParticipantNameDraft(event.target.value)}
+          placeholder="例: 山田 太郎"
+        />
+        <span className="wfg-feedback-field-help">このブラウザに保存され、次回から自動入力されます。</span>
+      </label>
+      <label className="wfg-feedback-field">
         コメント
         <textarea
           rows={5}
@@ -296,7 +334,7 @@ function FeedbackComposer({
         <button
           type="button"
           className="wfg-feedback-button-primary"
-          disabled={!body.trim() || !perspectiveCode || createThread.isPending}
+          disabled={!body.trim() || !participantNameDraft.trim() || !perspectiveCode || createThread.isPending}
           onClick={() => void submit()}
         >
           {createThread.isPending ? "投稿中…" : "投稿する"}

@@ -1,9 +1,11 @@
 import { useCallback, useEffect } from "react";
 import type { Map as MapLibreMap, MapMouseEvent, Marker } from "maplibre-gl";
 import type { FeedbackThread } from "./contracts";
+import { useFeedbackPluginContext } from "./plugin-context";
 import { useFeedbackThreadsQuery, useOpenReviewSessionQuery } from "./queries";
 import { useFeedbackState } from "./state";
 import { parseFeedbackTarget, resolveMapTarget } from "./target";
+import { feedbackThreadMatchesPath } from "./thread-route";
 import { captureExcludeAttribute } from "./types";
 
 export type FeedbackMapLayer = {
@@ -24,6 +26,7 @@ export function FeedbackMapLibreAdapter({
   styleLayersByLayerId
 }: FeedbackMapLibreAdapterProps) {
   const { mode, selectTarget, showContextMenu, openThread } = useFeedbackState();
+  const { currentPath } = useFeedbackPluginContext();
   const sessionQuery = useOpenReviewSessionQuery();
   const threadsQuery = useFeedbackThreadsQuery(sessionQuery.data?.id ?? null);
   const threads = threadsQuery.data ?? [];
@@ -72,7 +75,8 @@ export function FeedbackMapLibreAdapter({
     const markers: Array<{ marker: Marker; element: HTMLButtonElement; onClick: (event: Event) => void }> = [];
     void import("maplibre-gl").then(({ default: maplibregl }) => {
       if (!active) return;
-      threads.forEach((thread, index) => {
+      threads.forEach((thread) => {
+        if (!feedbackThreadMatchesPath(thread, currentPath)) return;
         const target = parseFeedbackTarget(thread.targetMetadata);
         if (!target || (target.type !== "MAP_FEATURE" && target.type !== "MAP_POSITION")) return;
 
@@ -80,7 +84,7 @@ export function FeedbackMapLibreAdapter({
         element.type = "button";
         element.className = `wfg-feedback-map-pin${thread.status === "RESOLVED" ? " is-resolved" : ""}`;
         const number = document.createElement("span");
-        number.textContent = String(index + 1);
+        number.textContent = String(thread.displayNumber);
         element.append(number);
         element.setAttribute(captureExcludeAttribute, "");
         element.setAttribute("aria-label", threadLabel(thread));
@@ -103,7 +107,7 @@ export function FeedbackMapLibreAdapter({
         marker.remove();
       });
     };
-  }, [map, openThread, threads]);
+  }, [currentPath, map, openThread, threads]);
 
   return null;
 }
