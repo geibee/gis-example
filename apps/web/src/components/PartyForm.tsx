@@ -62,13 +62,15 @@ export function PartyForm({
       <form id={partyFormId} className="object-form" noValidate onSubmit={handleSubmit(onSubmit)}>
         <TextField
           label="ID"
+          feedbackTargetId="parties.field.id"
           required={creating}
           disabled={!creating}
           error={errors.id?.message}
           {...register("id")}
         />
-        <TextField label="名称" required error={errors.name?.message} {...register("name")} />
+        <TextField feedbackTargetId="parties.field.name" label="名称" required error={errors.name?.message} {...register("name")} />
         <SelectField
+          feedbackTargetId="parties.field.type"
           label="種別"
           required
           options={partyTypeOptions}
@@ -77,16 +79,17 @@ export function PartyForm({
           error={errors.partyType?.message}
           {...register("partyType")}
         />
-        <TextField label="連絡先" error={errors.contact?.message} {...register("contact")} />
-        <TextField label="住所" wide error={errors.address?.message} {...register("address")} />
+        <TextField feedbackTargetId="parties.field.contact" label="連絡先" error={errors.contact?.message} {...register("contact")} />
+        <TextField feedbackTargetId="parties.field.address" label="住所" wide error={errors.address?.message} {...register("address")} />
         <TextField
+          feedbackTargetId="parties.field.tags"
           label="タグ"
           wide
           placeholder="例: 外国人、競合（読点またはカンマ区切り）"
           error={errors.tags?.message}
           {...register("tags")}
         />
-        <TextAreaField label="メモ" wide error={errors.memo?.message} {...register("memo")} />
+        <TextAreaField feedbackTargetId="parties.field.memo" label="メモ" wide error={errors.memo?.message} {...register("memo")} />
       </form>
     </>
   );
@@ -110,6 +113,7 @@ function PartyFormHeader({
   const partyType = useWatch({ control, name: "partyType" });
   return (
     <ObjectDetailHeader
+      feedbackTargetId="parties.detail-header"
       id={creating ? id || "新規関係者" : id}
       title={name || "関係者"}
       subtitle={partyType}

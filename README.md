@@ -184,13 +184,34 @@ web は Authorization Code + PKCE でログインし (`oidc-client-ts` / `react-
 - メンバーでないプロジェクトのリソースへの個別アクセスは 404 (ID の存在自体を隠す)。メンバーだがロール不足の場合と、projectId を明示した操作の拒否は 403
 - 一覧 API (`/api/layers` `/api/lands` `/api/buildings` `/api/parties` `/api/zones` `/api/features/search`) は `projectId` が必須
 - `/api/projects` はメンバーであるプロジェクトのみ返す (admin は全件)
-- 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。閲覧成功は記録しない。書込みはベストエフォートで、失敗してもリクエストは落とさない
+- 監査ログ (`app.audit_logs`): 変更系 (POST/PATCH/DELETE) の成功と、認証失敗・認可拒否 (401/403) を「誰が・いつ・どのアクションを・どのプロジェクトで」の形で記録する。通常の閲覧成功は記録しないが、機微なレビュー証跡の取得成功は例外として記録する。書込みはベストエフォートで、失敗してもリクエストは落とさない
 - 管理 API: `GET /api/me`(自分のロールとメンバーシップ)、admin 専用の `GET /api/users`・`PATCH /api/users/{id}`(system_role / is_active。自分自身は変更不可)・`GET/PUT/DELETE /api/projects/{id}/members/{userId}`。メンバーシップの変更は次のリクエストから即時反映される
+
+## Prototype Review
+
+プロトタイプに対して顧客が非同期でレビューコメントを付け、開発側とスレッドで対話・解決管理するための基盤。設計と実装計画は [`docs/prototype-review.md`](docs/prototype-review.md) を参照。
+
+最大の技術的不確実性だった「業務 DOM と MapLibre の WebGL 描画を 1 枚の証跡 PNG に合成できるか」は Phase 0 の技術検証で解消済み (`apps/web/spike/review-capture/`)。**地図を証跡に写すには MapLibre の生成時に `canvasContextAttributes: { preserveDrawingBuffer: true }` が必須** で、外すとエラーなしに「地図だけ白紙の証跡」になる (`packages/feedback-plugin/src/capture.test.ts` が契約を固定)。
+
+Phase 1 として、レビューセッション (何を・どの画面を・どの観点で見てほしいか) の API (`/api/review-sessions`) と、レビュー画面 (`/review`) のガイド表示を実装済み。editor は同画面からセッションを作成・編集し、受付状態・期間・観点・対象画面を管理できる。対象画面は業務APIの実データを列挙せず、ホストがSDKへ登録したルート一覧から生成する。管理画面は初期状態ですべてをチェックし、詳細画面は画面種別の安定 ID (`zones.detail` 等) とルートテンプレート (`/zones/{id}` 等) を保存する。観点候補はDBマスタ (`/api/review-perspectives`) から取得するため、コードへ固定しない。観点は `ACTIVE` / `FUTURE` / `OUT_OF_SCOPE` の 3 状態を持ち、**今回選べない観点も消さずグレーアウトして表示する** (「今は見なくてよい」と「存在を忘れている」を顧客が区別できるようにするため)。
+
+Phase 2 として、コメント投稿を実装済み。受付中のセッションがあると全画面の右下に「フィードバック」ボタンが出て、**対象箇所をクリック → 観点を選択 → コメント入力** でコンテキスト付きの指摘を残せる。証跡 PNG は対象クリックの瞬間に固定化され、`multipart/form-data` でメタデータと同時に送られる。証跡は公開ストレージに置かず `GET /api/threads/{id}/evidence` (認可つき・`private, no-store`) でのみ配信する。「受付中でないセッション」「ACTIVE でない観点」への投稿は UI だけでなくサーバ側でも拒否する。
+
+Phase 3 として、主要なナビゲーション・一覧行・詳細ヘッダ・入力項目へ `data-feedback-id` の安定 ID を付与し、既存コメントを現在 UI 上のピンとして再表示する。地図クリックは `@web-gis/feedback-plugin` の `FeedbackMapLibreAdapter` が表示中の MapLibre レイヤを問い合わせ、レイヤごとの feature ID 列を使って `MAP_FEATURE` / `MAP_POSITION` を解決する。地図コメントは経緯度に追従する Marker、画面コメントは同じ route の相対座標または安定 ID の現在位置へ表示する。
+
+Phase 4 として、ピンを押すと直接開く Thread Drawer、メッセージ一覧・返信、`OPEN` / `RESOLVED` の解決・再開を実装済み。viewer は返信でき、状態変更は editor 以上に限定する。解決済みスレッドへの返信は暗黙に再開せず 409 で拒否し、editor が明示的に Reopen してから会話を続ける。返信と状態変更は既存の監査ログへ変更内容を記録する。
+
+Phase 5 として、レビュー画面に管理パネルを実装済み。プロジェクト全体の未解決・解決済み・証跡あり件数と、セッション別・観点別の内訳を確認できる。選択中セッションのスレッドは状態・観点・証跡有無・コメント本文でサーバ側検索でき、一覧から Thread Drawer と認可付き証跡ビューアを開ける。現在の絞り込みに一致する全スレッドは、画面・対象箇所・投稿者・コメントを1メッセージ1行にしたExcel用CSVへ出力できる。
+
+Phase 6 として、コメントの本人編集と全版履歴、証跡閲覧成功の監査、証跡の保存期間管理を実装済み。保存期間はプロジェクト既定をセッション単位で上書きでき、未設定は自動削除なし。期限切れ証跡は物理削除前でも API・一覧・集計から遮断され、editor が管理画面または外部スケジューラ向け API から小分けに完全削除できる。
+
+権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 
 ## Notes
 
 - API は `DATABASE_PASSWORD`(または `PGPASSWORD`)必須、worker は `PGPASSWORD` 必須。既定パスワードへのフォールバックはしない。全環境変数の一覧と本番 (ECS + Secrets Manager) での供給元は [`docs/environment-variables.md`](docs/environment-variables.md)。
-- CORS の許可オリジンは `WEB_ORIGIN`(未設定時は `http://localhost:5173` のみ)。全開放 (`anyHost`) にはならない。
+- CORS の許可オリジンは複数値の `WEB_ORIGINS` (カンマ区切り) または後方互換な単一値
+  `WEB_ORIGIN` (未指定時は `http://localhost:5173` のみ)。全開放 (`anyHost`) にはならない。
 - アップロード上限は API 側 `UPLOAD_MAX_BYTES`(既定 200MB)と web の nginx `client_max_body_size 200m` で揃えている。
 - API の SQL には `DATABASE_STATEMENT_TIMEOUT_MS`(既定 30 秒)の statement_timeout がかかる。分析ジョブ・区域レイヤ生成などの重い生成系処理はトランザクション内で `HEAVY_STATEMENT_TIMEOUT_MS`(既定 0 = 無制限)に差し替わる。
 - 一覧 API (`/api/lands` `/api/buildings` `/api/parties` `/api/zones`) は `limit`(既定 200・最大 1000)と `offset` でページングし、フィルタ適用後の総件数を `X-Total-Count` ヘッダで返す。

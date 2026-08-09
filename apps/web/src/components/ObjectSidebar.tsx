@@ -13,6 +13,7 @@ export function ObjectSidebar({
   selectedProject,
   projects,
   onProjectChange,
+  feedbackIdPrefix,
   children
 }: {
   title: string;
@@ -26,11 +27,12 @@ export function ObjectSidebar({
   selectedProject: string;
   projects: Project[];
   onProjectChange: (id: string) => void;
+  feedbackIdPrefix: string;
   children: React.ReactNode;
 }) {
   return (
     <aside className="object-sidebar">
-      <header className="panel-header">
+      <header className="panel-header" data-feedback-id={`${feedbackIdPrefix}.list-header`}>
         <div>
           <p className="eyebrow">Business Object</p>
           <h1>{title}</h1>
@@ -44,7 +46,7 @@ export function ObjectSidebar({
           </button>
         </div>
       </header>
-      <label>
+      <label data-feedback-id={`${feedbackIdPrefix}.project-selector`}>
         プロジェクト
         <select value={selectedProject} onChange={(event) => onProjectChange(event.target.value)}>
           {projects.map((project) => (
@@ -56,6 +58,7 @@ export function ObjectSidebar({
       </label>
       <form
         className="sidebar-search-form"
+        data-feedback-id={`${feedbackIdPrefix}.keyword-search`}
         onSubmit={(event) => {
           event.preventDefault();
           onSearch();

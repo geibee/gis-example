@@ -3,12 +3,14 @@
 // あればここが型エラーになり、テストデータのドリフトを検知できる。
 import type {
   Building,
+  FeedbackThread,
   Land,
   Layer,
   Me,
   Party,
   Project,
   ProjectMember,
+  ReviewSession,
   UserAccount,
   Zone,
   ZonePartySummary
@@ -30,7 +32,25 @@ export function makeMe(overrides: Partial<Me> = {}): Me {
     email: "user@example.com",
     displayName: "一般ユーザー",
     systemRole: "user",
-    memberships: [{ projectId: "p1", role: "editor" }],
+    memberships: [{
+      projectId: "p1",
+      role: "editor",
+      permissions: [
+        "projects.view",
+        "layers.view",
+        "layers.manage",
+        "map.view",
+        "features.edit",
+        "business-data.view",
+        "business-data.edit",
+        "import.run",
+        "analysis.run",
+        "jobs.view",
+        "review.view",
+        "review.comment",
+        "review.manage"
+      ]
+    }],
     ...overrides
   };
 }
@@ -144,6 +164,88 @@ export function makeParty(overrides: Partial<Party> = {}): Party {
     partyType: "個人",
     tags: [],
     relationships: [],
+    ...overrides
+  };
+}
+
+export function makeReviewSession(overrides: Partial<ReviewSession> = {}): ReviewSession {
+  return {
+    id: "rs-1",
+    projectId: "p1",
+    title: "第1回 業務フローレビュー",
+    description: "案件検索から詳細確認までの流れを確認してください",
+    status: "open",
+    startAt: "2026-08-10T09:00:00+09:00",
+    endAt: "2026-08-20T18:00:00+09:00",
+    evidenceRetentionDays: null,
+    effectiveEvidenceRetentionDays: null,
+    createdBy: "u1",
+    createdAt: "2026-08-01T09:00:00+09:00",
+    updatedAt: "2026-08-01T09:00:00+09:00",
+    perspectives: [
+      { code: "BUSINESS_FLOW", label: "業務フロー", description: null, displayOrder: 10, status: "ACTIVE", guidance: null },
+      { code: "MAP_OPERATION", label: "地図操作", description: null, displayOrder: 40, status: "ACTIVE", guidance: null },
+      {
+        code: "UI_DESIGN",
+        label: "デザイン・配色",
+        description: null,
+        displayOrder: 50,
+        status: "FUTURE",
+        guidance: "次回のデザインレビューで確認します"
+      },
+      {
+        code: "PERFORMANCE",
+        label: "性能",
+        description: null,
+        displayOrder: 60,
+        status: "OUT_OF_SCOPE",
+        guidance: "性能検証フェーズで確認します"
+      }
+    ],
+    scopes: [
+      { id: "sc-1", pageId: "lands.list", route: "/lands", description: "案件一覧", reviewable: true, displayOrder: 10 },
+      { id: "sc-2", pageId: "admin.users", route: "/admin", description: "管理画面", reviewable: false, displayOrder: 20 }
+    ],
+    ...overrides
+  };
+}
+
+export function makeFeedbackThread(overrides: Partial<FeedbackThread> = {}): FeedbackThread {
+  return {
+    id: "ft-1",
+    displayNumber: 1,
+    projectId: "p1",
+    reviewSessionId: "rs-1",
+    reviewScopeId: "sc-1",
+    pageRoute: "/lands/L-1?projectId=p1",
+    perspectiveCode: "BUSINESS_FLOW",
+    perspectiveLabel: "業務フロー",
+    targetType: "UI_ELEMENT",
+    targetMetadata: {
+      type: "UI_ELEMENT",
+      feedbackTargetId: "navigation.lands",
+      relativeX: 0.2,
+      relativeY: 0.05
+    },
+    evidence: null,
+    status: "OPEN",
+    createdBy: "u1",
+    createdByName: "一般ユーザー",
+    reporterName: "レビュー担当A",
+    createdAt: "2026-08-12T10:15:00+09:00",
+    updatedAt: "2026-08-12T10:15:00+09:00",
+    messages: [
+      {
+        id: "fm-1",
+        threadId: "ft-1",
+        authorId: "u1",
+        authorName: "一般ユーザー",
+        participantName: "レビュー担当A",
+        body: "土地タブの名称を確認してください",
+        createdAt: "2026-08-12T10:15:00+09:00",
+        editedAt: null
+      }
+    ],
     ...overrides
   };
 }

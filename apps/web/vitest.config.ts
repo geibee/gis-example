@@ -11,6 +11,8 @@ export default mergeConfig(
       setupFiles: ["src/testing/setup.ts"],
       include: ["src/**/*.test.{ts,tsx}"],
       restoreMocks: true,
+      // CIやコンテナのPID上限下でもjsdomワーカーを確実に起動できる値に固定する。
+      maxWorkers: 2,
       env: {
         // api.ts の API_BASE。jsdom + Node fetch は相対 URL を解決できないため
         // 絶対 URL を与える (MSW ハンドラ側はホスト非依存の "*/api/..." で受ける)

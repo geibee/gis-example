@@ -32,6 +32,13 @@ internal fun parseListOffset(value: String?): Int {
     return offset
 }
 
+internal fun parseOptionalBoolean(value: String?, label: String): Boolean? = when (value) {
+    null -> null
+    "true" -> true
+    "false" -> false
+    else -> throw ApiException(HttpStatusCode.BadRequest, "$label must be true or false")
+}
+
 internal fun requireUuid(value: String, label: String): String =
     try {
         UUID.fromString(value).toString()

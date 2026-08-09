@@ -134,6 +134,7 @@ export function BuildingWorkspace({
     <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
       {!detailOpen ? (
       <ObjectSidebar
+        feedbackIdPrefix="buildings"
         title="建物"
         query={query}
         setQuery={setQuery}
@@ -167,6 +168,7 @@ export function BuildingWorkspace({
           columns={buildingColumns}
           rows={items}
           rowKey={(building) => building.id}
+          rowFeedbackId={(building) => `buildings.row.${building.id}`}
           onRowClick={(building) => onSelect(building.id)}
           selectedRowKey={selectedId}
           emptyMessage="建物はありません"
@@ -180,6 +182,7 @@ export function BuildingWorkspace({
         {hasDetailContent ? (
           <>
             <ObjectDetailHeader
+              feedbackTargetId="buildings.detail-header"
               id={creating ? draft.id || "新規建物" : selected?.id ?? ""}
               title={draft.name || "建物"}
               subtitle={selected?.landLabel ?? draft.buildingLocation}
@@ -188,11 +191,11 @@ export function BuildingWorkspace({
               onBack={creating ? onCancelCreate : onBackToList}
             />
             <div className="object-form">
-              <label>
+              <label data-feedback-id="buildings.field.id">
                 ID
                 <input value={draft.id} disabled={!creating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
               </label>
-              <label>
+              <label data-feedback-id="buildings.field.land-id">
                 土地ID
                 <select value={draft.landId} onChange={(event) => setDraft((current) => ({ ...current, landId: event.target.value }))}>
                   <option value="">未設定</option>
@@ -203,11 +206,11 @@ export function BuildingWorkspace({
                   ))}
                 </select>
               </label>
-              <label>
+              <label data-feedback-id="buildings.field.name">
                 建物名
                 <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
               </label>
-              <label>
+              <label data-feedback-id="buildings.field.location">
                 所在
                 <input value={draft.buildingLocation} onChange={(event) => setDraft((current) => ({ ...current, buildingLocation: event.target.value }))} />
               </label>

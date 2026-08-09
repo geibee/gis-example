@@ -1,0 +1,11 @@
+.feedback-admin { color: var(--feedback-admin-text, #172033); font-family: system-ui, sans-serif; }
+.feedback-admin nav { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: 1rem; }
+.feedback-admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+.feedback-admin-card { border: 1px solid var(--feedback-admin-border, #cbd5e1); border-radius: .5rem; padding: 1rem; background: var(--feedback-admin-surface, #fff); }
+.feedback-admin label, .feedback-admin input, .feedback-admin select, .feedback-admin textarea { display: block; width: 100%; box-sizing: border-box; }
+.feedback-admin textarea { min-height: 8rem; }
+.feedback-admin-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
+.feedback-admin-error { color: var(--feedback-admin-error, #b91c1c); }
+.feedback-admin img { max-width: 100%; }
+.feedback-admin table { width: 100%; border-collapse: collapse; }
+.feedback-admin th, .feedback-admin td { border: 1px solid var(--feedback-admin-border, #cbd5e1); padding: .35rem; text-align: start; }

@@ -9,7 +9,7 @@ const MapPane = lazy(() => import("./MapPane"));
 // MapPane への配線を App から切り出したホスト。props はすべて AppShell / MapState
 // コンテキストから供給し、App 側のバケツリレーをなくす。
 export function MapPaneHost() {
-  const { mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const { mapSupportOpen, selectedProject, setMapSupportOpen } = useAppShell();
   const map = useMapState();
 
   return (

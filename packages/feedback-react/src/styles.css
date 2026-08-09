@@ -1,0 +1,16 @@
+.feedback-overlay-root { font-family: system-ui, sans-serif; color: var(--feedback-text, #172033); }
+.feedback-launcher { position: fixed; right: 1rem; bottom: 1rem; z-index: 2147483000; }
+.feedback-panel { position: fixed; right: 1rem; bottom: 4rem; z-index: 2147483001; width: min(26rem, calc(100vw - 2rem)); max-height: calc(100vh - 6rem); overflow: auto; background: var(--feedback-surface, #fff); border: 1px solid var(--feedback-border, #cbd5e1); border-radius: .5rem; padding: 1rem; box-shadow: 0 .5rem 2rem rgb(15 23 42 / 20%); }
+.feedback-panel label, .feedback-panel textarea, .feedback-panel input, .feedback-panel select { display: block; width: 100%; box-sizing: border-box; }
+.feedback-panel textarea, .feedback-panel input, .feedback-panel select { margin-block: .25rem .75rem; }
+.feedback-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.feedback-thread-list { list-style: none; padding: 0; }
+.feedback-thread-pin { margin: .125rem; }
+.feedback-dom-pin { position: absolute; inset-block-start: 0; inset-inline-end: 0; z-index: 2147482999; }
+.feedback-screen-pins { position: fixed; left: .5rem; bottom: .5rem; z-index: 2147482999; }
+.feedback-mask-active { position: relative !important; }
+.feedback-mask-active::after { position: absolute; z-index: 2147483640; inset: 0; display: block; content: ""; pointer-events: none; background: #111; }
+.feedback-error { color: var(--feedback-error, #b91c1c); }
+.feedback-warning { color: var(--feedback-warning, #92400e); }
+.feedback-posting-notice { position: fixed; right: 1rem; bottom: 1rem; z-index: 2147482998; color: var(--feedback-muted, #475569); }
+.feedback-message { border-block-start: 1px solid var(--feedback-border, #cbd5e1); padding-block: .5rem; }

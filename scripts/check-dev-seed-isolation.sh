@@ -20,7 +20,13 @@ log() { echo "[seed-guard] $*"; }
 fail() { echo "[seed-guard] FAIL: $*" >&2; exit 1; }
 
 # ---------------------------------------------------- 1. 本番 Dockerfile の検査
-PROD_DOCKERFILES=(apps/api/Dockerfile apps/worker-gis/Dockerfile apps/web/Dockerfile)
+PROD_DOCKERFILES=(
+  apps/api/Dockerfile
+  apps/feedback-service/Dockerfile
+  apps/feedback-admin/Dockerfile
+  apps/worker-gis/Dockerfile
+  apps/web/Dockerfile
+)
 for df in "${PROD_DOCKERFILES[@]}"; do
   [[ -f "$df" ]] || fail "$df が見つかりません (本番 Dockerfile の配置が変わった場合はこのスクリプトを更新すること)"
   if hits=$(grep -inE '^[[:space:]]*(COPY|ADD)[[:space:]]' "$df" | grep -iE 'infra/|realm|seed'); then
@@ -34,7 +40,7 @@ log "OK: 本番 Dockerfile は infra/ のシード・realm を参照しない"
 MARKERS='a0000000-0000-4000-8000|@gis\.example|gis-admin|gis-editor|gis-viewer'
 # 検査対象はアプリ本体コードのみ (テストコードは dev 固定 ID の利用を許容する)
 mapfile -t hits < <(git grep -lE "$MARKERS" -- \
-  'apps/api/src/main' 'apps/worker-gis/src' 'apps/web/src' 2>/dev/null || true)
+  'apps/api/src/main' 'apps/feedback-service/src/main' 'apps/worker-gis/src' 'apps/web/src' 2>/dev/null || true)
 if ((${#hits[@]} > 0)); then
   fail "開発ユーザーの識別子がアプリ本体コードに混入しています (シード / テスト以外に置かない): ${hits[*]}"
 fi

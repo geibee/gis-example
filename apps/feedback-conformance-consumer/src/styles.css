@@ -1,0 +1,6 @@
+:root { font-family: system-ui, sans-serif; color: #172033; background: #f4f7fb; }
+body { margin: 0; }
+.fixture-header { display: flex; justify-content: space-between; padding: 1rem 1.5rem; background: #172033; color: white; }
+.fixture-header nav { display: flex; gap: .5rem; }
+main { margin: 2rem auto; max-width: 50rem; padding: 1.5rem; background: white; border-radius: .75rem; }
+article { display: flex; justify-content: space-between; border: 1px solid #cbd5e1; padding: 1rem; }

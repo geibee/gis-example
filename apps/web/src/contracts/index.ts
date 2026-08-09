@@ -2,7 +2,7 @@
 // サーバ契約型の定義元は apps/api/openapi.yaml → generated.ts のみ。
 // ここでは手書きの型定義を行わず、components["schemas"] の別名だけを公開する。
 // (新規エンドポイント追加時は openapi.yaml 更新 → generate:contracts 再生成 → ここに別名を足すだけ)
-import type { components } from "./generated";
+import type { components, operations as OperationMap } from "./generated";
 
 export type { components, operations, paths } from "./generated";
 
@@ -48,6 +48,34 @@ export type ZonePartySummaryEntry = Schemas["ZonePartySummaryEntry"];
 export type ZonePartySummary = Schemas["ZonePartySummary"];
 export type ZoneLayerFromImportRequest = Schemas["ZoneLayerFromImportRequest"];
 export type ZoneLayerOperation = Schemas["ZoneLayerOperation"];
+
+// ---------------------------------------------------------------- レビュー (docs/prototype-review.md)
+export type ReviewSession = Schemas["ReviewSession"];
+export type ReviewSessionCreateRequest = Schemas["ReviewSessionCreateRequest"];
+export type ReviewSessionPatchRequest = Schemas["ReviewSessionPatchRequest"];
+export type ReviewPerspective = Schemas["ReviewPerspective"];
+export type ReviewPerspectiveDefinition = Schemas["ReviewPerspectiveDefinition"];
+export type ReviewPerspectiveWriteRequest = Schemas["ReviewPerspectiveWriteRequest"];
+export type ReviewScope = Schemas["ReviewScope"];
+export type ReviewScopeWriteRequest = Schemas["ReviewScopeWriteRequest"];
+export type FeedbackThread = Schemas["FeedbackThread"];
+export type FeedbackMessage = Schemas["FeedbackMessage"];
+export type FeedbackMessageCreateRequest = Schemas["FeedbackMessageCreateRequest"];
+export type FeedbackMessageUpdateRequest = Schemas["FeedbackMessageUpdateRequest"];
+export type FeedbackMessageVersion = Schemas["FeedbackMessageVersion"];
+export type FeedbackThreadStatusPatchRequest = Schemas["FeedbackThreadStatusPatchRequest"];
+export type FeedbackSummary = Schemas["FeedbackSummary"];
+export type FeedbackSessionSummary = Schemas["FeedbackSessionSummary"];
+export type FeedbackPerspectiveSummary = Schemas["FeedbackPerspectiveSummary"];
+export type FeedbackThreadSearchQuery = OperationMap["searchFeedbackThreads"]["parameters"]["query"];
+export type ReviewEvidence = Schemas["ReviewEvidence"];
+export type FeedbackThreadCreateMetadata = Schemas["FeedbackThreadCreateMetadata"];
+export type ReviewRetentionPolicy = Schemas["ReviewRetentionPolicy"];
+export type ReviewRetentionPolicyPatchRequest = Schemas["ReviewRetentionPolicyPatchRequest"];
+export type ReviewRetentionPurgeResult = Schemas["ReviewRetentionPurgeResult"];
+export type ReviewNotificationSettings = Schemas["ReviewNotificationSettings"];
+export type ReviewNotificationSettingsPatchRequest = Schemas["ReviewNotificationSettingsPatchRequest"];
+export type ReviewNotificationRetryResult = Schemas["ReviewNotificationRetryResult"];
 
 // ---------------------------------------------------------------- ジョブ
 export type ImportJob = Schemas["ImportJob"];

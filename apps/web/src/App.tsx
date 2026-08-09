@@ -1,15 +1,36 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Building2, EyeOff, FileText, LogOut, Map as MapIcon, ShieldCheck, Users } from "lucide-react";
+import {
+  Building2,
+  ClipboardCheck,
+  EyeOff,
+  FileText,
+  LogOut,
+  Map as MapIcon,
+  ShieldCheck,
+  Users
+} from "lucide-react";
 import { useAuth } from "react-oidc-context";
+import {
+  FeedbackOverlay,
+  FeedbackPluginProvider,
+  useFeedbackPlugin,
+  type FeedbackPluginNotification
+} from "@web-gis/feedback-plugin";
 import { AppShellProvider, useAppShell } from "./appShell";
+import { getAccessToken, notifyUnauthorized, tryRenewAccessToken } from "./auth";
 import { MapStateProvider } from "./mapState";
 import { MapPaneHost } from "./components/MapPaneHost";
+import { notifyError, notifySuccess } from "./notifications";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
 import { Toaster } from "./ui/Toaster";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
+import { hasProjectPermission, reviewManagePermission } from "./permissions";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
+import { feedbackRoutes } from "./appRoutes";
+import { resolveWebGisFeedbackThread } from "./feedbackHostAdapter";
 
 // ルートレイアウト。認証・レイアウト・ルーター配置のみを担い、
 // サーバ状態は TanStack Query (src/queries/)、画面固有の状態は各 src/screens/、
@@ -17,24 +38,93 @@ import type { Me } from "./contracts";
 export default function App() {
   return (
     <AppShellProvider>
-      <MapStateProvider>
-        <AppLayout />
-      </MapStateProvider>
+      <FeedbackSdkHost>
+        <MapStateProvider>
+          <AppLayout />
+        </MapStateProvider>
+      </FeedbackSdkHost>
     </AppShellProvider>
   );
+}
+
+function FeedbackSdkHost({ children }: { children: ReactNode }) {
+  const { selectedProject } = useAppShell();
+  const queryClient = useQueryClient();
+  const currentPath = useRouterState({ select: (state) => state.location.pathname });
+  const configuredMode = import.meta.env.VITE_FEEDBACK_API_MODE;
+  const feedbackApiMode = configuredMode === "feedback-v1" || configuredMode === "feedback-v1-dual-read"
+    ? configuredMode
+    : "legacy";
+  return (
+    <FeedbackPluginProvider
+      apiMode={feedbackApiMode}
+      apiBaseUrl={(feedbackApiMode !== "legacy"
+        ? import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1"
+        : import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
+      legacyApiBaseUrl={(import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
+      applicationKey={import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis"}
+      environmentKey={import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local"}
+      projectId={selectedProject}
+      appVersion={import.meta.env.VITE_APP_VERSION ?? "dev"}
+      routes={feedbackRoutes}
+      currentPath={currentPath}
+      getAccessToken={getAccessToken}
+      refreshAccessToken={tryRenewAccessToken}
+      onNotification={handleFeedbackNotification}
+      queryClient={queryClient}
+    >
+      {children}
+    </FeedbackPluginProvider>
+  );
+}
+
+function handleFeedbackNotification(notification: FeedbackPluginNotification) {
+  if (notification.type === "success") notifySuccess(notification.message);
+  else if (notification.type === "error") notifyError(notification.message);
+  else notifyUnauthorized();
 }
 
 function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const { me, projects, selectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const { me, projects, selectedProject, setSelectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const { openThread } = useFeedbackPlugin();
+  const canManageReview = hasProjectPermission(me, selectedProject, reviewManagePermission);
 
   // URL (マッチ中ルートの staticData) を唯一の正としてタブ強調・タイトルを導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
   const screenTitle = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.title ?? null });
+  const linkedProjectId = useRouterState({
+    select: (state) => {
+      const value = (state.location.search as Record<string, unknown>).projectId;
+      return typeof value === "string" ? value : null;
+    }
+  });
+  const linkedThreadId = useRouterState({
+    select: (state) => resolveWebGisFeedbackThread(state.location.search as Record<string, unknown>)
+  });
+  const handledReviewLink = useRef("");
   useEffect(() => {
     document.title = screenTitle ? `${screenTitle} · Web GIS MVP` : "Web GIS MVP";
   }, [screenTitle]);
+
+  useEffect(() => {
+    if (!linkedThreadId) {
+      handledReviewLink.current = "";
+      return;
+    }
+    if (linkedProjectId && !projects.some((project) => project.id === linkedProjectId)) return;
+    // projectId付きリンクは先にホスト側のプロジェクト文脈を切り替え、次のrenderで
+    // SDKへthreadIdを渡す。異なるprojectIdのキャッシュ／Drawerを一瞬開かない。
+    if (linkedProjectId && linkedProjectId !== selectedProject) {
+      setSelectedProject(linkedProjectId);
+      return;
+    }
+    const linkKey = `${linkedProjectId ?? ""}:${linkedThreadId}`;
+    if (handledReviewLink.current === linkKey) return;
+    handledReviewLink.current = linkKey;
+    openThread(linkedThreadId);
+  }, [linkedProjectId, linkedThreadId, openThread, projects, selectedProject, setSelectedProject]);
 
   const navigateTab = (tab: BusinessTab) => void navigate({ to: tabBasePath[tab] });
 
@@ -49,30 +139,36 @@ function AppLayout() {
           </div>
         </div>
         <nav className="top-tabs" aria-label="業務タブ">
-          <button className={activeTab === "zone" ? "active" : ""} type="button" onClick={() => navigateTab("zone")}>
+          <button data-feedback-id="navigation.zones" className={activeTab === "zone" ? "active" : ""} type="button" onClick={() => navigateTab("zone")}>
             <MapIcon size={17} />
             区域
           </button>
-          <button className={activeTab === "lands" ? "active" : ""} type="button" onClick={() => navigateTab("lands")}>
+          <button data-feedback-id="navigation.lands" className={activeTab === "lands" ? "active" : ""} type="button" onClick={() => navigateTab("lands")}>
             <MapIcon size={17} />
             土地
           </button>
-          <button className={activeTab === "buildings" ? "active" : ""} type="button" onClick={() => navigateTab("buildings")}>
+          <button data-feedback-id="navigation.buildings" className={activeTab === "buildings" ? "active" : ""} type="button" onClick={() => navigateTab("buildings")}>
             <Building2 size={17} />
             建物
           </button>
-          <button className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
+          <button data-feedback-id="navigation.parties" className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
             <Users size={17} />
             関係者
           </button>
+          {canManageReview ? (
+            <button data-feedback-id="navigation.review" className={activeTab === "review" ? "active" : ""} type="button" onClick={() => navigateTab("review")}>
+              <ClipboardCheck size={17} />
+              レビュー
+            </button>
+          ) : null}
           {me?.systemRole === "admin" ? (
-            <button className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
+            <button data-feedback-id="navigation.admin" className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
               <ShieldCheck size={17} />
               管理
             </button>
           ) : null}
         </nav>
-        <button className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
+        <button data-feedback-id="map.visibility" className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
           {mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
           {mapSupportOpen ? "地図を隠す" : "地図を表示"}
         </button>
@@ -96,30 +192,43 @@ function AppLayout() {
         <MapPaneHost />
       </main>
 
+      {/* レビュー機能はどの画面からでも使えるよう、画面ではなくシェルに置く
+          (受付中のレビューセッションが無ければ何も描画しない) */}
+      <FeedbackOverlay />
       <Toaster />
       <ConfirmDialogHost />
     </div>
   );
 }
 
-// マッチしたルートの staticData (requiredSystemRole) を見て権限を一元的に enforce するガード。
-// 個別画面に me?.systemRole の直判定を増やさなくても、ルート定義のメタ情報だけで保護される。
+// マッチしたルートの staticData を見て、system role／project permissionを一元的に強制するガード。
+// 個別画面へ権限の直判定を増やさず、ルート定義のメタ情報だけで保護する。
 function ScreenGuard({ me, children }: { me: Me | null; children: ReactNode }) {
+  const { selectedProject } = useAppShell();
   const requiredSystemRole = useRouterState({
     select: (state) => activeScreenMeta(state.matches)?.requiredSystemRole ?? null
   });
-  if (requiredSystemRole) {
+  const requiredProjectPermission = useRouterState({
+    select: (state) => activeScreenMeta(state.matches)?.requiredProjectPermission ?? null
+  });
+  if (requiredSystemRole || requiredProjectPermission) {
     // /api/me 取得完了までガード判定を保留する (未ロード時に誤リダイレクトしない)
-    if (!me) {
+    if (!me || (requiredProjectPermission && !selectedProject && me.systemRole !== "admin")) {
       return (
         <section className="tab-pane active">
           <p className="admin-hint">権限を確認しています…</p>
         </section>
       );
     }
-    if (me.systemRole !== requiredSystemRole) {
+    if (requiredSystemRole && me.systemRole !== requiredSystemRole) {
       return <Navigate to="/zones" replace />;
     }
+  }
+  if (
+    requiredProjectPermission &&
+    !hasProjectPermission(me, selectedProject, requiredProjectPermission)
+  ) {
+    return <Navigate to="/zones" replace />;
   }
   return <>{children}</>;
 }

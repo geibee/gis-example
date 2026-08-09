@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://feedback.example/schemas/location.v1.json",
+  "title": "FeedbackLocationV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "pageKey", "routeTemplate", "pathParameters"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "pageKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+      "maxLength": 100
+    },
+    "routeTemplate": {
+      "type": "string",
+      "pattern": "^/(?:[^/?#]+(?:/[^/?#]+)*)?$",
+      "maxLength": 500
+    },
+    "pathParameters": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "type": "string", "maxLength": 500 }
+    },
+    "queryParameters": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$" },
+      "additionalProperties": { "type": "string", "maxLength": 1000 }
+    }
+  }
+}

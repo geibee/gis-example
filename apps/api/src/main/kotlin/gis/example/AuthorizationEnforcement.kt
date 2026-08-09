@@ -26,7 +26,10 @@ enum class ProjectResourceType(
     BUILDING("app.buildings", false, "Building not found"),
     PARTY("app.parties", false, "Party not found"),
     ZONE("app.zones", false, "Zone not found"),
-    PARTY_RELATIONSHIP("app.party_relationships", true, "Relationship not found")
+    PARTY_RELATIONSHIP("app.party_relationships", true, "Relationship not found"),
+    REVIEW_SESSION("app.review_sessions", true, "Review session not found"),
+    FEEDBACK_THREAD("app.feedback_threads", true, "Feedback thread not found"),
+    FEEDBACK_MESSAGE("app.feedback_messages", true, "Feedback message not found")
 }
 
 fun ApplicationCall.appPrincipal(): AppPrincipal =
@@ -75,9 +78,17 @@ internal fun Database.projectIdOf(type: ProjectResourceType, id: String): String
     if (type.idIsUuid && runCatching { UUID.fromString(id) }.isFailure) return null
     val idExpr = if (type.idIsUuid) "?::uuid" else "?"
     return dataSource.connection.use { connection ->
-        connection.prepareStatement(
+        val sql = if (type == ProjectResourceType.FEEDBACK_MESSAGE) {
+            """
+            SELECT t.project_id::text
+            FROM app.feedback_messages AS m
+            JOIN app.feedback_threads AS t ON t.id = m.thread_id
+            WHERE m.id = $idExpr
+            """.trimIndent()
+        } else {
             "SELECT project_id::text FROM ${type.table} WHERE id = $idExpr"
-        ).use { stmt ->
+        }
+        connection.prepareStatement(sql).use { stmt ->
             stmt.setString(1, id)
             stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
         }

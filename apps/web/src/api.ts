@@ -29,7 +29,26 @@ import type {
   PartyRelationshipWriteRequest,
   PartyWriteRequest,
   Project,
+  FeedbackMessage,
+  FeedbackMessageCreateRequest,
+  FeedbackMessageUpdateRequest,
+  FeedbackMessageVersion,
+  FeedbackSummary,
+  FeedbackThread,
+  FeedbackThreadCreateMetadata,
+  FeedbackThreadSearchQuery,
+  FeedbackThreadStatusPatchRequest,
   ProjectMember,
+  ReviewPerspectiveDefinition,
+  ReviewSession,
+  ReviewSessionCreateRequest,
+  ReviewSessionPatchRequest,
+  ReviewRetentionPolicy,
+  ReviewRetentionPolicyPatchRequest,
+  ReviewRetentionPurgeResult,
+  ReviewNotificationSettings,
+  ReviewNotificationSettingsPatchRequest,
+  ReviewNotificationRetryResult,
   UserAccount,
   UserPatchRequest,
   Zone,
@@ -443,6 +462,189 @@ export async function deleteProjectMember(projectId: string, userId: string): Pr
   unwrapVoid(
     await client.DELETE("/api/projects/{id}/members/{userId}", {
       params: { path: { id: projectId, userId } }
+    })
+  );
+}
+
+// ---------------------------------------------------------------- レビュー (docs/prototype-review.md)
+
+export async function getReviewSessions(projectId: string, status?: ReviewSession["status"]): Promise<ReviewSession[]> {
+  return unwrap(await client.GET("/api/review-sessions", { params: { query: { projectId, status } } }));
+}
+
+export async function getReviewPerspectiveDefinitions(projectId: string): Promise<ReviewPerspectiveDefinition[]> {
+  return unwrap(await client.GET("/api/review-perspectives", { params: { query: { projectId } } }));
+}
+
+export async function createReviewSession(request: ReviewSessionCreateRequest): Promise<ReviewSession> {
+  return unwrap(await client.POST("/api/review-sessions", { body: request }));
+}
+
+export async function getReviewSession(id: string): Promise<ReviewSession> {
+  return unwrap(await client.GET("/api/review-sessions/{id}", { params: { path: { id } } }));
+}
+
+export async function updateReviewSession(id: string, request: ReviewSessionPatchRequest): Promise<ReviewSession> {
+  return unwrap(
+    await client.PATCH("/api/review-sessions/{id}", {
+      params: { path: { id } },
+      body: request
+    })
+  );
+}
+
+export async function getFeedbackThreads(reviewSessionId: string): Promise<FeedbackThread[]> {
+  return unwrap(
+    await client.GET("/api/review-sessions/{id}/threads", { params: { path: { id: reviewSessionId } } })
+  );
+}
+
+export async function getFeedbackThread(threadId: string): Promise<FeedbackThread> {
+  return unwrap(await client.GET("/api/threads/{threadId}", { params: { path: { threadId } } }));
+}
+
+export type FeedbackThreadSearchResult = {
+  items: FeedbackThread[];
+  totalCount: number;
+};
+
+export async function searchFeedbackThreads(query: FeedbackThreadSearchQuery): Promise<FeedbackThreadSearchResult> {
+  const result = await client.GET("/api/threads", { params: { query } });
+  const items = unwrap(result);
+  const header = result.response.headers.get("X-Total-Count");
+  const totalCount = header === null ? items.length : Number.parseInt(header, 10);
+  return { items, totalCount: Number.isFinite(totalCount) ? totalCount : items.length };
+}
+
+export async function getFeedbackSummary(projectId: string): Promise<FeedbackSummary> {
+  return unwrap(await client.GET("/api/threads/summary", { params: { query: { projectId } } }));
+}
+
+export async function getFeedbackEvidence(threadId: string): Promise<Blob> {
+  return unwrap(
+    await client.GET("/api/threads/{threadId}/evidence", {
+      params: { path: { threadId } },
+      parseAs: "blob"
+    })
+  );
+}
+
+/**
+ * コメント投稿。メタデータ JSON と証跡 PNG を multipart/form-data で同時に送る
+ * (契約は openapi.yaml の createFeedbackThread)。
+ */
+export async function createFeedbackThread(
+  reviewSessionId: string,
+  metadata: FeedbackThreadCreateMetadata,
+  screenshot: Blob | null
+): Promise<FeedbackThread> {
+  return unwrap(
+    await client.POST("/api/review-sessions/{id}/threads", {
+      params: { path: { id: reviewSessionId } },
+      // openapi-fetch の既定シリアライザは JSON なので、multipart は自前で組み立てる
+      // (Content-Type は boundary 付きでブラウザに決めさせる)
+      bodySerializer: () => {
+        const form = new FormData();
+        form.append("metadata", JSON.stringify(metadata));
+        if (screenshot) form.append("screenshot", screenshot, "evidence.png");
+        return form;
+      },
+      body: { metadata }
+    })
+  );
+}
+
+export async function createFeedbackMessage(
+  threadId: string,
+  request: FeedbackMessageCreateRequest
+): Promise<FeedbackMessage> {
+  return unwrap(
+    await client.POST("/api/threads/{threadId}/messages", {
+      params: { path: { threadId } },
+      body: request
+    })
+  );
+}
+
+export async function updateFeedbackMessage(
+  messageId: string,
+  request: FeedbackMessageUpdateRequest
+): Promise<FeedbackMessage> {
+  return unwrap(
+    await client.PATCH("/api/messages/{messageId}", {
+      params: { path: { messageId } },
+      body: request
+    })
+  );
+}
+
+export async function getFeedbackMessageHistory(messageId: string): Promise<FeedbackMessageVersion[]> {
+  return unwrap(
+    await client.GET("/api/messages/{messageId}/history", {
+      params: { path: { messageId } }
+    })
+  );
+}
+
+export async function updateFeedbackThreadStatus(
+  threadId: string,
+  request: FeedbackThreadStatusPatchRequest
+): Promise<FeedbackThread> {
+  return unwrap(
+    await client.PATCH("/api/threads/{threadId}/status", {
+      params: { path: { threadId } },
+      body: request
+    })
+  );
+}
+
+export async function getReviewRetentionPolicy(projectId: string): Promise<ReviewRetentionPolicy> {
+  return unwrap(await client.GET("/api/review-retention", { params: { query: { projectId } } }));
+}
+
+export async function updateReviewRetentionPolicy(
+  projectId: string,
+  request: ReviewRetentionPolicyPatchRequest
+): Promise<ReviewRetentionPolicy> {
+  return unwrap(
+    await client.PATCH("/api/review-retention", {
+      params: { query: { projectId } },
+      body: request
+    })
+  );
+}
+
+export async function purgeExpiredReviewEvidence(
+  projectId: string,
+  limit = 200
+): Promise<ReviewRetentionPurgeResult> {
+  return unwrap(
+    await client.POST("/api/review-retention/purge", {
+      params: { query: { projectId, limit } }
+    })
+  );
+}
+
+export async function getReviewNotificationSettings(projectId: string): Promise<ReviewNotificationSettings> {
+  return unwrap(await client.GET("/api/review-notifications", { params: { query: { projectId } } }));
+}
+
+export async function updateReviewNotificationSettings(
+  projectId: string,
+  request: ReviewNotificationSettingsPatchRequest
+): Promise<ReviewNotificationSettings> {
+  return unwrap(
+    await client.PATCH("/api/review-notifications", {
+      params: { query: { projectId } },
+      body: request
+    })
+  );
+}
+
+export async function retryFailedReviewNotifications(projectId: string): Promise<ReviewNotificationRetryResult> {
+  return unwrap(
+    await client.POST("/api/review-notifications/retry", {
+      params: { query: { projectId } }
     })
   );
 }

@@ -1,0 +1,1430 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Feedback Service API
+  version: 1.0.0-alpha.1
+  description: |
+    ホスト業務システムから独立したフィードバック基盤の公開契約。
+    Web GIS の project、GIS、業務 CRUD、タイル API を含めない。
+servers:
+  - url: /feedback/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: system
+  - name: identity
+  - name: applications
+  - name: review-context
+  - name: sessions
+  - name: threads
+  - name: administration
+
+paths:
+  /capabilities:
+    get:
+      tags: [system]
+      operationId: getFeedbackCapabilities
+      security: []
+      responses:
+        "200":
+          description: API と schema の対応能力
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackCapabilities"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /me:
+    get:
+      tags: [identity]
+      operationId: getFeedbackMe
+      responses:
+        "200":
+          description: 認証主体と workspace 権限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackMe"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /applications/{applicationKey}/manifest:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationKey"
+    get:
+      tags: [applications]
+      operationId: getFeedbackApplicationManifest
+      responses:
+        "200":
+          description: 登録済み application manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackApplicationManifestV1"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [applications]
+      operationId: putFeedbackApplicationManifest
+      parameters:
+        - $ref: "#/components/parameters/IfMatchOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackApplicationManifestV1"
+      responses:
+        "200":
+          description: 登録した manifest
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackApplicationManifestV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /review-context:
+    get:
+      tags: [review-context]
+      operationId: getFeedbackReviewContext
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/EnvironmentKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - name: release
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - name: locale
+          in: query
+          schema: { type: string, maxLength: 35 }
+        - name: pageKey
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - name: routeTemplate
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 500 }
+        - name: pathParameters
+          in: query
+          required: true
+          description: JSON object として直列化した path parameter。
+          schema: { type: string, minLength: 2, maxLength: 4000 }
+        - name: queryParameters
+          in: query
+          description: JSON object として直列化した許可候補 query parameter。
+          schema: { type: string, maxLength: 8000 }
+      responses:
+        "200":
+          description: 現在位置へ適用するレビュー文脈
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackReviewContextV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /sessions:
+    get:
+      tags: [sessions]
+      operationId: listFeedbackSessions
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/EnvironmentKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/FeedbackSessionStatus"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: セッション一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackSessionPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [sessions]
+      operationId: createFeedbackSession
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackSessionCreateRequest"
+      responses:
+        "201":
+          description: 作成したセッション
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackSessionV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /sessions/{sessionId}:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [sessions]
+      operationId: getFeedbackSession
+      responses:
+        "200":
+          description: セッション詳細
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackSessionV1"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [sessions]
+      operationId: patchFeedbackSession
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/FeedbackSessionPatchRequest"
+      responses:
+        "200":
+          description: 更新したセッション
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackSessionV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /sessions/{sessionId}/threads:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [threads]
+      operationId: listFeedbackThreads
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/FeedbackThreadStatus" }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: スレッド一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackThreadPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [threads]
+      operationId: createFeedbackThread
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackThreadCreateRequest"
+      responses:
+        "201":
+          description: 作成したスレッド
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackThreadV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /threads/{threadId}:
+    parameters:
+      - $ref: "#/components/parameters/ThreadId"
+    get:
+      tags: [threads]
+      operationId: getFeedbackThread
+      responses:
+        "200":
+          description: スレッド詳細
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackThreadV1"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /threads/{threadId}/deep-link:
+    parameters:
+      - $ref: "#/components/parameters/ThreadId"
+    get:
+      tags: [threads]
+      operationId: getFeedbackThreadDeepLink
+      responses:
+        "200":
+          description: 登録済みenvironment/manifestから生成した対象アプリURL
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackDeepLink" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /threads/{threadId}/messages:
+    parameters:
+      - $ref: "#/components/parameters/ThreadId"
+    post:
+      tags: [threads]
+      operationId: createFeedbackMessage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackMessageCreateRequest"
+      responses:
+        "201":
+          description: 作成したメッセージ
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackMessageV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /messages/{messageId}:
+    parameters:
+      - $ref: "#/components/parameters/MessageId"
+    patch:
+      tags: [threads]
+      operationId: patchFeedbackMessage
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/FeedbackMessagePatchRequest"
+      responses:
+        "200":
+          description: 更新したメッセージ
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackMessageV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /messages/{messageId}/versions:
+    parameters:
+      - $ref: "#/components/parameters/MessageId"
+    get:
+      tags: [threads]
+      operationId: listFeedbackMessageVersions
+      responses:
+        "200":
+          description: メッセージ版履歴
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeedbackMessageVersionV1"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /threads/{threadId}/status:
+    parameters:
+      - $ref: "#/components/parameters/ThreadId"
+    patch:
+      tags: [threads]
+      operationId: patchFeedbackThreadStatus
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status:
+                  $ref: "#/components/schemas/FeedbackThreadStatus"
+      responses:
+        "200":
+          description: 更新したスレッド
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackThreadV1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /threads/{threadId}/evidence:
+    parameters:
+      - $ref: "#/components/parameters/ThreadId"
+    get:
+      tags: [threads]
+      operationId: getFeedbackEvidence
+      parameters:
+        - $ref: "#/components/parameters/Range"
+      responses:
+        "200":
+          description: 認可済み証跡画像
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        "206":
+          description: Rangeで指定したprivate evidenceの一部
+          headers:
+            Content-Range:
+              schema: { type: string }
+            Accept-Ranges:
+              schema: { type: string, const: bytes }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
+
+  /exports:
+    post:
+      tags: [administration]
+      operationId: createFeedbackExport
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackExportRequest"
+      responses:
+        "202":
+          description: 受付済み export job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackExportJob"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /exports/{exportId}:
+    parameters:
+      - $ref: "#/components/parameters/ExportId"
+    get:
+      tags: [administration]
+      operationId: getFeedbackExport
+      responses:
+        "200":
+          description: export job の現在状態
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackExportJob"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /exports/{exportId}/download:
+    parameters:
+      - $ref: "#/components/parameters/ExportId"
+    get:
+      tags: [administration]
+      operationId: downloadFeedbackExport
+      responses:
+        "200":
+          description: 認可済みで保存期限内のCSV/XLSX
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /retention-policy:
+    get:
+      tags: [administration]
+      operationId: getFeedbackRetentionPolicy
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: 保存方針
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackRetentionPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [administration]
+      operationId: patchFeedbackRetentionPolicy
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/FeedbackRetentionPolicy"
+      responses:
+        "200":
+          description: 更新した保存方針
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackRetentionPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /notification-settings:
+    get:
+      tags: [administration]
+      operationId: getFeedbackNotificationSettings
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: 通知接続設定
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackNotificationSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [administration]
+      operationId: patchFeedbackNotificationSettings
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/FeedbackNotificationSettings"
+      responses:
+        "200":
+          description: 更新した通知接続設定
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackNotificationSettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /memberships:
+    get:
+      tags: [administration]
+      operationId: listFeedbackWorkspaceMemberships
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: workspace membership 一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackWorkspaceMember" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [administration]
+      operationId: createFeedbackWorkspaceMembership
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackMembershipCreateRequest" }
+      responses:
+        "201":
+          description: 追加したmembership
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackWorkspaceMember" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "416": { $ref: "#/components/responses/RangeNotSatisfiable" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /memberships/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+      - $ref: "#/components/parameters/ApplicationKeyQuery"
+      - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      - $ref: "#/components/parameters/IfMatch"
+    patch:
+      tags: [administration]
+      operationId: patchFeedbackWorkspaceMembership
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/FeedbackMembershipPatchRequest" }
+      responses:
+        "200":
+          description: 更新したmembership
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackWorkspaceMember" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+    delete:
+      tags: [administration]
+      operationId: deleteFeedbackWorkspaceMembership
+      responses:
+        "204": { description: membershipを削除 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+
+  /notification-deliveries:
+    get:
+      tags: [administration]
+      operationId: listFeedbackNotificationDeliveries
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - name: status
+          in: query
+          schema: { enum: [pending, processing, delivered, failed] }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: payload本文とsecretを含まない配送状態・試行履歴
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackNotificationDelivery" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /notification-deliveries/{deliveryId}/retry:
+    parameters:
+      - $ref: "#/components/parameters/DeliveryId"
+    post:
+      tags: [administration]
+      operationId: retryFeedbackNotificationDelivery
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: 新しいretry cycleへ戻した配送
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackNotificationDelivery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ApplicationKey:
+      name: applicationKey
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+    ApplicationKeyQuery:
+      name: applicationKey
+      in: query
+      required: true
+      schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+    EnvironmentKeyQuery:
+      name: environmentKey
+      in: query
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 100 }
+    ExternalWorkspaceKeyQuery:
+      name: externalWorkspaceKey
+      in: query
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ThreadId:
+      name: threadId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ExportId:
+      name: exportId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DeliveryId:
+      name: deliveryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 2000 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 200 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: { type: string, minLength: 3, maxLength: 200 }
+    IfMatchOptional:
+      name: If-Match
+      in: header
+      required: false
+      schema: { type: string, minLength: 3, maxLength: 200 }
+    Range:
+      name: Range
+      in: header
+      required: false
+      schema:
+        type: string
+        pattern: "^bytes=(?:[0-9]+-[0-9]*|-[0-9]+)$"
+
+  headers:
+    ETag:
+      description: resource version。更新時は If-Match へそのまま指定する。
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: 契約または manifest に適合しない入力
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    Unauthorized:
+      description: 未認証または token 無効
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    Forbidden:
+      description: feedback permission 不足
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    NotFound:
+      description: resource 不在または存在秘匿
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    Conflict:
+      description: open session 競合などの一意制約違反
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    PreconditionFailed:
+      description: ETag が古い
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    PayloadTooLarge:
+      description: evidence または request が上限を超えた
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    TooManyRequests:
+      description: rate limit または quota 超過
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    ServiceUnavailable:
+      description: DB または必須依存が利用不能
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+    RangeNotSatisfiable:
+      description: evidence size の範囲外または複数 byte range
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/FeedbackProblem" }
+
+  schemas:
+    FeedbackApplicationManifestV1:
+      $ref: "./schemas/application-manifest.schema.json"
+    FeedbackLocationV1:
+      $ref: "./schemas/location.schema.json"
+    FeedbackTargetV1:
+      $ref: "./schemas/target.schema.json"
+    FeedbackWebhookEventV1:
+      $ref: "./schemas/webhook-event.schema.json"
+
+    FeedbackCapabilities:
+      type: object
+      additionalProperties: false
+      required: [apiVersion, apiMajorVersion, manifestSchemaVersions, targetSchemaVersions, evidence, features]
+      properties:
+        apiVersion: { type: string, const: "1.0" }
+        apiMajorVersion: { type: integer, const: 1 }
+        manifestSchemaVersions:
+          type: array
+          items: { type: string, const: "1" }
+        targetSchemaVersions:
+          type: array
+          items: { type: string, const: "1" }
+        evidence:
+          type: object
+          additionalProperties: false
+          required: [maxBytes, maxCountPerWorkspace, acceptedContentTypes]
+          properties:
+            maxBytes: { type: integer, minimum: 1 }
+            maxCountPerWorkspace: { type: integer, minimum: 1 }
+            acceptedContentTypes:
+              type: array
+              items: { enum: [image/png, image/webp] }
+        features:
+          type: array
+          items: { type: string }
+
+    FeedbackProblem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, requestId]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        code: { type: string, pattern: "^[a-z0-9_.-]+$" }
+        requestId: { type: string, minLength: 1, maxLength: 200 }
+
+    FeedbackPermission:
+      enum: [feedback.read, feedback.comment, feedback.manage, feedback.admin]
+
+    FeedbackParticipant:
+      type: object
+      additionalProperties: false
+      required: [principalId]
+      properties:
+        principalId: { type: string, minLength: 1, maxLength: 200 }
+        displayName: { type: [string, "null"], maxLength: 200 }
+        participantName: { type: [string, "null"], maxLength: 100 }
+
+    FeedbackMembership:
+      type: object
+      additionalProperties: false
+      required: [applicationKey, externalWorkspaceKey, permissions]
+      properties:
+        applicationKey: { type: string }
+        externalWorkspaceKey: { type: string }
+        permissions:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackPermission" }
+
+    FeedbackMe:
+      type: object
+      additionalProperties: false
+      required: [participant, memberships]
+      properties:
+        participant: { $ref: "#/components/schemas/FeedbackParticipant" }
+        memberships:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackMembership" }
+
+    FeedbackWorkspaceMember:
+      type: object
+      additionalProperties: false
+      required: [userId, issuer, subject, permissions, version]
+      properties:
+        userId: { type: string, format: uuid }
+        issuer: { type: string, minLength: 1, maxLength: 1000 }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        email: { type: [string, "null"], maxLength: 320 }
+        displayName: { type: [string, "null"], maxLength: 200 }
+        permissions:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/FeedbackPermission" }
+        version: { type: integer, minimum: 1 }
+
+    FeedbackMembershipCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [issuer, subject, permissions]
+      properties:
+        issuer: { type: string, minLength: 1, maxLength: 1000 }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        permissions:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/FeedbackPermission" }
+
+    FeedbackMembershipPatchRequest:
+      type: object
+      additionalProperties: false
+      required: [permissions]
+      properties:
+        permissions:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/FeedbackPermission" }
+
+    FeedbackHostContextV1:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, applicationKey, environmentKey, externalWorkspaceKey, release]
+      properties:
+        schemaVersion: { type: string, const: "1" }
+        applicationKey: { type: string, minLength: 1, maxLength: 100 }
+        environmentKey: { type: string, minLength: 1, maxLength: 100 }
+        externalWorkspaceKey: { type: string, minLength: 1, maxLength: 200 }
+        release: { type: string, minLength: 1, maxLength: 100 }
+        locale: { type: string, maxLength: 35 }
+
+    FeedbackParticipantPolicy:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [mode]
+          properties:
+            mode: { const: authenticated-identity }
+        - type: object
+          additionalProperties: false
+          required: [mode, storage]
+          properties:
+            mode: { enum: [prompt, authenticated-and-prompt] }
+            storage: { enum: [memory, local-storage, host] }
+
+    FeedbackEvidencePolicy:
+      type: object
+      additionalProperties: false
+      required: [enabled, maxBytes, acceptedContentTypes]
+      properties:
+        enabled: { type: boolean }
+        maxBytes: { type: integer, minimum: 1 }
+        acceptedContentTypes:
+          type: array
+          items: { enum: [image/png, image/webp] }
+
+    FeedbackReviewContextV1:
+      type: object
+      additionalProperties: false
+      required: [session, scope, posting, permissions, participantPolicy, evidencePolicy]
+      properties:
+        session:
+          oneOf:
+            - $ref: "#/components/schemas/FeedbackSessionV1"
+            - type: "null"
+        scope: { enum: [reviewable, excluded, unregistered] }
+        posting: { enum: [allow, warn, deny] }
+        permissions:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackPermission" }
+        participantPolicy: { $ref: "#/components/schemas/FeedbackParticipantPolicy" }
+        evidencePolicy: { $ref: "#/components/schemas/FeedbackEvidencePolicy" }
+
+    FeedbackSessionStatus:
+      enum: [draft, open, closed]
+
+    FeedbackSessionV1:
+      type: object
+      additionalProperties: false
+      required:
+        [id, applicationKey, environmentKey, externalWorkspaceKey, manifestVersion, title, status,
+         outOfScopePosting, scopes, perspectives, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        applicationKey: { type: string }
+        environmentKey: { type: string }
+        externalWorkspaceKey: { type: string }
+        manifestVersion: { type: string }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, "null"], maxLength: 5000 }
+        status: { $ref: "#/components/schemas/FeedbackSessionStatus" }
+        outOfScopePosting: { enum: [allow, warn, deny] }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackSessionScopeV1" }
+        perspectives:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackSessionPerspectiveV1" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    FeedbackSessionScopeV1:
+      type: object
+      additionalProperties: false
+      required: [pageKey, reviewable]
+      properties:
+        pageKey: { type: string, minLength: 1, maxLength: 100 }
+        routeTemplate: { type: [string, "null"], maxLength: 500 }
+        reviewable: { type: boolean }
+
+    FeedbackSessionPerspectiveV1:
+      type: object
+      additionalProperties: false
+      required: [code, label, status]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 100 }
+        label: { type: string, minLength: 1, maxLength: 200 }
+        status: { enum: [active, future, out-of-scope] }
+        guidance: { type: [string, "null"], maxLength: 5000 }
+
+    FeedbackSessionPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackSessionV1" }
+        nextCursor: { type: [string, "null"] }
+        totalCount: { type: integer, minimum: 0 }
+
+    FeedbackSessionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [applicationKey, environmentKey, externalWorkspaceKey, manifestVersion, title, outOfScopePosting]
+      properties:
+        applicationKey: { type: string }
+        environmentKey: { type: string }
+        externalWorkspaceKey: { type: string }
+        manifestVersion: { type: string }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, "null"], maxLength: 5000 }
+        outOfScopePosting: { enum: [allow, warn, deny], default: warn }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackSessionScopeV1" }
+        perspectives:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackSessionPerspectiveV1" }
+
+    FeedbackSessionPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, "null"], maxLength: 5000 }
+        status: { $ref: "#/components/schemas/FeedbackSessionStatus" }
+        outOfScopePosting: { enum: [allow, warn, deny] }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time }
+
+    FeedbackThreadStatus:
+      enum: [open, resolved]
+
+    FeedbackMessageV1:
+      type: object
+      additionalProperties: false
+      required: [id, threadId, author, body, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        threadId: { type: string, format: uuid }
+        author: { $ref: "#/components/schemas/FeedbackParticipant" }
+        body: { type: string, minLength: 1, maxLength: 20000 }
+        createdAt: { type: string, format: date-time }
+        editedAt: { type: [string, "null"], format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    FeedbackMessageVersionV1:
+      type: object
+      additionalProperties: false
+      required: [id, threadId, author, body, createdAt, version, current]
+      properties:
+        id: { type: string, format: uuid }
+        threadId: { type: string, format: uuid }
+        author: { $ref: "#/components/schemas/FeedbackParticipant" }
+        body: { type: string, minLength: 1, maxLength: 20000 }
+        createdAt: { type: string, format: date-time }
+        editedAt: { type: [string, "null"], format: date-time }
+        version: { type: integer, minimum: 1 }
+        current: { type: boolean }
+
+    FeedbackThreadV1:
+      type: object
+      additionalProperties: false
+      required:
+        [id, sessionId, displayNumber, location, target, perspectiveCode, status, reporter,
+         messages, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        sessionId: { type: string, format: uuid }
+        displayNumber: { type: integer, minimum: 1 }
+        location: { $ref: "#/components/schemas/FeedbackLocationV1" }
+        target: { $ref: "#/components/schemas/FeedbackTargetV1" }
+        perspectiveCode: { type: string, minLength: 1, maxLength: 100 }
+        status: { $ref: "#/components/schemas/FeedbackThreadStatus" }
+        reporter: { $ref: "#/components/schemas/FeedbackParticipant" }
+        evidenceAvailable: { type: boolean, default: false }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackMessageV1" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    FeedbackThreadPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackThreadV1" }
+        nextCursor: { type: [string, "null"] }
+        totalCount: { type: integer, minimum: 0 }
+
+    FeedbackDeepLink:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+
+    FeedbackThreadCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [location, target, perspectiveCode, body]
+      properties:
+        location: { $ref: "#/components/schemas/FeedbackLocationV1" }
+        target: { $ref: "#/components/schemas/FeedbackTargetV1" }
+        perspectiveCode: { type: string, minLength: 1, maxLength: 100 }
+        body: { type: string, minLength: 1, maxLength: 20000 }
+        participantName: { type: [string, "null"], maxLength: 100 }
+        evidence:
+          type: [object, "null"]
+          additionalProperties: false
+          required: [contentType, dataBase64, viewportWidth, viewportHeight, pixelRatio, capturedAt]
+          properties:
+            contentType: { enum: [image/png, image/webp] }
+            dataBase64: { type: string, contentEncoding: base64 }
+            viewportWidth: { type: integer, minimum: 1 }
+            viewportHeight: { type: integer, minimum: 1 }
+            pixelRatio: { type: number, minimum: 0.1, maximum: 8 }
+            capturedAt: { type: string, format: date-time }
+
+    FeedbackMessageCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 20000 }
+        participantName: { type: [string, "null"], maxLength: 100 }
+
+    FeedbackMessagePatchRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 20000 }
+        participantName: { type: [string, "null"], maxLength: 100 }
+
+    FeedbackExportRequest:
+      type: object
+      additionalProperties: false
+      required: [applicationKey, environmentKey, externalWorkspaceKey, format]
+      properties:
+        applicationKey: { type: string }
+        environmentKey: { type: string }
+        externalWorkspaceKey: { type: string }
+        sessionId: { type: [string, "null"], format: uuid }
+        format: { enum: [csv, xlsx] }
+        locale: { type: string, default: ja-JP }
+        timezone: { type: string, default: Asia/Tokyo }
+
+    FeedbackExportJob:
+      type: object
+      additionalProperties: false
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { enum: [queued, running, completed, failed] }
+        downloadUrl: { type: [string, "null"], format: uri-reference }
+        expiresAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        error: { type: [string, "null"], maxLength: 2000 }
+
+    FeedbackRetentionPolicy:
+      type: object
+      additionalProperties: false
+      required: [evidenceRetentionDays]
+      properties:
+        evidenceRetentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
+        exportRetentionDays: { type: integer, minimum: 1, maximum: 365, default: 7 }
+
+    FeedbackNotificationSettings:
+      type: object
+      additionalProperties: false
+      required: [webhookEnabled, includeBody, includeEvidence]
+      properties:
+        webhookEnabled: { type: boolean }
+        webhookEndpoint: { type: [string, "null"], format: uri }
+        includeBody: { type: boolean, default: false }
+        includeEvidence: { type: boolean, default: false }
+
+    FeedbackNotificationAttempt:
+      type: object
+      additionalProperties: false
+      required: [retryCycle, attempt, status, createdAt]
+      properties:
+        retryCycle: { type: integer, minimum: 0 }
+        attempt: { type: integer, minimum: 1 }
+        status: { enum: [delivered, failed] }
+        responseStatus: { type: [integer, "null"], minimum: 100, maximum: 599 }
+        error: { type: [string, "null"], maxLength: 2000 }
+        createdAt: { type: string, format: date-time }
+
+    FeedbackNotificationDelivery:
+      type: object
+      additionalProperties: false
+      required: [id, eventType, status, retryCycle, attemptCount, availableAt, createdAt, attempts]
+      properties:
+        id: { type: string, format: uuid }
+        eventType: { type: string, minLength: 1, maxLength: 100 }
+        status: { enum: [pending, processing, delivered, failed] }
+        retryCycle: { type: integer, minimum: 0 }
+        attemptCount: { type: integer, minimum: 0 }
+        availableAt: { type: string, format: date-time }
+        deliveredAt: { type: [string, "null"], format: date-time }
+        lastError: { type: [string, "null"], maxLength: 2000 }
+        createdAt: { type: string, format: date-time }
+        attempts:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackNotificationAttempt" }

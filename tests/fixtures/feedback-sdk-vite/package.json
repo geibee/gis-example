@@ -1,0 +1,13 @@
+{
+  "name": "feedback-sdk-clean-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "typecheck:maplibre": "tsc --noEmit -p tsconfig.maplibre.json",
+    "typecheck:admin": "tsc --noEmit -p tsconfig.admin.json",
+    "build": "vite build",
+    "test": "vitest run"
+  }
+}

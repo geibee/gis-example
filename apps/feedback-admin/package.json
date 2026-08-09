@@ -1,0 +1,27 @@
+{
+  "name": "@feedback/admin-console",
+  "version": "1.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@feedback/admin-react": "1.0.0-alpha.1",
+    "@feedback/core": "1.0.0-alpha.1",
+    "oidc-client-ts": "3.4.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "latest",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.21",
+    "vitest": "4.1.9"
+  }
+}

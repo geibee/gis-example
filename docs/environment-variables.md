@@ -44,12 +44,27 @@ ECS タスク定義を作成するときの完全なインプットとして、�
 | `S3_ENDPOINT_URL` | 任意 (**dev の MinIO 専用**。指定時は path-style アクセス。本番では設定しない) | なし (compose の s3 プロファイルは `http://minio:9000`) | — |
 | `S3_KEY_PREFIX` | 任意 | `uploads/` | タスク定義 |
 | `UPLOAD_MAX_BYTES` | 任意 | `209715200` (200MB。web の nginx `client_max_body_size` と揃える) | タスク定義 |
-| `API_PUBLIC_URL` | 任意 (本番は明示) | `http://localhost:8080` | タスク定義 / SSM |
-| `WEB_ORIGIN` | 任意 (本番は明示。未設定時も anyHost には開放しない) | `http://localhost:5173` | タスク定義 / SSM |
+| `REVIEW_EVIDENCE_MAX_BYTES` | 任意 | `10485760` (10MB。1440x900 の証跡 PNG は実測 70KB 前後) | タスク定義 |
+| `REVIEW_NOTIFICATION_RUNNER_MODE` | 任意 (`in-process` \| `external`) | `in-process` | タスク定義。本番の水平分割時は `external` + `bin/review-notification-worker`。詳細は [review-notifications.md](review-notifications.md) |
+| `REVIEW_NOTIFICATION_POLL_INTERVAL_SECONDS` | 任意 | `2` | タスク定義 |
+| `REVIEW_NOTIFICATION_MAX_ATTEMPTS` | 任意 | `5` | タスク定義 |
+| `REVIEW_NOTIFICATION_LEASE_SECONDS` | 任意 (配信中ワーカー停止時に再 claim するまでの時間) | `120` | タスク定義 |
+| `REVIEW_NOTIFICATION_REQUEST_TIMEOUT_SECONDS` | 任意 (Teams / Issue Webhook の接続・応答期限) | `10` | タスク定義 |
+| `REVIEW_APP_URL` | 任意 | `WEB_ORIGIN` → `http://localhost:5173` | SSM (通知内のレビュー画面リンク) |
+| `REVIEW_EMAIL_FROM` | 任意 (設定すると Email チャネルが利用可能) | なし | SSM (SES で検証済みの送信元) |
+| `REVIEW_SES_REGION` | 任意 (未設定時は AWS SDK 既定チェーン) | なし | タスク定義 |
+| `REVIEW_SES_ENDPOINT_URL` | 任意 (**dev の SES 互換モック専用**。本番では設定しない) | なし | — |
+| `REVIEW_TEAMS_WEBHOOK_URL` | 任意 (設定すると Teams チャネルが利用可能) | なし | **Secrets Manager** |
+| `REVIEW_ISSUE_WEBHOOK_URL` | 任意 (設定すると Issue 生成チャネルが利用可能) | なし | **Secrets Manager** |
+| `REVIEW_ISSUE_WEBHOOK_TOKEN` | 任意 (Issue Webhook の Bearer token) | なし | **Secrets Manager** |
+| `API_PUBLIC_URL` | 任意 (本番は明示) | API単体は `http://localhost:8080`、composeはCSPと同一オリジンの `http://localhost:5173` | タスク定義 / SSM |
+| `WEB_ORIGINS` | 任意 (複数SPAを許可する場合に推奨。カンマ区切りの完全なorigin。指定時は `WEB_ORIGIN` より優先) | なし | タスク定義 / SSM |
+| `WEB_ORIGIN` | 任意 (`WEB_ORIGINS` 未設定時の後方互換な単一値。本番はどちらかを明示。未指定時も anyHost には開放しない) | `http://localhost:5173` | タスク定義 / SSM |
 | `OIDC_ISSUER` | **必須** (未設定は起動失敗) | なし (compose が注入) | タスク定義 / SSM |
 | `OIDC_AUDIENCE` | **必須** (未設定は起動失敗) | なし (compose が注入) | タスク定義 / SSM |
 | `OIDC_JWKS_URL` | 任意 | `$OIDC_ISSUER/protocol/openid-connect/certs` | タスク定義 / SSM |
 | `AUTH_ADMIN_EMAILS` | 任意 (初期 system admin のブートストラップ用。カンマ区切り) | なし | SSM |
+| `API_ROUTE_MODE` | 任意 (`full` \| `review-sidecar`) | `full` | タスク定義。`review-sidecar` はレビュー／フィードバック系ルートと `/api/me` だけを公開し、分析ランナーを起動しない |
 | `ANALYSIS_RUNNER_MODE` | 任意 (**本番は `external` 推奨** — 分析ランナーを独立サービスへ分離。`in-process` \| `external` 以外は起動失敗) | `in-process` (API 内デーモンスレッド) | タスク定義。詳細は [jobs-architecture.md](jobs-architecture.md) |
 | `JOB_QUEUE_MODE` | 任意 (**本番は `sqs` 推奨**。`polling` \| `sqs` 以外は起動失敗) | `polling` (ワーカーの DB ポーリング) | タスク定義。詳細は [jobs-architecture.md](jobs-architecture.md) |
 | `SQS_ANALYSIS_QUEUE_URL` | `JOB_QUEUE_MODE=sqs` のとき**必須** (未設定は起動失敗) | なし (compose の sqs プロファイルは ElasticMQ の URL) | タスク定義 / SSM |
@@ -65,12 +80,108 @@ ECS タスク定義を作成するときの完全なインプットとして、�
 | `ANALYSIS_RECEIVE_WAIT_SECONDS` | 任意 (SQS long polling の待ち時間) | `10` | タスク定義 |
 | `ANALYSIS_VISIBILITY_EXTENSION_SECONDS` | 任意 (ハートビートごとに延長する visibility timeout) | `120` | タスク定義 |
 | `ANALYSIS_TEST_CLAIM_HOLD_MILLIS` | **テスト専用** (claim 直後に実行を保留する。kill 回復の統合テスト用 — 本番で設定しない) | `0` | — |
+
 | `LOG_FORMAT` | 任意 (**本番は `json` 必須** — CloudWatch Logs Insights でのフィールド検索の前提。`text` \| `json` 以外は起動失敗) | `text` (人間可読) | タスク定義。詳細は [observability.md](observability.md) |
 | `HEALTH_READINESS_TIMEOUT_MS` | 任意 (`/health/ready` の DB 疎通確認の応答期限。ALB ヘルスチェックのタイムアウトより短くする) | `2000` | タスク定義 |
+
+`WEB_ORIGINS` / `WEB_ORIGIN` は `scheme://host[:port]` だけを受け付ける。path、query、userinfo、
+`http` / `https` 以外のscheme、不完全なURLは起動時に拒否する。例:
+
+```text
+WEB_ORIGINS=https://sales.example.com,https://assets.example.com
+```
+
+両方を設定した場合は `WEB_ORIGINS` が許可リストのSSoTとなる。通知リンクは複数候補から
+決められないため、複数SPA構成では `REVIEW_APP_URL` も明示する。
 
 `ANALYSIS_*` / `JOB_QUEUE_MODE` / `SQS_*` は分析ワーカー (`bin/analysis-worker` — api と
 同イメージの別エントリポイント) にも同じ名前で適用される。API 側は `ANALYSIS_RUNNER_MODE=external`
 のとき `ANALYSIS_*` を読まない (ジョブ実行の設計は [jobs-architecture.md](jobs-architecture.md))。
+
+`API_ROUTE_MODE=review-sidecar` は透過プロキシではない。同じAPIイメージを別コンテナとして起動し、
+Gatewayのpath routingまたはSDKの `apiBaseUrl` で明示的に送る。JWT検証・DBメンバーシップ認可・
+監査・証跡保管は通常APIと同じ実装を使う。通常APIと同時起動する場合、通知outboxを二重にpoll
+しないよう通常API側を `REVIEW_NOTIFICATION_RUNNER_MODE=external` にし、sidecar側だけを
+`in-process` にするか、両方を `external` にして専用通知workerを1つ起動する。
+
+## feedback-service (apps/feedback-service — Ktor)
+
+Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flyway history で動作する。
+`DATABASE_*` や `OIDC_*` は共有せず、すべて `FEEDBACK_*` の独立設定を使う。
+
+| 名称 | 必須 | dev 既定 (未設定時) | 本番の供給元 |
+|---|---|---|---|
+| `FEEDBACK_PORT` | 任意 | `8090` | タスク定義 |
+| `FEEDBACK_DATABASE_URL` | 任意 (本番は明示) | `jdbc:postgresql://localhost:5432/feedback` | タスク定義 (専用 RDS/PostgreSQL) |
+| `FEEDBACK_DATABASE_USER` | 任意 (本番は明示) | `PGUSER` → `feedback` | Secrets Manager |
+| `FEEDBACK_DATABASE_PASSWORD` | **必須** (`PGPASSWORD` でも可。既定値なし) | なし (compose が注入) | **Secrets Manager** |
+| `FEEDBACK_DATABASE_POOL_SIZE` | 任意 | `10` | タスク定義 |
+| `FEEDBACK_DATABASE_CONNECTION_TIMEOUT_MS` | 任意 | `10000` | タスク定義 |
+| `FEEDBACK_DATABASE_STATEMENT_TIMEOUT_MS` | 任意 | `30000` | タスク定義 |
+| `FEEDBACK_OIDC_ISSUER` | **API では必須** | なし (compose が注入) | タスク定義 / SSM |
+| `FEEDBACK_OIDC_AUDIENCE` | **API では必須** | なし (compose は `feedback-service`) | タスク定義 / SSM |
+| `FEEDBACK_OIDC_JWKS_URL` | 任意 | `$issuer/.well-known/jwks.json` | タスク定義 / SSM |
+| `FEEDBACK_OIDC_SUBJECT_CLAIM` | 任意 | `sub` | タスク定義 |
+| `FEEDBACK_OIDC_DISPLAY_NAME_CLAIM` | 任意 | `name` | タスク定義 |
+| `FEEDBACK_OIDC_EMAIL_CLAIM` | 任意 | `email` | タスク定義 |
+| `FEEDBACK_ALLOW_INSECURE_HTTP` | 任意 (**dev 専用**) | 未設定 (`https` 必須、`localhost` だけ例外) | —。本番で `1` にしない |
+| `FEEDBACK_TOKEN_EXCHANGE_ISSUER` | broker token 検証を有効にするとき必須 | なし (未設定なら直接 OIDC のみ) | タスク定義 / SSM |
+| `FEEDBACK_TOKEN_EXCHANGE_AUDIENCE` | exchange issuer 設定時**必須** | なし | タスク定義 / SSM |
+| `FEEDBACK_TOKEN_EXCHANGE_JWKS_URL` | 任意 | `$exchangeIssuer/.well-known/jwks.json` | タスク定義 / SSM |
+| `FEEDBACK_TOKEN_EXCHANGE_ACTOR_ISSUERS` | exchange issuer 設定時**必須** | なし | 許可する元 IdP issuer のカンマ区切り |
+| `FEEDBACK_TOKEN_EXCHANGE_MAX_LIFETIME_SECONDS` | 任意 | `300` (許容範囲 30..900) | タスク定義 |
+| `FEEDBACK_EVIDENCE_MAX_BYTES` | 任意 | `10485760` (10MiB) | タスク定義 |
+| `FEEDBACK_EVIDENCE_MAX_COUNT_PER_WORKSPACE` | 任意 | `1000` (workspace単位、1..1000000) | タスク定義 |
+| `FEEDBACK_WRITE_RATE_LIMIT_PER_MINUTE` | 任意 | `120` (principal単位、1..10000) | タスク定義 |
+| `FEEDBACK_WRITE_RATE_LIMIT_PER_TENANT_PER_MINUTE` | 任意 | `1200` (tenant単位、1..100000) | タスク定義 |
+| `FEEDBACK_WRITE_RATE_LIMIT_PER_IP_PER_MINUTE` | 任意 | `240` (IPはSHA-256のみ保存、1..100000) | タスク定義 |
+| `FEEDBACK_EVIDENCE_STORAGE` | 任意 (**本番は `s3`**) | `local` | タスク定義 |
+| `FEEDBACK_EVIDENCE_DIR` | `local` のとき任意 | `/data/evidence` | タスク定義 / volume |
+| `FEEDBACK_S3_BUCKET` | `s3` のとき**必須** | なし | タスク定義 / SSM |
+| `FEEDBACK_S3_REGION` | 任意 | AWS SDK 既定チェーン | タスク定義 |
+| `FEEDBACK_S3_ENDPOINT_URL` | 任意 (**dev の S3 互換 storage 専用**) | なし | — |
+| `FEEDBACK_S3_KEY_PREFIX` | 任意 | `evidence/` | タスク定義 |
+| `FEEDBACK_EXPORT_DIR` | API/export/retention worker で任意 | `/data/exports` | タスク定義 / private volume |
+| `FEEDBACK_EXPORT_KEY_PREFIX` | export worker で任意 | `exports/` | タスク定義 |
+| `FEEDBACK_EXPORT_POLL_MS` | export worker で任意 | `2000` | タスク定義 |
+| `FEEDBACK_NOTIFICATION_POLL_MS` | notification worker で任意 | `2000` | タスク定義 |
+| `FEEDBACK_NOTIFICATION_MAX_ATTEMPTS` | notification worker で任意 | `5` | タスク定義 |
+| `FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP` | 任意 (**ローカル fixture 専用**) | 未設定 (`https` と public address のみ) | —。本番で `1` にしない |
+| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | notification worker では**必須** | なし (compose が注入) | **Secrets Manager** |
+| `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | API/notification worker で**必須** | なし (base64 で 32 byte) | **Secrets Manager** |
+| `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY_PREVIOUS` | key rotation 中だけ任意 | なし (base64 で 32 byte) | **Secrets Manager** |
+| `FEEDBACK_RETENTION_POLL_MS` | retention worker で任意 | `3600000` | タスク定義 |
+| `FEEDBACK_ORPHAN_GRACE_SECONDS` | retention worker で任意 | `3600` (最小 300) | タスク定義 |
+
+`application_environments.allowed_origins` が CORS allowlist の正本であり、API 起動環境変数で
+origin を上書きしない。S3 認証は AWS SDK の既定チェーン (本番は ECS タスクロール) を使う。
+API、notification worker、export worker、retention worker は同じ image から、それぞれ
+`bin/feedback-service`、`bin/feedback-notification-worker`、`bin/feedback-export-worker`、
+`bin/feedback-retention-worker` を command で選ぶ。export file は認可付き download API だけで配信し、
+API、export worker、retention worker が同じ private volume を共有する。
+
+exchange token は別 issuer/audience の署名・`iat`/`exp` と最大 lifetime を検証し、
+`actor_issuer` / `actor_sub`、`feedback_tenant/application/environment/workspace`、
+`feedback_permissions` claim を必須とする。実効権限は DB membership と token permission の積集合であり、
+token scope 外の resource は許可しない。broker でのホスト session 検証・mTLS・token 発行鍵の保護は
+broker 側の責務であり、業務 API token を Feedback Service へ転送しない。
+
+Phase 3 の管理 UI/API が完成するまで、初期 tenant/application/environment/workspace/membership は
+one-shot の `bin/feedback-bootstrap` で登録する。次の変数は bootstrap command だけが読む。
+
+| 名称 | 必須 | 説明 |
+|---|---|---|
+| `FEEDBACK_BOOTSTRAP_TENANT_KEY` / `FEEDBACK_BOOTSTRAP_TENANT_DISPLAY_NAME` | 必須 | tenant の安定 key と表示名 |
+| `FEEDBACK_BOOTSTRAP_APPLICATION_KEY` / `FEEDBACK_BOOTSTRAP_APPLICATION_DISPLAY_NAME` | 必須 | application の安定 key と表示名 |
+| `FEEDBACK_BOOTSTRAP_ENVIRONMENT_KEY` / `FEEDBACK_BOOTSTRAP_ENVIRONMENT_BASE_URL` | 必須 | environment key と deep link の基底 URL |
+| `FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS` | 必須 | CORS 許可 origin (カンマ区切り) |
+| `FEEDBACK_BOOTSTRAP_EXTERNAL_WORKSPACE_KEY` / `FEEDBACK_BOOTSTRAP_WORKSPACE_DISPLAY_NAME` | 必須 | ホスト側 workspace key と表示名 |
+| `FEEDBACK_BOOTSTRAP_ISSUER` / `FEEDBACK_BOOTSTRAP_SUBJECT` | 必須 | 最初の管理主体を特定する OIDC issuer/subject |
+| `FEEDBACK_BOOTSTRAP_EMAIL` / `FEEDBACK_BOOTSTRAP_DISPLAY_NAME` | 任意 | 管理主体の表示属性 |
+| `FEEDBACK_BOOTSTRAP_PERMISSIONS` | 必須 | `feedback.read/comment/manage/admin` のカンマ区切り |
+
+bootstrap は冪等だが、同じ `applicationKey` を別 tenant に割り当てる操作は拒否する。production では
+one-shot task の環境変数として渡し、常駐 API タスクへ `FEEDBACK_BOOTSTRAP_*` を設定しない。
 
 ## worker-gis (apps/worker-gis — Python)
 
@@ -108,7 +219,7 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 
 ## web (apps/web — ビルド時のみ)
 
-ソース: `src/api.ts` / `src/auth.ts` の `import.meta.env`。Vite の `VITE_*` は
+ソース: `src/api.ts` / `src/auth.ts` / `src/App.tsx` の `import.meta.env`。Vite の `VITE_*` は
 **ビルド時に JS へ埋め込まれる**ため、実行時の環境変数では変更できない。
 環境ごとにイメージを分けるか、ビルドパイプラインで環境別に `--build-arg` /
 `.env.production` を与える。**シークレットを `VITE_*` に入れないこと** (配布物に平文で残る)。
@@ -118,6 +229,38 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 | `VITE_API_BASE` | 任意 | `""` (同一オリジン相対パス) | ビルド引数 |
 | `VITE_OIDC_AUTHORITY` | 任意 (本番は明示) | `http://localhost:8081/realms/gis` | ビルド引数 |
 | `VITE_OIDC_CLIENT_ID` | 任意 | `gis-web` | ビルド引数 |
+| `VITE_APP_VERSION` | 任意 (レビュー基盤を使うなら必須) | `"dev"` | ビルド引数 (git SHA / ビルド番号) |
+| `VITE_FEEDBACK_API_MODE` | 任意 | `legacy` (`feedback-v1`、互換期間は `feedback-v1-dual-read`) | ビルド引数 |
+| `VITE_FEEDBACK_API_BASE` | `feedback-v1` のとき必須 | `/feedback/v1` (同一 origin proxy) | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_URL` | `feedback-v1` のとき必須 | `http://localhost:5174/` | ビルド引数 |
+| `VITE_FEEDBACK_APPLICATION_KEY` | `feedback-v1` のとき必須 | `web-gis` | ビルド引数 |
+| `VITE_FEEDBACK_ENVIRONMENT_KEY` | `feedback-v1` のとき必須 | `local` | ビルド引数 |
+
+`VITE_APP_VERSION` はレビュー証跡 (`docs/prototype-review.md`) に「どのプロトタイプへの
+指摘か」を残すための識別子。未設定でも動くが `dev` 固定になり、後から対象ビルドを
+追跡できなくなる。
+
+`feedback-v1` は SDK overlay と管理画面の通信先を切り替える Phase 4 の rollback 可能な flag である。
+切替前に対象 application manifest、workspace membership、open session を Feedback DB へ provisioning する。
+問題時は同じ build pipeline で `legacy` に戻し、旧 API/DB を再選択する。
+`feedback-v1-dual-read` は新 API へだけ書き込み、一覧・詳細・履歴の読み取りだけ旧 API と統合する。
+新 API の 401/403/429 は旧 API へ fallback しない。
+
+## feedback-admin (apps/feedback-admin — ビルド時のみ)
+
+独立 Feedback Admin Console の `VITE_*` もビルド時に公開 bundle へ埋め込まれる。secret は設定しない。
+Web GIS と異なる OIDC client を使い、Feedback Service audience だけを取得する。
+
+| 名称 | 必須 | dev 既定 (compose) | 本番の供給元 |
+|---|---|---|---|
+| `VITE_FEEDBACK_API_BASE` | **必須** | `http://localhost:8090/feedback/v1` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_AUTHORITY` | **必須** | `http://localhost:8081/realms/gis` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_CLIENT_ID` | **必須** | `feedback-admin` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI` | 任意 | `window.location.origin + /` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_SCOPE` | 任意 | `openid profile email feedback` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_APPLICATION_KEY` | **必須** | `web-gis` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_ENVIRONMENT_KEY` | **必須** | `local` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_WORKSPACE_KEY` | **必須** | ローカル fixture UUID | ビルド引数 |
 
 ## martin (タイルサーバー)
 
@@ -141,11 +284,14 @@ Keycloak の本番モード運用 (ECS) か Cognito への移行を別途判断�
 | 名称 | 説明 | dev 既定 |
 |---|---|---|
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 開発 PostgreSQL の資格情報。api / worker / martin / seed にも同じ値が配線される | `gis` / `gis` / `gis` |
+| `FEEDBACK_POSTGRES_DB` / `FEEDBACK_POSTGRES_USER` / `FEEDBACK_POSTGRES_PASSWORD` | `--profile feedback` の専用通常 PostgreSQL。Web GIS DB と共有しない | `feedback` / `feedback` / `feedback` |
+| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | dev webhook の HMAC 署名 key | `feedback-dev-signing-secret-32chars` |
+| `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | dev notification endpoint の暗号鍵 (base64) | `infra/.env.example` の開発専用値 |
 | `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` | 開発 Keycloak の管理者 | `admin` / `admin` |
 | `UPLOAD_STORAGE` / `S3_BUCKET` / `S3_REGION` | アップロード保存先の切替。`s3` にする場合は `--profile s3` で MinIO を同時起動する | `local` / `gis-uploads` / `us-east-1` |
 | `JOB_QUEUE_MODE` / `ANALYSIS_RUNNER_MODE` | ジョブ実行基盤の切替 ([jobs-architecture.md](jobs-architecture.md))。`sqs` / `external` にする場合は `--profile sqs` で ElasticMQ と analysis-worker を同時起動する | `polling` / `in-process` |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | 開発 MinIO のルート資格情報 (`--profile s3` のときのみ使用。api / worker の `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` としても配線) | `minio` / `minio-secret` |
-| `POSTGRES_HOST_PORT` / `WEB_HOST_PORT` | ホスト側ポートの競合回避 | `5432` / `5173` |
+| `POSTGRES_HOST_PORT` / `MARTIN_HOST_PORT` / `WEB_HOST_PORT` / `FEEDBACK_ADMIN_HOST_PORT` | ホスト側ポートの競合回避。`MARTIN_HOST_PORT` を変えてもコンテナ間の `martin:3000` は変わらない | `5432` / `3000` / `5173` / `5174` |
 
 CI / verify 用の変数 (`VERIFY_*`, `SMOKE_*`, `FUZZ_*`) は各スクリプトのヘッダコメントを参照。
 

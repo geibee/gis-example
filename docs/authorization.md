@@ -47,6 +47,9 @@ issue #25 の設計ドキュメント。数百画面規模を見据え、認可�
 | `import.run` | GIS ファイル取込の実行 | `IMPORT_EXECUTE` |
 | `analysis.run` | 空間分析の実行 | `ANALYSIS_EXECUTE` |
 | `jobs.view` | 取込・分析ジョブの進捗閲覧 | `JOB_READ` |
+| `review.view` | レビューセッション・スレッド・コメント版履歴・保存方針の閲覧、証跡取得 | `REVIEW_READ` |
+| `review.comment` | フィードバック投稿・スレッド返信・自分のコメント編集 | `REVIEW_COMMENT` |
+| `review.manage` | セッション/観点/対象画面・証跡保存期間の設定、スレッド解決/再開、期限切れ証跡削除 | `REVIEW_MANAGE` |
 | `admin.users.manage` | ユーザー管理 (system 管理画面) | `USER_ADMIN` |
 | `admin.members.manage` | プロジェクトメンバー管理 (system 管理画面) | `MEMBER_ADMIN` |
 
@@ -63,8 +66,18 @@ issue #25 の設計ドキュメント。数百画面規模を見据え、認可�
 |---|---|---|
 | system `admin` | システム | 全 Permission (組込みの破壊不能ルール。PDP が無条件許可) |
 | system `user` | システム | なし (プロジェクトロールに従う) |
-| project `viewer` | プロジェクト | `projects.view` `layers.view` `map.view` `business-data.view` `jobs.view` |
-| project `editor` | プロジェクト | viewer + `layers.manage` `features.edit` `business-data.edit` `import.run` `analysis.run` |
+| project `viewer` | プロジェクト | `projects.view` `layers.view` `map.view` `business-data.view` `jobs.view` `review.view` `review.comment` |
+| project `editor` | プロジェクト | viewer + `layers.manage` `features.edit` `business-data.edit` `import.run` `analysis.run` `review.manage` |
+
+レビュー基盤 (docs/prototype-review.md) のロール想定は本リポジトリの 2 ロールへ次のように対応させている。
+専用ロール (Reviewer / CustomerAdmin / Developer / ReviewManager) を切るのは、顧客側メンバーを
+開発側と分離して管理する必要が出た時点で検討する (`RolePermissionResolver` の差し替え点は既にある)。
+
+| レビュー基盤のロール | 本リポジトリ |
+|---|---|
+| Reviewer (コメント・閲覧) | project `viewer` (`review.view` + `review.comment`) |
+| ReviewManager (セッション・観点の管理) | project `editor` |
+| SystemAdmin | system `admin` |
 
 新しいロール (例: 取込オペレータ = viewer + `import.run` + `jobs.view`) の追加は
 `Authorization.kt` の `BuiltinRoleDefinitions` への宣言追加のみで完結する。ただし
@@ -131,20 +144,12 @@ fail-closed を保つ)。
 
 ## フロントエンド (web) への申し送り
 
-現状の web は `me?.systemRole === "admin"` の直判定のみで、機能単位の出し分け基盤が
-ない。web 側チェーンで次を行う (この issue では API 契約 (openapi.yaml) を変えて
-いないため未着手):
+`/api/me` は `memberships[].permissions` として、プロジェクトロールから導出した実効権限を返す。
+web のプロジェクト機能はルート・画面メタデータに必要 Permission キーを宣言し、ルートガードと
+ボタン出し分けをこの配列から導出する。system admin はプロジェクトメンバーシップを持たなくても
+全操作を許可されるため、フロントでも `systemRole=admin` を同じ破壊不能ルールとして扱う。
 
-1. `/api/me` のレスポンスへ実効権限を追加する — openapi.yaml の `Me` スキーマに
-   `permissions: string[]` (グローバル = system admin 由来) と `memberships[].permissions:
-   string[]` (プロジェクトロール由来) を追加し、生成型を再生成する。サーバ側は
-   `AccessPolicy.permissionsOf(role)` (この issue で追加済み) から `Permission.key` を
-   列挙するだけでよい
-2. ルート・画面のメタデータ (staticData 等) に必要 Permission キーを宣言し、
-   ルートガードとボタン出し分けを `/api/me` の permissions から導出する —
-   「フロントの表示制御とサーバの認可判断が同一の権限情報源から導出される」
-   (受け入れ条件) はこれで満たす
-3. UI 出し分けはあくまで UX であり、強制は常にサーバ (PEP) が行う (現行どおり)
+UI 出し分けはあくまで UX であり、強制は常にサーバ (PEP) が行う。
 
 Permission キーは `Permission.key` (例: `business-data.edit`) を唯一の正とし、
 web 側で独自の権限文字列を定義しない。

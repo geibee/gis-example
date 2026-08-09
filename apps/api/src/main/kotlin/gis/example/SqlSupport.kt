@@ -6,6 +6,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -16,6 +17,8 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Types
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.format.DateTimeParseException
 import java.util.UUID
 
 internal data class SqlFragment(
@@ -268,6 +271,35 @@ internal fun readOptionalDate(request: JsonObject, key: String): String? {
         LocalDate.parse(value)
     } catch (exc: IllegalArgumentException) {
         throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key must be YYYY-MM-DD")
+    }
+    return value
+}
+
+internal fun readOptionalBoolean(request: JsonObject, key: String): Boolean? {
+    val element = request[key] ?: return null
+    if (element is JsonNull) return null
+    val primitive = try {
+        element.jsonPrimitive
+    } catch (exc: IllegalArgumentException) {
+        throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key must be a boolean")
+    }
+    return primitive.booleanOrNull
+        ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "$key must be a boolean")
+}
+
+/**
+ * ISO-8601 の日時 (オフセット必須) を読む。レビュー期間のように「いつまで受け付けるか」を
+ * 機械的に比較する値は、ローカル時刻の解釈揺れを避けるためオフセット付きのみ受け付ける
+ */
+internal fun readOptionalTimestamp(request: JsonObject, key: String): String? {
+    val value = readOptionalText(request, key) ?: return null
+    try {
+        OffsetDateTime.parse(value)
+    } catch (exc: DateTimeParseException) {
+        throw ApiException(
+            io.ktor.http.HttpStatusCode.BadRequest,
+            "$key must be an ISO-8601 timestamp with offset (e.g. 2026-08-10T09:00:00+09:00)"
+        )
     }
     return value
 }
