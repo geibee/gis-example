@@ -11,6 +11,6 @@ Web GIS とは異なる在庫・承認 SPA を模した repository-local fixture
 - MapLibre を導入しない consumer でも `@feedback/react` が利用できること
 
 `npm --workspace @feedback/conformance-consumer run test` は API と broker を in-memory mock にして完結する。
-dev server を実サービスへ接続する場合、同一 origin の `/feedback/v1` と
-`/fixture-auth/feedback-token` を人手で用意する必要がある。fixture は実 IdP、実アカウント、実データへ
-自動接続しない。
+standalone composeでは同梱host endpointが署名付きHttpOnly fixture sessionを検証し、client証明書で
+reference brokerを呼ぶ。actorはsessionからだけ取得し、ブラウザが送るuser/role headerは使用しない。
+業務画面はtoken取得より先に描画されるため、Feedback Service停止中もFeedback subtreeだけがunavailableになる。

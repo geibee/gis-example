@@ -1,0 +1,158 @@
+openapi: 3.1.0
+info:
+  title: Feedback Token Exchange API
+  version: 1.0.0
+  description: ホストbackendが検証済みsessionをFeedback専用の短寿命JWTへ交換する契約。
+servers:
+  - url: https://feedback-token-broker.example
+tags:
+  - name: Token Exchange
+    description: ホストbackend専用のtoken交換
+  - name: Discovery
+    description: 署名鍵discovery
+security:
+  - mutualTls: []
+paths:
+  /v1/exchanges:
+    post:
+      tags: [Token Exchange]
+      operationId: exchangeFeedbackToken
+      summary: 検証済みactorと許可されたscopeを短寿命tokenへ交換する
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenExchangeRequest'
+      responses:
+        '200':
+          description: Feedback audience限定JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenExchangeResponse'
+        '400':
+          description: 不正な要求
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: mTLS client認証失敗
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: client上限を越えるscopeまたはpermission
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /.well-known/jwks.json:
+    get:
+      tags: [Discovery]
+      security: []
+      operationId: getFeedbackTokenBrokerJwks
+      summary: Feedback Serviceがexchange tokenを検証する公開鍵
+      responses:
+        '200':
+          description: JSON Web Key Set
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+components:
+  securitySchemes:
+    mutualTls:
+      type: mutualTLS
+  schemas:
+    TokenExchangeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - actor_issuer
+        - actor_sub
+        - feedback_tenant
+        - feedback_application
+        - feedback_environment
+        - feedback_workspace
+        - feedback_permissions
+      properties:
+        actor_issuer:
+          type: string
+          format: uri
+          maxLength: 1000
+        actor_sub:
+          type: string
+          minLength: 1
+          maxLength: 200
+        actor_name:
+          type: string
+          maxLength: 200
+        actor_email:
+          type: string
+          format: email
+          maxLength: 320
+        feedback_tenant:
+          type: string
+          minLength: 1
+          maxLength: 100
+        feedback_application:
+          type: string
+          minLength: 1
+          maxLength: 63
+        feedback_environment:
+          type: string
+          minLength: 1
+          maxLength: 100
+        feedback_workspace:
+          type: string
+          minLength: 1
+          maxLength: 200
+        feedback_permissions:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [feedback.read, feedback.comment, feedback.manage, feedback.admin]
+        requested_lifetime_seconds:
+          type: integer
+          minimum: 30
+          maximum: 300
+    TokenExchangeResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, token_type, expires_in, expires_at]
+      properties:
+        access_token:
+          type: string
+          minLength: 1
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          minimum: 1
+          maximum: 300
+        expires_at:
+          type: integer
+          minimum: 1
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }

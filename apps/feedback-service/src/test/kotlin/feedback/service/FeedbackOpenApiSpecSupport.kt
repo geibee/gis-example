@@ -253,7 +253,7 @@ object FeedbackOpenApiSpecSupport {
 
     private fun findRepositoryRoot(): Path {
         var directory = Path.of("").toAbsolutePath()
-        while (!Files.exists(directory.resolve(".git"))) {
+        while (!Files.isRegularFile(directory.resolve("contracts/feedback/openapi.yaml"))) {
             directory = directory.parent ?: error("repository root が見つかりません")
         }
         return directory

@@ -63,22 +63,23 @@ jobs:
         run: bash scripts/verify.sh
 
   feedback:
-    name: feedback verify (Kotlin)
+    name: feedback extraction verify
     needs: scope
     if: needs.scope.outputs.feedback == '1'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v6
-      - name: 独立 Feedback Service verify
-        env:
-          VERIFY_SCOPE: feedback
-        run: bash scripts/verify.sh
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: allowlist抽出物をclean build/test/image buildする
+        run: bash scripts/check-feedback-extraction.sh
 
   worker:
     name: worker verify (Python)
@@ -205,14 +206,16 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
-      - name: 空の通常 PostgreSQL で独立性を検証
+      - name: clean baselineを空の通常 PostgreSQL で検証
         env:
-          VERIFY_SCOPE: feedback
-          VERIFY_INTEGRATION: "1"
           FEEDBACK_DATABASE_URL: jdbc:postgresql://localhost:5432/feedback
           FEEDBACK_DATABASE_USER: feedback
           FEEDBACK_DATABASE_PASSWORD: feedback
-        run: bash scripts/verify.sh
+        run: |
+          mkdir -p "$RUNNER_TEMP/feedback-system"
+          bash scripts/assemble-feedback-repository --output "$RUNNER_TEMP/feedback-system"
+          cd "$RUNNER_TEMP/feedback-system/apps/feedback-service"
+          ./gradlew integrationTest --no-daemon
 
   web:
     name: web verify (TypeScript)

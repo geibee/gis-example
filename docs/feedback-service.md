@@ -31,7 +31,8 @@ docker compose -f infra/docker-compose.yml --profile feedback up --build
 この profile は通常の `postgres` とは別に `feedback-postgres` (`postgres:16-alpine`) を起動し、
 one-shot `feedback-bootstrap` で local tenant/application/environment/workspace と管理 membership を登録する。
 Feedback API は `http://localhost:8090/feedback/v1`、health は `/health/live` と `/health/ready` で確認できる。
-`/health/ready` は DB/private storage を必須依存、notification backlog/failure を degraded な任意依存として区別する。
+`/health/ready` はDB/Evidence storage/Export storageを個別の必須依存、notification backlog/failureを
+degradedな任意依存として区別する。
 `/metrics` は Prometheus text を返す内部運用 endpoint なので、公開 ingress へ露出させない。
 
 既存 volume を持つ Keycloak は realm import の mapper 追加を自動反映しない。その場合は dev realm を作り直すか、
@@ -57,7 +58,8 @@ application manifest 自体は管理主体の token で `PUT /feedback/v1/applic
 |---|---|---|
 | HTTP API | `/app/bin/feedback-service` | PostgreSQL、OIDC JWKS、private object storage |
 | notification worker | `/app/bin/feedback-notification-worker` | PostgreSQL、`FEEDBACK_WEBHOOK_SIGNING_SECRET` |
-| retention worker | `/app/bin/feedback-retention-worker` | PostgreSQL、private object storage |
+| export worker | `/app/bin/feedback-export-worker` | PostgreSQL、Export storage |
+| retention worker | `/app/bin/feedback-retention-worker` | PostgreSQL、Evidence/Export storage |
 | provisioning | `/app/bin/feedback-bootstrap` | PostgreSQL、`FEEDBACK_BOOTSTRAP_*` |
 
 notification worker は outbox を `FOR UPDATE SKIP LOCKED` で claim し、delivery ID、timestamp、

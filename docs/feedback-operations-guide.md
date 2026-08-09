@@ -2,16 +2,18 @@
 
 ## process と依存
 
-HTTP API、notification worker、export worker、retention worker、bootstrap、legacy migration は同じ image の
-別 command として起動する。通常 PostgreSQL と private object storage だけを要求し、PostGIS と consumer DB は
-要求しない。設定値は `environment-variables.md` を正とし、secret は環境変数から注入する。
+HTTP API、notification worker、export worker、retention worker、bootstrap は同じ image の別 commandとして起動する。
+旧consumerのcopy migrationはホスト側の専用toolとして保持し、独立Service imageへ含めない。toolの台帳とFlyway履歴は
+`feedback_migration` schemaに分離し、対象Service schema versionを固定する。通常 PostgreSQL と
+private object storageだけを要求する。設定値は `environment-variables.md` を正とし、secretは環境変数から注入する。
 
 ## deploy 前後
 
 - backup/restore 手順と対象 database/bucket を人手で確認する。
 - Flyway は version 順に適用し、checksum 不一致を修正 migration で回避しない。
 - `/health/live`、`/health/ready`、`/feedback/v1/capabilities` を確認する。readiness の
-  `database` / `storage` は必須、`notification: degraded` は API を停止しない非同期系の要調査状態として扱う。
+  `database` / `evidenceStorage` / `exportStorage` は必須、`notification: degraded` はAPIを停止しない
+  非同期系の要調査状態として扱う。
 - 内部ネットワーク限定の `/metrics` を収集する。公開 ingress では `/metrics` を遮断する。
 - API error/latency、投稿成功、storage failure、outbox lag、delivery failure、export/purge backlog、tenant 使用量を監視する。
 - notification/export/retention worker は claim lease と retry を利用し、同時実行数を小さく始める。

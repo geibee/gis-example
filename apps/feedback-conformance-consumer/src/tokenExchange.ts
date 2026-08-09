@@ -55,12 +55,21 @@ function scopeKey(scope: FeedbackExchangeScope): string {
 
 /** fixture host backend のmock exchange endpoint。secretをbrowser bundleへ置かない。 */
 export async function browserTokenBroker(scope: FeedbackExchangeScope): Promise<FeedbackExchangeResult> {
-  const response = await fetch("/fixture-auth/feedback-token", {
+  let response = await requestFixtureToken(scope);
+  if (response.status === 401) {
+    const session = await fetch("/fixture-auth/session", { method: "POST", credentials: "include" });
+    if (!session.ok) throw new Error(`fixture sessionの開始に失敗しました (${session.status})`);
+    response = await requestFixtureToken(scope);
+  }
+  if (!response.ok) throw new Error(`token exchange に失敗しました (${response.status})`);
+  return await response.json() as FeedbackExchangeResult;
+}
+
+function requestFixtureToken(scope: FeedbackExchangeScope): Promise<Response> {
+  return fetch("/fixture-auth/feedback-token", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(scope)
   });
-  if (!response.ok) throw new Error(`token exchange に失敗しました (${response.status})`);
-  return await response.json() as FeedbackExchangeResult;
 }

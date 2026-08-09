@@ -291,7 +291,9 @@ internal fun validateNotificationSettings(value: FeedbackNotificationSettings) {
         } catch (_: IllegalArgumentException) {
             badRequest("webhookEndpoint が不正です")
         }
-        if (uri.scheme != "https" || uri.host == null || uri.userInfo != null || uri.fragment != null) {
+        val allowLocalHttp = System.getenv("FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP") == "1"
+        if ((uri.scheme != "https" && !(allowLocalHttp && uri.scheme == "http")) ||
+            uri.host == null || uri.userInfo != null || uri.fragment != null) {
             badRequest("webhookEndpoint は userinfo/fragment を含まない https URL で指定してください")
         }
     }

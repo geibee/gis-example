@@ -48,19 +48,17 @@ classify_paths() {
         NEED_API=1; NEED_WEB=1 ;;
       apps/api/*)
         NEED_API=1 ;;
-      apps/feedback-service/*)
+      apps/feedback-service/* | apps/feedback-admin/* | apps/feedback-conformance-consumer/* | apps/feedback-token-broker-reference/*)
         NEED_FEEDBACK=1 ;;
-      apps/feedback-admin/*)
-        NEED_WEB=1 ;;
-      apps/feedback-conformance-consumer/*)
-        NEED_WEB=1 ;;
       apps/worker-gis/*)
         NEED_WORKER=1 ;;
       apps/web/*)
         NEED_WEB=1 ;;
-      contracts/feedback/*)
+      contracts/feedback/* | packages/feedback-core/*)
         NEED_FEEDBACK=1; NEED_WEB=1 ;;
-      packages/feedback-core/* | packages/feedback-react/* | packages/feedback-maplibre/* | packages/feedback-admin-react/* | packages/feedback-plugin/*)
+      packages/feedback-react/* | packages/feedback-maplibre/* | packages/feedback-admin-react/* | deploy/* | feedback-repository/*)
+        NEED_FEEDBACK=1 ;;
+      packages/feedback-plugin/*)
         NEED_WEB=1 ;;
       infra/postgres/*)
         # DB スキーマ・シードは api / worker の共有契約
@@ -145,22 +143,17 @@ verify_api() {
 # ---------------------------------------------------- feedback-service (Kotlin)
 verify_feedback() {
   log "=== feedback (apps/feedback-service) ==="
-  command -v gradle >/dev/null 2>&1 \
-    || fail "gradle が見つかりません (fail-closed: feedback 変更は gradle なしで合格にできない)"
-
-  pushd apps/feedback-service >/dev/null
   if [[ "$INTEGRATION" == "1" ]]; then
     [[ -n "${FEEDBACK_DATABASE_URL:-}" ]] \
       || fail "FEEDBACK_DATABASE_URL が未設定です (通常 PostgreSQL の独立統合テストに必要)"
     [[ -n "${FEEDBACK_DATABASE_USER:-}" && -n "${FEEDBACK_DATABASE_PASSWORD:-}" ]] \
       || fail "FEEDBACK_DATABASE_USER / FEEDBACK_DATABASE_PASSWORD が未設定です"
-    gradle integrationTest --no-daemon
+    (cd apps/feedback-service && ./gradlew integrationTest --no-daemon)
     log "feedback integration PASS"
   else
-    gradle build --no-daemon
+    bash scripts/verify-feedback.sh
     log "feedback PASS"
   fi
-  popd >/dev/null
 }
 
 # ---------------------------------------------------------------- worker (Python)
@@ -203,25 +196,13 @@ verify_web() {
 
   # lockfile は npm workspaces のルートにあるため、ルートで npm ci を実行する
   npm ci
-  # 独立 Feedback 契約と package 境界。下流 package が declaration を解決できる順で build する。
+  # Web GIS consumerが直接使う外部Feedback契約だけをartifact相当の順でbuildする。
   npm --workspace @feedback/contracts run typecheck
   npm --workspace @feedback/contracts run test
   npm --workspace @feedback/contracts run build
   npm --workspace @feedback/core run typecheck
   npm --workspace @feedback/core run test
   npm --workspace @feedback/core run build
-  npm --workspace @feedback/react run typecheck
-  npm --workspace @feedback/react run test
-  npm --workspace @feedback/react run build
-  npm --workspace @feedback/maplibre run typecheck
-  npm --workspace @feedback/maplibre run test
-  npm --workspace @feedback/maplibre run build
-  npm --workspace @feedback/admin-react run typecheck
-  npm --workspace @feedback/admin-react run test
-  npm --workspace @feedback/admin-react run build
-  bash scripts/check-feedback-contracts.sh
-  bash scripts/check-feedback-packages.sh
-  bash scripts/check-feedback-conformance.sh
   # consumer 1 の互換 package。Phase 4 完了までは既存契約とのドリフトも継続検査する。
   npm --workspace @web-gis/feedback-plugin run typecheck
   npm --workspace @web-gis/feedback-plugin run test
@@ -233,12 +214,6 @@ verify_web() {
   # フロントエンドテスト (vitest run: 単発実行。watch にしない)
   npm --workspace apps/web run test
   npm --workspace apps/web run build
-  npm --workspace @feedback/admin-console run typecheck
-  npm --workspace @feedback/admin-console run test
-  npm --workspace @feedback/admin-console run build
-  npm --workspace @feedback/conformance-consumer run typecheck
-  npm --workspace @feedback/conformance-consumer run test
-  npm --workspace @feedback/conformance-consumer run build
   log "web PASS"
 }
 

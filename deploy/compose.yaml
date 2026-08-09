@@ -1,0 +1,294 @@
+name: feedback-system
+
+x-database-environment: &database-environment
+  FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/feedback
+  FEEDBACK_DATABASE_USER: feedback
+  FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?deploy/.envを作成してください}
+
+x-s3-environment: &s3-environment
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?deploy/.envを作成してください}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?deploy/.envを作成してください}
+  FEEDBACK_EVIDENCE_STORAGE: s3
+  FEEDBACK_S3_BUCKET: feedback-evidence
+  FEEDBACK_S3_REGION: us-east-1
+  FEEDBACK_S3_ENDPOINT_URL: http://minio:9000
+  FEEDBACK_S3_KEY_PREFIX: evidence/
+  FEEDBACK_EXPORT_STORAGE: s3
+  FEEDBACK_EXPORT_S3_BUCKET: feedback-exports
+  FEEDBACK_EXPORT_S3_REGION: us-east-1
+  FEEDBACK_EXPORT_S3_ENDPOINT_URL: http://minio:9000
+  FEEDBACK_EXPORT_KEY_PREFIX: exports/
+
+services:
+  feedback-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: feedback
+      POSTGRES_USER: feedback
+      POSTGRES_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?deploy/.envを作成してください}
+    volumes:
+      - feedback-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U feedback -d feedback"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?deploy/.envを作成してください}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?deploy/.envを作成してください}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - feedback-object-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        mc mb --ignore-existing local/feedback-evidence;
+        mc mb --ignore-existing local/feedback-exports
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?deploy/.envを作成してください}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?deploy/.envを作成してください}
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  oidc:
+    image: quay.io/keycloak/keycloak:26.3.2
+    command: ["start-dev", "--import-realm", "--http-port=8080"]
+    restart: unless-stopped
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: feedback-local-only
+    ports:
+      - "127.0.0.1:8180:8080"
+    volumes:
+      - ./keycloak/realm-feedback.json:/opt/keycloak/data/import/realm-feedback.json:ro
+
+  dev-certificates:
+    image: alpine:3.21
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["apk add --no-cache openssl >/dev/null && /scripts/generate-dev-certificates.sh /certs"]
+    volumes:
+      - ./generate-dev-certificates.sh:/scripts/generate-dev-certificates.sh:ro
+      - feedback-dev-certificates:/certs
+
+  feedback-token-broker-reference:
+    build:
+      context: ..
+      dockerfile: apps/feedback-token-broker-reference/Dockerfile
+    restart: unless-stopped
+    environment:
+      FEEDBACK_BROKER_PORT: "8443"
+      FEEDBACK_BROKER_JWKS_PORT: "8081"
+      FEEDBACK_BROKER_ISSUER: https://feedback-token-broker-reference:8443
+      FEEDBACK_BROKER_AUDIENCE: feedback-service
+      FEEDBACK_BROKER_CLIENT_POLICIES_FILE: /config/token-broker-clients.json
+      FEEDBACK_BROKER_TLS_CERT_FILE: /certs/broker.crt
+      FEEDBACK_BROKER_TLS_KEY_FILE: /certs/broker.key
+      FEEDBACK_BROKER_CLIENT_CA_FILE: /certs/ca.crt
+      FEEDBACK_BROKER_SIGNING_PRIVATE_KEY_FILE: /certs/signing-private.pem
+      FEEDBACK_BROKER_SIGNING_PUBLIC_KEY_FILE: /certs/signing-public.pem
+    ports:
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - ./token-broker-clients.json:/config/token-broker-clients.json:ro
+      - feedback-dev-certificates:/certs:ro
+    depends_on:
+      dev-certificates:
+        condition: service_completed_successfully
+
+  feedback-service:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: [*database-environment, *s3-environment]
+      FEEDBACK_PORT: "8090"
+      FEEDBACK_OIDC_ISSUER: http://localhost:8180/realms/feedback
+      FEEDBACK_OIDC_AUDIENCE: feedback-service
+      FEEDBACK_OIDC_JWKS_URL: http://oidc:8080/realms/feedback/protocol/openid-connect/certs
+      FEEDBACK_TOKEN_EXCHANGE_ISSUER: https://feedback-token-broker-reference:8443
+      FEEDBACK_TOKEN_EXCHANGE_AUDIENCE: feedback-service
+      FEEDBACK_TOKEN_EXCHANGE_JWKS_URL: http://feedback-token-broker-reference:8081/.well-known/jwks.json
+      FEEDBACK_TOKEN_EXCHANGE_ACTOR_ISSUERS: http://localhost:8180/realms/feedback
+      FEEDBACK_ALLOW_INSECURE_HTTP: "1"
+      FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP: "1"
+      FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?deploy/.envを作成してください}
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      feedback-postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      oidc:
+        condition: service_started
+      feedback-token-broker-reference:
+        condition: service_started
+
+  feedback-bootstrap-east:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    command: ["/app/bin/feedback-bootstrap"]
+    restart: "no"
+    environment:
+      <<: *database-environment
+      FEEDBACK_BOOTSTRAP_TENANT_KEY: local
+      FEEDBACK_BOOTSTRAP_TENANT_DISPLAY_NAME: Local
+      FEEDBACK_BOOTSTRAP_APPLICATION_KEY: inventory
+      FEEDBACK_BOOTSTRAP_APPLICATION_DISPLAY_NAME: Inventory Approval
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_KEY: local
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_BASE_URL: http://localhost:5175
+      FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS: http://localhost:5174,http://localhost:5175
+      FEEDBACK_BOOTSTRAP_EXTERNAL_WORKSPACE_KEY: east
+      FEEDBACK_BOOTSTRAP_WORKSPACE_DISPLAY_NAME: East
+      FEEDBACK_BOOTSTRAP_ISSUER: http://localhost:8180/realms/feedback
+      FEEDBACK_BOOTSTRAP_SUBJECT: 10000000-0000-4000-8000-000000000001
+      FEEDBACK_BOOTSTRAP_EMAIL: feedback-admin@example.invalid
+      FEEDBACK_BOOTSTRAP_DISPLAY_NAME: Feedback Admin
+      FEEDBACK_BOOTSTRAP_PERMISSIONS: feedback.read,feedback.comment,feedback.manage,feedback.admin
+    depends_on:
+      feedback-postgres:
+        condition: service_healthy
+
+  feedback-bootstrap-west:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    command: ["/app/bin/feedback-bootstrap"]
+    restart: "no"
+    environment:
+      <<: *database-environment
+      FEEDBACK_BOOTSTRAP_TENANT_KEY: local
+      FEEDBACK_BOOTSTRAP_TENANT_DISPLAY_NAME: Local
+      FEEDBACK_BOOTSTRAP_APPLICATION_KEY: inventory
+      FEEDBACK_BOOTSTRAP_APPLICATION_DISPLAY_NAME: Inventory Approval
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_KEY: local
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_BASE_URL: http://localhost:5175
+      FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS: http://localhost:5174,http://localhost:5175
+      FEEDBACK_BOOTSTRAP_EXTERNAL_WORKSPACE_KEY: west
+      FEEDBACK_BOOTSTRAP_WORKSPACE_DISPLAY_NAME: West
+      FEEDBACK_BOOTSTRAP_ISSUER: http://localhost:8180/realms/feedback
+      FEEDBACK_BOOTSTRAP_SUBJECT: 10000000-0000-4000-8000-000000000001
+      FEEDBACK_BOOTSTRAP_EMAIL: feedback-admin@example.invalid
+      FEEDBACK_BOOTSTRAP_DISPLAY_NAME: Feedback Admin
+      FEEDBACK_BOOTSTRAP_PERMISSIONS: feedback.read,feedback.comment,feedback.manage,feedback.admin
+    depends_on:
+      feedback-bootstrap-east:
+        condition: service_completed_successfully
+
+  feedback-notification-worker:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    command: ["/app/bin/feedback-notification-worker"]
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      FEEDBACK_WEBHOOK_SIGNING_SECRET: ${FEEDBACK_WEBHOOK_SIGNING_SECRET:?deploy/.envを作成してください}
+      FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?deploy/.envを作成してください}
+      FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP: "1"
+    depends_on:
+      feedback-bootstrap-west:
+        condition: service_completed_successfully
+
+  feedback-export-worker:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    command: ["/app/bin/feedback-export-worker"]
+    restart: unless-stopped
+    environment:
+      <<: [*database-environment, *s3-environment]
+    depends_on:
+      feedback-bootstrap-west:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+
+  feedback-retention-worker:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    command: ["/app/bin/feedback-retention-worker"]
+    restart: unless-stopped
+    environment:
+      <<: [*database-environment, *s3-environment]
+      FEEDBACK_RETENTION_POLL_MS: "1000"
+    depends_on:
+      feedback-bootstrap-west:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+
+  feedback-admin:
+    build:
+      context: ..
+      dockerfile: apps/feedback-admin/Dockerfile
+      args:
+        VITE_FEEDBACK_API_BASE: http://localhost:8090/feedback/v1
+        VITE_FEEDBACK_ADMIN_OIDC_AUTHORITY: http://localhost:8180/realms/feedback
+        VITE_FEEDBACK_ADMIN_OIDC_CLIENT_ID: feedback-admin
+        VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI: http://localhost:5174/
+        FEEDBACK_ADMIN_APPLICATION: inventory
+        FEEDBACK_ADMIN_ENVIRONMENT: local
+        FEEDBACK_ADMIN_WORKSPACE: east
+        CSP_CONNECT_SRC_EXTRA: http://localhost:8090 http://localhost:8180
+    ports:
+      - "127.0.0.1:5174:80"
+    depends_on:
+      feedback-service:
+        condition: service_started
+
+  feedback-conformance-consumer:
+    build:
+      context: ..
+      dockerfile: apps/feedback-conformance-consumer/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      FIXTURE_SESSION_SIGNING_SECRET: ${FIXTURE_SESSION_SIGNING_SECRET:?deploy/.envを作成してください}
+      FEEDBACK_WEBHOOK_SIGNING_SECRET: ${FEEDBACK_WEBHOOK_SIGNING_SECRET:?deploy/.envを作成してください}
+      FIXTURE_ACTOR_ISSUER: http://localhost:8180/realms/feedback
+      FIXTURE_ACTOR_SUBJECT: 10000000-0000-4000-8000-000000000001
+      FIXTURE_ACTOR_DISPLAY_NAME: Feedback Admin
+      FIXTURE_ACTOR_EMAIL: feedback-admin@example.invalid
+      FIXTURE_FEEDBACK_TENANT: local
+      FEEDBACK_BROKER_URL: https://feedback-token-broker-reference:8443/v1/exchanges
+      FEEDBACK_BROKER_CLIENT_CERT_FILE: /certs/conformance-consumer.crt
+      FEEDBACK_BROKER_CLIENT_KEY_FILE: /certs/conformance-consumer.key
+      FEEDBACK_BROKER_CA_FILE: /certs/ca.crt
+    ports:
+      - "127.0.0.1:5175:8080"
+    volumes:
+      - feedback-dev-certificates:/certs:ro
+    depends_on:
+      feedback-service:
+        condition: service_started
+      feedback-token-broker-reference:
+        condition: service_started
+
+volumes:
+  feedback-postgres-data:
+  feedback-object-data:
+  feedback-dev-certificates:

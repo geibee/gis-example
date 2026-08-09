@@ -1,0 +1,13 @@
+.git
+.github
+**/node_modules
+**/dist
+**/server-dist
+**/build
+**/.gradle
+**/.kotlin
+coverage
+*.log
+**/.env
+**/.env.*
+!**/.env.example

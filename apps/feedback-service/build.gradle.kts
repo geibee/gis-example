@@ -41,11 +41,27 @@ val exportWorkerStartScripts by tasks.registering(CreateStartScripts::class) {
     classpath = tasks.startScripts.get().classpath
 }
 
-val legacyMigrationStartScripts by tasks.registering(CreateStartScripts::class) {
-    applicationName = "feedback-legacy-migration"
-    mainClass.set("feedback.service.LegacyMigrationMainKt")
-    outputDir = layout.buildDirectory.dir("scripts-legacy-migration").get().asFile
-    classpath = tasks.startScripts.get().classpath
+// 旧Web GISコピーCLIはGIS repositoryだけの別配布物にし、ServiceのinstallDist/imageへ混ぜない。
+if (file("src/main/kotlin/feedback/service/LegacyMigrationMain.kt").isFile) {
+    val legacyMigrationStartScripts by tasks.registering(CreateStartScripts::class) {
+        applicationName = "feedback-legacy-migration"
+        mainClass.set("feedback.service.LegacyMigrationMainKt")
+        outputDir = layout.buildDirectory.dir("scripts-legacy-migration").get().asFile
+        classpath = tasks.startScripts.get().classpath
+    }
+    distributions.create("legacyMigration") {
+        distributionBaseName.set("feedback-legacy-migration")
+        contents {
+            into("bin") {
+                from(legacyMigrationStartScripts)
+                filePermissions { unix("rwxr-xr-x") }
+            }
+            into("lib") {
+                from(tasks.jar)
+                from(configurations.runtimeClasspath)
+            }
+        }
+    }
 }
 
 distributions {
@@ -65,10 +81,6 @@ distributions {
             }
             into("bin") {
                 from(exportWorkerStartScripts)
-                filePermissions { unix("rwxr-xr-x") }
-            }
-            into("bin") {
-                from(legacyMigrationStartScripts)
                 filePermissions { unix("rwxr-xr-x") }
             }
         }

@@ -2,7 +2,7 @@
 # 独立 Feedback API / JSON Schema / 生成型 / package 境界のドリフト検査。
 set -euo pipefail
 
-ROOT=$(git rev-parse --show-toplevel)
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/.." && pwd))
 cd "$ROOT"
 
 OPENAPI="contracts/feedback/openapi.yaml"
@@ -30,6 +30,7 @@ if ! diff -u "$KOTLIN_GENERATED" "$kotlin_tmp"; then
 fi
 
 npx --no-install spectral lint --ruleset .spectral.yaml "$OPENAPI"
+npx --no-install spectral lint --ruleset .spectral.yaml contracts/feedback/token-exchange.openapi.yaml
 
 if grep -qE '^  /api/' "$OPENAPI"; then
   echo "[feedback-contract] FAIL: 専用契約にWeb GISの /api pathが混入しています" >&2

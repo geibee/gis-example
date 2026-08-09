@@ -1,0 +1,27 @@
+{
+  "name": "feedback-system",
+  "version": "1.0.0-alpha.1",
+  "private": true,
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "workspaces": [
+    "apps/feedback-admin",
+    "apps/feedback-token-broker-reference",
+    "apps/feedback-conformance-consumer",
+    "contracts/feedback",
+    "packages/feedback-core",
+    "packages/feedback-react",
+    "packages/feedback-maplibre",
+    "packages/feedback-admin-react"
+  ],
+  "scripts": {
+    "build": "npm run build:packages && npm --workspace @feedback/admin-console run build && npm --workspace @feedback/token-broker-reference run build && npm --workspace @feedback/conformance-consumer run build",
+    "build:packages": "npm --workspace @feedback/contracts run build && npm --workspace @feedback/core run build && npm --workspace @feedback/react run build && npm --workspace @feedback/maplibre run build && npm --workspace @feedback/admin-react run build",
+    "test": "bash scripts/verify-feedback.sh",
+    "compose:config": "docker compose --env-file deploy/.env.example -f deploy/compose.yaml config --quiet"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "^6.16.1"
+  }
+}

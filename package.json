@@ -4,6 +4,7 @@
   "workspaces": [
     "apps/web",
     "apps/feedback-admin",
+    "apps/feedback-token-broker-reference",
     "apps/feedback-conformance-consumer",
     "contracts/feedback",
     "packages/feedback-core",

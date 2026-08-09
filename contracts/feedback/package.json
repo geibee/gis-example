@@ -8,6 +8,7 @@
     "dist",
     "kotlin",
     "openapi.yaml",
+    "token-exchange.openapi.yaml",
     "schemas",
     "README.md",
     "CHANGELOG.md"
@@ -21,6 +22,7 @@
       "import": "./dist/index.js"
     },
     "./openapi.yaml": "./openapi.yaml",
+    "./token-exchange.openapi.yaml": "./token-exchange.openapi.yaml",
     "./schemas/*": "./schemas/*"
   },
   "publishConfig": {

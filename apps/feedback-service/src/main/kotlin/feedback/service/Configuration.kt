@@ -141,16 +141,34 @@ data class EvidenceStorageSettings(
 }
 
 data class ExportStorageSettings(
+    val mode: String,
     val localDirectory: Path,
+    val bucket: String?,
+    val region: String?,
+    val endpointUrl: String?,
     val keyPrefix: String
 ) {
     companion object {
-        fun fromEnv(): ExportStorageSettings = ExportStorageSettings(
-            localDirectory = Path.of(System.getenv("FEEDBACK_EXPORT_DIR") ?: "/data/exports"),
-            keyPrefix = (System.getenv("FEEDBACK_EXPORT_KEY_PREFIX") ?: "exports/").let {
-                if (it.endsWith('/')) it else "$it/"
+        fun fromEnv(): ExportStorageSettings {
+            val mode = System.getenv("FEEDBACK_EXPORT_STORAGE") ?: "local"
+            require(mode in setOf("local", "s3")) {
+                "FEEDBACK_EXPORT_STORAGE は local または s3 を指定してください"
             }
-        )
+            val bucket = System.getenv("FEEDBACK_EXPORT_S3_BUCKET")
+            if (mode == "s3" && bucket.isNullOrBlank()) {
+                error("FEEDBACK_EXPORT_STORAGE=s3 では FEEDBACK_EXPORT_S3_BUCKET が必須です")
+            }
+            return ExportStorageSettings(
+                mode = mode,
+                localDirectory = Path.of(System.getenv("FEEDBACK_EXPORT_DIR") ?: "/data/exports"),
+                bucket = bucket,
+                region = System.getenv("FEEDBACK_EXPORT_S3_REGION"),
+                endpointUrl = System.getenv("FEEDBACK_EXPORT_S3_ENDPOINT_URL"),
+                keyPrefix = (System.getenv("FEEDBACK_EXPORT_KEY_PREFIX") ?: "exports/").let {
+                    if (it.endsWith('/')) it else "$it/"
+                }
+            )
+        }
     }
 }
 

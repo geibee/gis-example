@@ -24,6 +24,8 @@ PROD_DOCKERFILES=(
   apps/api/Dockerfile
   apps/feedback-service/Dockerfile
   apps/feedback-admin/Dockerfile
+  apps/feedback-token-broker-reference/Dockerfile
+  apps/feedback-conformance-consumer/Dockerfile
   apps/worker-gis/Dockerfile
   apps/web/Dockerfile
 )

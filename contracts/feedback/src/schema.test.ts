@@ -94,4 +94,27 @@ describe("Feedback JSON Schema", () => {
     expect(validate(event), JSON.stringify(validate.errors)).toBe(true);
     expect(validate({ ...event, eventType: "feedback.unknown.v1" })).toBe(false);
   });
+
+  it("token exchange JWTはactorとFeedback scope claimを必須にする", () => {
+    const validate = validator("token-exchange-jwt");
+    const claims = {
+      iss: "https://broker.example",
+      sub: "user-1",
+      aud: "feedback-service",
+      iat: 1000,
+      exp: 1300,
+      jti: "00000000-0000-4000-8000-000000000001",
+      actor_issuer: "https://id.example",
+      actor_sub: "user-1",
+      feedback_tenant: "tenant-1",
+      feedback_application: "inventory",
+      feedback_environment: "production",
+      feedback_workspace: "east",
+      feedback_permissions: ["feedback.read", "feedback.comment"]
+    };
+    expect(validate(claims), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({ ...claims, feedback_permissions: ["host.admin"] })).toBe(false);
+    const { actor_sub: _actorSubject, ...withoutActor } = claims;
+    expect(validate(withoutActor)).toBe(false);
+  });
 });

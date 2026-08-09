@@ -2,15 +2,13 @@ FROM node:22-alpine AS build
 
 WORKDIR /repo
 COPY package.json package-lock.json ./
-COPY apps/web/package.json apps/web/package.json
 COPY apps/feedback-admin/package.json apps/feedback-admin/package.json
 COPY contracts/feedback/package.json contracts/feedback/package.json
 COPY packages/feedback-core/package.json packages/feedback-core/package.json
-COPY packages/feedback-react/package.json packages/feedback-react/package.json
-COPY packages/feedback-maplibre/package.json packages/feedback-maplibre/package.json
 COPY packages/feedback-admin-react/package.json packages/feedback-admin-react/package.json
-COPY packages/feedback-plugin/package.json packages/feedback-plugin/package.json
-RUN npm ci
+RUN npm ci --ignore-scripts --no-audit --no-fund --workspace @feedback/contracts --workspace @feedback/core \
+    --workspace @feedback/admin-react --workspace @feedback/admin-console \
+    --include-workspace-root=false
 COPY apps/feedback-admin apps/feedback-admin
 COPY contracts/feedback contracts/feedback
 COPY packages/feedback-core packages/feedback-core

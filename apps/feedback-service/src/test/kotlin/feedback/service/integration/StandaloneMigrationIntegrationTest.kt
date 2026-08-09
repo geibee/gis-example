@@ -104,8 +104,27 @@ class StandaloneMigrationIntegrationTest {
     }
 
     @Test
-    fun `V1既存schemaをV4へupgradeするとclean適用と収束する`() {
+    fun `段階migrationと独立clean baselineのどちらも収束する`() {
         val cleanSignature = schemaSignature()
+        val migrationDirectory = Path.of("src", "main", "resources", "db", "migration")
+        val isCleanBaseline = Files.list(migrationDirectory).use { files ->
+            files.filter { it.fileName.toString().matches(Regex("V[0-9]+__.*\\.sql")) }.count() == 1L
+        }
+        if (isCleanBaseline) {
+            database.dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "SELECT 1 FROM information_schema.columns " +
+                        "WHERE table_schema = 'feedback' AND table_name = 'application_environments' " +
+                        "AND column_name = 'allowed_issuers'"
+                ).use { statement -> statement.executeQuery().use { assertTrue(it.next()) } }
+                connection.prepareStatement(
+                    "SELECT 1 FROM information_schema.tables " +
+                        "WHERE table_schema = 'feedback' AND table_name IN ('legacy_migration_runs', 'legacy_migration_entities')"
+                ).use { statement -> statement.executeQuery().use { assertFalse(it.next()) } }
+            }
+            assertTrue(cleanSignature.isNotEmpty())
+            return
+        }
         database.dataSource.connection.use { connection ->
             connection.createStatement().use { it.execute("DROP SCHEMA feedback CASCADE") }
         }
@@ -744,12 +763,20 @@ class StandaloneMigrationIntegrationTest {
             application {
                 install(ContentNegotiation) { json(serviceJson) }
                 routing {
-                    healthRoutes(database, LocalEvidenceStorage(temporaryDirectory.resolve("health")), "evidence/", metrics)
+                    healthRoutes(
+                        database = database,
+                        evidenceStorage = LocalEvidenceStorage(temporaryDirectory.resolve("health-evidence")),
+                        evidencePrefix = "evidence/",
+                        exportStorage = LocalEvidenceStorage(temporaryDirectory.resolve("health-exports")),
+                        exportPrefix = "exports/",
+                        metrics = metrics
+                    )
                 }
             }
             val ready = client.get("/health/ready")
             assertEquals(HttpStatusCode.OK, ready.status)
-            assertContains(ready.bodyAsText(), "\"storage\":\"available\"")
+            assertContains(ready.bodyAsText(), "\"evidenceStorage\":\"available\"")
+            assertContains(ready.bodyAsText(), "\"exportStorage\":\"available\"")
             assertContains(ready.bodyAsText(), "\"notification\":\"degraded\"")
             val rendered = client.get("/metrics")
             assertEquals(HttpStatusCode.OK, rendered.status)
@@ -765,11 +792,21 @@ class StandaloneMigrationIntegrationTest {
         testApplication {
             application {
                 install(ContentNegotiation) { json(serviceJson) }
-                routing { healthRoutes(database, UnavailableStorage, "evidence/", metrics) }
+                routing {
+                    healthRoutes(
+                        database = database,
+                        evidenceStorage = UnavailableStorage,
+                        evidencePrefix = "evidence/",
+                        exportStorage = LocalEvidenceStorage(temporaryDirectory.resolve("health-exports-2")),
+                        exportPrefix = "exports/",
+                        metrics = metrics
+                    )
+                }
             }
             val unavailable = client.get("/health/ready")
             assertEquals(HttpStatusCode.ServiceUnavailable, unavailable.status)
-            assertContains(unavailable.bodyAsText(), "\"storage\":\"unavailable\"")
+            assertContains(unavailable.bodyAsText(), "\"evidenceStorage\":\"unavailable\"")
+            assertContains(unavailable.bodyAsText(), "\"exportStorage\":\"available\"")
         }
     }
 
@@ -863,7 +900,11 @@ class StandaloneMigrationIntegrationTest {
                         keyPrefix = "evidence/"
                     ),
                     exportStorage = ExportStorageSettings(
+                        mode = "local",
                         localDirectory = temporaryDirectory.resolve("exports"),
+                        bucket = null,
+                        region = null,
+                        endpointUrl = null,
                         keyPrefix = "exports/"
                     )
                 )

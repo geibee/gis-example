@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://feedback.example/contracts/token-exchange-jwt.schema.json",
+  "title": "Feedback token exchange JWT claims",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "iss", "sub", "aud", "iat", "exp", "jti", "actor_issuer", "actor_sub",
+    "feedback_tenant", "feedback_application", "feedback_environment", "feedback_workspace",
+    "feedback_permissions"
+  ],
+  "properties": {
+    "iss": { "type": "string", "format": "uri" },
+    "sub": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "aud": { "type": "string", "minLength": 1 },
+    "iat": { "type": "integer" },
+    "exp": { "type": "integer" },
+    "jti": { "type": "string", "format": "uuid" },
+    "actor_issuer": { "type": "string", "format": "uri" },
+    "actor_sub": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "actor_name": { "type": "string", "maxLength": 200 },
+    "actor_email": { "type": "string", "format": "email", "maxLength": 320 },
+    "feedback_tenant": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "feedback_application": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "feedback_environment": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "feedback_workspace": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "feedback_permissions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["feedback.read", "feedback.comment", "feedback.manage", "feedback.admin"]
+      }
+    }
+  }
+}
