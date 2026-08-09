@@ -267,7 +267,7 @@ class LegacyFeedbackMigration(
     private fun validateAppliedRun(runId: String, expectedChecksum: String) {
         database.dataSource.connection.use { connection ->
             connection.prepareStatement(
-                "SELECT source_checksum, status FROM feedback.legacy_migration_runs WHERE id = ?::uuid"
+                "SELECT source_checksum, status FROM feedback_migration.legacy_migration_runs WHERE id = ?::uuid"
             ).use { statement ->
                 statement.setString(1, runId)
                 statement.executeQuery().use { result ->
@@ -286,7 +286,7 @@ class LegacyFeedbackMigration(
         }
         val objectKeys = database.transaction { connection ->
             val status = connection.prepareStatement(
-                "SELECT status FROM feedback.legacy_migration_runs WHERE id = ?::uuid FOR UPDATE"
+                "SELECT status FROM feedback_migration.legacy_migration_runs WHERE id = ?::uuid FOR UPDATE"
             ).use { statement ->
                 statement.setString(1, runId)
                 statement.executeQuery().use { result -> require(result.next()) { "migration run がありません" }; result.getString(1) }
@@ -302,7 +302,7 @@ class LegacyFeedbackMigration(
                 ).use { statement -> statement.setString(1, workspaceId); statement.executeUpdate() }
             }
             connection.prepareStatement(
-                "UPDATE feedback.legacy_migration_runs SET status = 'rolled-back', rolled_back_at = now() WHERE id = ?::uuid"
+                "UPDATE feedback_migration.legacy_migration_runs SET status = 'rolled-back', rolled_back_at = now() WHERE id = ?::uuid"
             ).use { statement -> statement.setString(1, runId); statement.executeUpdate() }
             keys
         }
@@ -383,7 +383,7 @@ class LegacyFeedbackMigration(
         val scope = resolveScope(snapshot)
         connection.prepareStatement(
             """
-            INSERT INTO feedback.legacy_migration_runs (
+            INSERT INTO feedback_migration.legacy_migration_runs (
                 id, source_system, source_checksum, application_id, environment_id, workspace_id, status, summary
             ) VALUES (?::uuid, ?, ?, ?::uuid, ?::uuid, ?::uuid, 'applied', ?::jsonb)
             """.trimIndent()
@@ -695,7 +695,7 @@ class LegacyFeedbackMigration(
             targets.forEach { (table, ids) ->
                 require(scalarCount(connection, "feedback.$table", "id", ids) == 0L) { "$table に同じ ID が既にあります" }
             }
-            require(scalarCount(connection, "feedback.legacy_migration_runs", "id", listOf(runId)) == 0L) {
+            require(scalarCount(connection, "feedback_migration.legacy_migration_runs", "id", listOf(runId)) == 0L) {
                 "migration run ID が既にあります"
             }
             snapshot.evidence.forEach { evidence ->
@@ -848,7 +848,7 @@ private fun compareDescendantCount(
 
 private fun track(connection: Connection, runId: String, type: String, key: String) {
     connection.prepareStatement(
-        "INSERT INTO feedback.legacy_migration_entities (run_id, entity_type, entity_key) VALUES (?::uuid, ?, ?)"
+        "INSERT INTO feedback_migration.legacy_migration_entities (run_id, entity_type, entity_key) VALUES (?::uuid, ?, ?)"
     ).use { statement ->
         statement.setString(1, runId); statement.setString(2, type); statement.setString(3, key); statement.executeUpdate()
     }
@@ -856,7 +856,7 @@ private fun track(connection: Connection, runId: String, type: String, key: Stri
 
 private fun migrationEntities(connection: Connection, runId: String, type: String): List<String> =
     connection.prepareStatement(
-        "SELECT entity_key FROM feedback.legacy_migration_entities WHERE run_id = ?::uuid AND entity_type = ?"
+        "SELECT entity_key FROM feedback_migration.legacy_migration_entities WHERE run_id = ?::uuid AND entity_type = ?"
     ).use { statement ->
         statement.setString(1, runId); statement.setString(2, type)
         statement.executeQuery().use { result -> buildList { while (result.next()) add(result.getString(1)) } }

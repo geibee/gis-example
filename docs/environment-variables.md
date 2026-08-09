@@ -141,13 +141,17 @@ Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flywa
 | `FEEDBACK_S3_REGION` | 任意 | AWS SDK 既定チェーン | タスク定義 |
 | `FEEDBACK_S3_ENDPOINT_URL` | 任意 (**dev の S3 互換 storage 専用**) | なし | — |
 | `FEEDBACK_S3_KEY_PREFIX` | 任意 | `evidence/` | タスク定義 |
-| `FEEDBACK_EXPORT_DIR` | API/export/retention worker で任意 | `/data/exports` | タスク定義 / private volume |
-| `FEEDBACK_EXPORT_KEY_PREFIX` | export worker で任意 | `exports/` | タスク定義 |
+| `FEEDBACK_EXPORT_STORAGE` | 任意 (**本番は `s3`**) | `local` | タスク定義 |
+| `FEEDBACK_EXPORT_DIR` | `local` のとき任意 | `/data/exports` | タスク定義 / private volume |
+| `FEEDBACK_EXPORT_S3_BUCKET` | `s3` のとき**必須** | なし | タスク定義 / SSM |
+| `FEEDBACK_EXPORT_S3_REGION` | 任意 | AWS SDK 既定チェーン | タスク定義 |
+| `FEEDBACK_EXPORT_S3_ENDPOINT_URL` | 任意 (**dev の S3 互換 storage 専用**) | なし | — |
+| `FEEDBACK_EXPORT_KEY_PREFIX` | 任意 | `exports/` | タスク定義 |
 | `FEEDBACK_EXPORT_POLL_MS` | export worker で任意 | `2000` | タスク定義 |
 | `FEEDBACK_NOTIFICATION_POLL_MS` | notification worker で任意 | `2000` | タスク定義 |
 | `FEEDBACK_NOTIFICATION_MAX_ATTEMPTS` | notification worker で任意 | `5` | タスク定義 |
-| `FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP` | 任意 (**ローカル fixture 専用**) | 未設定 (`https` と public address のみ) | —。本番で `1` にしない |
-| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | notification worker では**必須** | なし (compose が注入) | **Secrets Manager** |
+| `FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP` | 任意 (**ローカル fixture 専用**) | 未設定 (`https` と public address のみ) | —。APIとworkerの双方へ設定し、本番で `1` にしない |
+| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | notification worker では**必須** | なし (32文字以上、compose が注入) | **Secrets Manager** |
 | `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | API/notification worker で**必須** | なし (base64 で 32 byte) | **Secrets Manager** |
 | `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY_PREVIOUS` | key rotation 中だけ任意 | なし (base64 で 32 byte) | **Secrets Manager** |
 | `FEEDBACK_RETENTION_POLL_MS` | retention worker で任意 | `3600000` | タスク定義 |
@@ -157,14 +161,29 @@ Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flywa
 origin を上書きしない。S3 認証は AWS SDK の既定チェーン (本番は ECS タスクロール) を使う。
 API、notification worker、export worker、retention worker は同じ image から、それぞれ
 `bin/feedback-service`、`bin/feedback-notification-worker`、`bin/feedback-export-worker`、
-`bin/feedback-retention-worker` を command で選ぶ。export file は認可付き download API だけで配信し、
-API、export worker、retention worker が同じ private volume を共有する。
+`bin/feedback-retention-worker` を command で選ぶ。export file は認可付き download API だけで配信する。
+local modeはAPI、export worker、retention workerでprivate volumeを共有し、分散配備は専用S3 bucketを共有する。
 
 exchange token は別 issuer/audience の署名・`iat`/`exp` と最大 lifetime を検証し、
 `actor_issuer` / `actor_sub`、`feedback_tenant/application/environment/workspace`、
 `feedback_permissions` claim を必須とする。実効権限は DB membership と token permission の積集合であり、
 token scope 外の resource は許可しない。broker でのホスト session 検証・mTLS・token 発行鍵の保護は
 broker 側の責務であり、業務 API token を Feedback Service へ転送しない。
+
+## token broker reference
+
+`POST /v1/exchanges` はmTLS必須。次のファイル設定にsecretや秘密鍵の内容を直接埋め込まず、
+orchestratorのsecret mountを使用する。
+
+| 名称 | 必須 | 説明 |
+|---|---|---|
+| `FEEDBACK_BROKER_ISSUER` / `FEEDBACK_BROKER_AUDIENCE` | 必須 | 発行JWTのissuer/audience |
+| `FEEDBACK_BROKER_TLS_CERT_FILE` / `FEEDBACK_BROKER_TLS_KEY_FILE` | 必須 | broker server証明書と秘密鍵 |
+| `FEEDBACK_BROKER_CLIENT_CA_FILE` | 必須 | mTLS clientを検証するCA |
+| `FEEDBACK_BROKER_SIGNING_PRIVATE_KEY_FILE` | 必須 | JWT署名秘密鍵 |
+| `FEEDBACK_BROKER_SIGNING_PUBLIC_KEY_FILE` | 任意 | JWKS公開鍵。未指定時は秘密鍵から導出 |
+| `FEEDBACK_BROKER_CLIENT_POLICIES_FILE` | 必須 | mTLS identity別scope上限allowlist |
+| `FEEDBACK_BROKER_MAX_LIFETIME_SECONDS` | 任意 | `300`、最大300秒 |
 
 Phase 3 の管理 UI/API が完成するまで、初期 tenant/application/environment/workspace/membership は
 one-shot の `bin/feedback-bootstrap` で登録する。次の変数は bootstrap command だけが読む。

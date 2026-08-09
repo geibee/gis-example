@@ -36,12 +36,18 @@
 - 新 `feedbackThread` と旧 `threadId` の permalink 互換 resolver、manifest 由来 deep link
 - v1 利用時の Web GIS 管理 route を独立 Admin Console link へ置換
 - `feedback-legacy-migration`: 匿名 snapshot の dry-run/copy/reconcile/rollback。session/thread/message/history/
-  evidence/audit/outbox を写し、ID、display number、SHA-256、個別の evidence expiry を維持する
+  evidence/audit/outbox を写し、ID、display number、SHA-256、個別の evidence expiry を維持する。GIS側の
+  `feedback_migration` schema/Flyway履歴だけを使用し、対象Feedback schema version 4以外は拒否する
 - `apps/feedback-conformance-consumer`: native History router、在庫・承認画面、mock token exchange、site workspace を
   使う consumer 2。Web GIS 固有依存なしで投稿、DOM pin、deep link、workspace state 分離を検証する
 - 互換 matrix、upgrade、operations、security guide と consumer 2 fail-closed dependency guard
 - tenant/principal/IP rate limit、環境別 issuer allowlist、監査 mask、request ID の監査/log/outbox 相関、
   readiness の必須/任意依存分離、Prometheus 形式の運用 metric、SDK capture/post/unavailable telemetry
+- allowlistから独立repository形状を作る `assemble-feedback-repository` とclean抽出ゲート、Gradle wrapper、
+  standalone package/lockfile/compose、PostgreSQL 16 + MinIO + local OIDCの自己完結構成
+- 言語非依存token exchange OpenAPI/JWT schema、mTLS client別scope上限、300秒以内のJWT/JWKSを提供する
+  reference broker、署名付きHttpOnly fixture sessionを検証してbrokerを呼ぶconsumer host endpoint
+- Exportのlocal/S3共通storage adapter化と、DB/Evidence/Exportを分けたreadiness
 
 ## 互換期間として意図的に残しているもの
 
@@ -54,9 +60,10 @@
 これらを新 package へ見せないため、`scripts/check-feedback-contracts.sh` が
 `@web-gis`、`apps/api/openapi.yaml`、`projectId` の混入と React/MapLibre の逆依存を fail-closed で検査する。
 
-## Phase 2 の外部接続として残っているもの
+## 外部作業として残っているもの
 
-- token exchange broker 自体のホスト session 検証・mTLS・短寿命 token 発行 (Service 側の token 検証は実装済み)
+- 実ホストbackendへのsession検証実装の移植、実PKI/client policy、実OIDC issuerを使うbroker deployment
+- npm互換registry/OCI registryの作成と、同一version/tag artifactのpublish
 
 Phase 0〜5 のリポジトリ内実装は完了している。実データ copy、旧 API の read-only 化、traffic 切替、旧 DB/object
 の削除、remote repository/registry/実 consumer への公開は未実施であり、外部依存文書の個別承認後に行う。

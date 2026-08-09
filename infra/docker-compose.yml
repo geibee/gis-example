@@ -57,7 +57,8 @@ services:
     profiles: ["feedback"]
     restart: unless-stopped
     build:
-      context: ../apps/feedback-service
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
     environment:
       FEEDBACK_PORT: "8090"
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -88,7 +89,8 @@ services:
     profiles: ["feedback"]
     restart: "no"
     build:
-      context: ../apps/feedback-service
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
     command: ["/app/bin/feedback-bootstrap"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -116,7 +118,8 @@ services:
     profiles: ["feedback"]
     restart: unless-stopped
     build:
-      context: ../apps/feedback-service
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
     command: ["/app/bin/feedback-notification-worker"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -132,7 +135,8 @@ services:
     profiles: ["feedback"]
     restart: unless-stopped
     build:
-      context: ../apps/feedback-service
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
     command: ["/app/bin/feedback-export-worker"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -149,7 +153,8 @@ services:
     profiles: ["feedback"]
     restart: unless-stopped
     build:
-      context: ../apps/feedback-service
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
     command: ["/app/bin/feedback-retention-worker"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}

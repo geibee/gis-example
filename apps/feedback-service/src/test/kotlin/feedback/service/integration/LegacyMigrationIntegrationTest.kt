@@ -36,9 +36,11 @@ class LegacyMigrationIntegrationTest {
             )
         )
         database.dataSource.connection.use { connection ->
+            connection.createStatement().use { it.execute("DROP SCHEMA IF EXISTS feedback_migration CASCADE") }
             connection.createStatement().use { it.execute("DROP SCHEMA IF EXISTS feedback CASCADE") }
         }
         database.migrate()
+        LegacyMigrationDatabase.prepare(database)
         provisionMigrationScope()
     }
 
@@ -47,6 +49,10 @@ class LegacyMigrationIntegrationTest {
 
     @Test
     fun `匿名fixtureをdry-run copy reconcile rollbackできる`() {
+        assertEquals(1, countQuery(
+            "SELECT count(*) FROM feedback_migration.flyway_schema_history WHERE type = 'SQL' AND success"
+        ))
+        assertEquals(0, count("feedback_migration.legacy_migration_runs"))
         val snapshot = migrationSnapshot()
         LocalEvidenceStorage(temporaryDirectory).use { storage ->
             val migration = LegacyFeedbackMigration(database, storage)
@@ -122,6 +128,20 @@ class LegacyMigrationIntegrationTest {
             assertEquals(0, storage.list("evidence/migration/${applied.runId}").size)
             assertEquals("rolled-back", migrationStatus(applied.runId))
         }
+    }
+
+    @Test
+    fun `対象Feedback schema version以外ではfail closedにする`() {
+        database.dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE feedback.flyway_schema_history SET version = '999' WHERE version = ?"
+            ).use { statement ->
+                statement.setString(1, LegacyMigrationDatabase.targetFeedbackSchemaVersion)
+                assertEquals(1, statement.executeUpdate())
+            }
+        }
+        val error = assertFailsWith<IllegalArgumentException> { LegacyMigrationDatabase.prepare(database) }
+        assertTrue(error.message.orEmpty().contains("対象Feedback schema versionは 4"))
     }
 
     private fun provisionMigrationScope() {
@@ -290,9 +310,15 @@ class LegacyMigrationIntegrationTest {
         }
     }
 
+    private fun countQuery(sql: String): Int = database.dataSource.connection.use { connection ->
+        connection.createStatement().use { statement ->
+            statement.executeQuery(sql).use { result -> result.next(); result.getInt(1) }
+        }
+    }
+
     private fun migrationStatus(runId: String): String = database.dataSource.connection.use { connection ->
         connection.prepareStatement(
-            "SELECT status FROM feedback.legacy_migration_runs WHERE id = ?::uuid"
+            "SELECT status FROM feedback_migration.legacy_migration_runs WHERE id = ?::uuid"
         ).use { statement ->
             statement.setString(1, runId)
             statement.executeQuery().use { result -> assertTrue(result.next()); result.getString(1) }

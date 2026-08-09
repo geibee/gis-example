@@ -34,7 +34,7 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
     val database = FeedbackDatabase.create(settings.database)
     database.migrate()
     val evidenceStorage = createEvidenceStorage(settings.evidenceStorage)
-    val exportStorage = LocalEvidenceStorage(settings.exportStorage.localDirectory)
+    val exportStorage = createExportStorage(settings.exportStorage)
     val metrics = FeedbackServiceMetrics(database)
     environment.monitor.subscribe(io.ktor.server.application.ApplicationStopped) {
         evidenceStorage.close()
@@ -141,7 +141,14 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
     installEnvironmentCors(database)
     installFeedbackAuthentication(database, settings.oidc, settings.tokenExchange)
     routing {
-        healthRoutes(database, evidenceStorage, settings.evidenceStorage.keyPrefix, metrics)
+        healthRoutes(
+            database = database,
+            evidenceStorage = evidenceStorage,
+            evidencePrefix = settings.evidenceStorage.keyPrefix,
+            exportStorage = exportStorage,
+            exportPrefix = settings.exportStorage.keyPrefix,
+            metrics = metrics
+        )
         feedbackRoutes(
             FeedbackDependencies(
                 database = database,

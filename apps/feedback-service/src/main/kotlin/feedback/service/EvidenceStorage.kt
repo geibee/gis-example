@@ -89,13 +89,38 @@ class S3EvidenceStorage(
     override fun close() = client.close()
 }
 
-fun createEvidenceStorage(settings: EvidenceStorageSettings): EvidenceStorage = when (settings.mode) {
-    "local" -> LocalEvidenceStorage(settings.localDirectory)
+fun createEvidenceStorage(settings: EvidenceStorageSettings): EvidenceStorage = createObjectStorage(
+    mode = settings.mode,
+    localDirectory = settings.localDirectory,
+    bucket = settings.bucket,
+    region = settings.region,
+    endpointUrl = settings.endpointUrl,
+    label = "evidence"
+)
+
+fun createExportStorage(settings: ExportStorageSettings): EvidenceStorage = createObjectStorage(
+    mode = settings.mode,
+    localDirectory = settings.localDirectory,
+    bucket = settings.bucket,
+    region = settings.region,
+    endpointUrl = settings.endpointUrl,
+    label = "export"
+)
+
+private fun createObjectStorage(
+    mode: String,
+    localDirectory: Path,
+    bucket: String?,
+    region: String?,
+    endpointUrl: String?,
+    label: String
+): EvidenceStorage = when (mode) {
+    "local" -> LocalEvidenceStorage(localDirectory)
     "s3" -> {
-        val builder = S3Client.builder().forcePathStyle(settings.endpointUrl != null)
-        settings.region?.let { builder.region(Region.of(it)) }
-        settings.endpointUrl?.let { builder.endpointOverride(URI(it)) }
-        S3EvidenceStorage(builder.build(), requireNotNull(settings.bucket))
+        val builder = S3Client.builder().forcePathStyle(endpointUrl != null)
+        region?.let { builder.region(Region.of(it)) }
+        endpointUrl?.let { builder.endpointOverride(URI(it)) }
+        S3EvidenceStorage(builder.build(), requireNotNull(bucket))
     }
-    else -> error("未対応の evidence storage: ${settings.mode}")
+    else -> error("未対応の $label storage: $mode")
 }

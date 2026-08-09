@@ -1,0 +1,43 @@
+{
+  "realm": "feedback",
+  "enabled": true,
+  "displayName": "Feedback standalone local",
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "feedback-admin",
+      "name": "Feedback Admin local",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:5174/*"],
+      "webOrigins": ["http://localhost:5174"],
+      "protocolMappers": [
+        {
+          "name": "feedback-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "feedback-service",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "username": "feedback-admin",
+      "enabled": true,
+      "email": "feedback-admin@example.invalid",
+      "firstName": "Feedback",
+      "lastName": "Admin",
+      "credentials": [
+        { "type": "password", "value": "feedback-local-only", "temporary": false }
+      ]
+    }
+  ]
+}

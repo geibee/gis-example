@@ -43,34 +43,50 @@ data class FeedbackDependencies(
 
 fun Route.healthRoutes(
     database: FeedbackDatabase,
-    evidenceStorage: EvidenceStorage? = null,
+    evidenceStorage: EvidenceStorage,
     evidencePrefix: String = "evidence/",
+    exportStorage: EvidenceStorage,
+    exportPrefix: String = "exports/",
     metrics: FeedbackServiceMetrics? = null
 ) {
     get("/health/live") { call.respond(mapOf("status" to "live")) }
     get("/health/ready") {
         try {
             database.ping()
-            val storage = try {
-                evidenceStorage?.list(evidencePrefix)
+            val evidence = try {
+                evidenceStorage.list(evidencePrefix)
+                "available"
+            } catch (_: Exception) {
+                "unavailable"
+            }
+            val export = try {
+                exportStorage.list(exportPrefix)
                 "available"
             } catch (_: Exception) {
                 "unavailable"
             }
             val notification = database.dependencyHealth()
+            val ready = evidence == "available" && export == "available"
             val response = mapOf(
-                "status" to if (storage == "available") "ready" else "unavailable",
+                "status" to if (ready) "ready" else "unavailable",
                 "database" to "available",
-                "storage" to storage,
+                "evidenceStorage" to evidence,
+                "exportStorage" to export,
                 "notification" to notification.notification,
                 "notificationFailedDeliveries" to notification.failedDeliveries.toString(),
                 "outboxLagSeconds" to notification.outboxLagSeconds.toString()
             )
-            call.respond(if (storage == "available") HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable, response)
+            call.respond(if (ready) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable, response)
         } catch (_: Exception) {
             call.respond(
                 HttpStatusCode.ServiceUnavailable,
-                mapOf("status" to "unavailable", "database" to "unavailable", "storage" to "unknown", "notification" to "unknown")
+                mapOf(
+                    "status" to "unavailable",
+                    "database" to "unavailable",
+                    "evidenceStorage" to "unknown",
+                    "exportStorage" to "unknown",
+                    "notification" to "unknown"
+                )
             )
         }
     }

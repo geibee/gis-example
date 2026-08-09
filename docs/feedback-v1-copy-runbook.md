@@ -20,9 +20,11 @@ provision し、旧ユーザー ID は履歴上の principal ID としてのみ�
 
 ## 実行順序
 
-配布物の `bin/feedback-legacy-migration` を使う。接続先と evidence storage は Feedback Service と同じ
-環境変数を参照する。CLI は Flyway を実行しないため、対象 schema は先に通常の Service 起動手順で
-V3 まで適用しておく。
+GIS repositoryで `./gradlew installLegacyMigrationDist` を実行して作る
+`build/install/feedback-legacy-migration/bin/feedback-legacy-migration` を使う。接続先と evidence storage は
+Feedback Service と同じ環境変数を参照する。CLI は専用 `feedback_migration` schema と専用Flyway履歴を
+作成し、Feedback Service schema が固定対象version 4でない場合は実行を拒否する。この配布物は独立
+Feedback Service image/repositoryには含めない。
 
 ```bash
 feedback-legacy-migration dry-run --input anonymized-snapshot.json

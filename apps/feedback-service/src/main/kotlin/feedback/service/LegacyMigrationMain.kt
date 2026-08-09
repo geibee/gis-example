@@ -16,6 +16,7 @@ fun main(arguments: Array<String>) {
     require(Files.isRegularFile(inputPath)) { "--input の snapshot file がありません" }
     val snapshot = serviceJson.decodeFromString<LegacyFeedbackSnapshot>(Files.readString(inputPath))
     FeedbackDatabase.create(DatabaseSettings.fromEnv()).use { database ->
+        LegacyMigrationDatabase.prepare(database)
         createEvidenceStorage(EvidenceStorageSettings.fromEnv()).use { storage ->
             val migration = LegacyFeedbackMigration(database, storage)
             val report = when (command) {

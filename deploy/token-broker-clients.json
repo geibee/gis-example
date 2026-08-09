@@ -1,0 +1,12 @@
+[
+  {
+    "id": "conformance-consumer",
+    "subjectCn": "conformance-consumer",
+    "actorIssuers": ["http://localhost:8180/realms/feedback"],
+    "tenants": ["local"],
+    "applications": ["inventory"],
+    "environments": ["local"],
+    "workspaces": ["east", "west"],
+    "permissions": ["feedback.read", "feedback.comment"]
+  }
+]

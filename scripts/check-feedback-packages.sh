@@ -2,7 +2,7 @@
 # publishせず、実tarballをworkspace外のReact 18/19 fixtureへ導入してpackage契約を検査する。
 set -euo pipefail
 
-ROOT=$(git rev-parse --show-toplevel)
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/.." && pwd))
 cd "$ROOT"
 
 feedback_package_tmp=$(mktemp -d -t feedback-packages.XXXXXX)
@@ -45,7 +45,7 @@ for package_name in "${packages[@]}"; do
     const required = ["dist/index.js", "dist/index.d.ts", "package.json", "README.md", "CHANGELOG.md"];
     if (["@feedback/react", "@feedback/admin-react"].includes(process.env.PACKAGE_NAME)) required.push("dist/styles.css");
     if (process.env.PACKAGE_NAME === "@feedback/contracts") {
-      required.push("openapi.yaml", "kotlin/FeedbackContractTypes.kt", "schemas/application-manifest.schema.json", "schemas/location.schema.json", "schemas/target.schema.json", "schemas/webhook-event.schema.json");
+      required.push("openapi.yaml", "token-exchange.openapi.yaml", "kotlin/FeedbackContractTypes.kt", "schemas/application-manifest.schema.json", "schemas/location.schema.json", "schemas/target.schema.json", "schemas/webhook-event.schema.json", "schemas/token-exchange-jwt.schema.json");
     }
     if (required.some((path) => !files.has(path))) process.exit(1);
     process.stdout.write(result.filename);

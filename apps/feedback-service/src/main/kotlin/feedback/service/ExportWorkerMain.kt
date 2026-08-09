@@ -4,7 +4,7 @@ fun main() {
     val database = FeedbackDatabase.create(DatabaseSettings.fromEnv())
     database.migrate()
     val settings = ExportStorageSettings.fromEnv()
-    val storage = LocalEvidenceStorage(settings.localDirectory)
+    val storage = createExportStorage(settings)
     val worker = ExportWorker(database, storage, settings.keyPrefix)
     Runtime.getRuntime().addShutdownHook(Thread {
         storage.close()

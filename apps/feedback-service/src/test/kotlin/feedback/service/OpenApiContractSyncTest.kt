@@ -83,7 +83,13 @@ class OpenApiContractSyncTest {
                 }
                 val root = routing {
                     val database = FeedbackDatabase(HikariDataSource())
-                    healthRoutes(database)
+                    healthRoutes(
+                        database,
+                        LocalEvidenceStorage(Path.of(System.getProperty("java.io.tmpdir"), "feedback-route-health-evidence")),
+                        exportStorage = LocalEvidenceStorage(
+                            Path.of(System.getProperty("java.io.tmpdir"), "feedback-route-health-export")
+                        )
+                    )
                     feedbackRoutes(
                         FeedbackDependencies(
                             database,
