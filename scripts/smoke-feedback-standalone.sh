@@ -22,7 +22,8 @@ cleanup() {
   if [[ "$smoke_succeeded" != "1" ]]; then
     compose ps >&2 || true
     compose logs --no-color --tail=80 feedback-service feedback-notification-worker \
-      feedback-export-worker feedback-retention-worker feedback-conformance-consumer >&2 || true
+      feedback-export-worker feedback-retention-worker feedback-webhook-connector \
+      feedback-connector-register feedback-conformance-consumer >&2 || true
   fi
   if [[ "$manage_compose" == "1" ]]; then
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -87,11 +88,18 @@ manifest='{"schemaVersion":"1","applicationKey":"inventory","displayName":"Inven
 api_request PUT /applications/inventory/manifest "$temporary_root/manifest.json" "$temporary_root/manifest.headers" "$manifest"
 
 scope_query='?applicationKey=inventory&externalWorkspaceKey=east'
-api_request GET "/notification-settings$scope_query" "$temporary_root/notification.json" "$temporary_root/notification.headers" ""
-notification_etag=$(header_value ETag "$temporary_root/notification.headers")
-notification='{"webhookEnabled":true,"webhookEndpoint":"http://feedback-conformance-consumer:8080/fixture-webhook","includeBody":false,"includeEvidence":false}'
-api_request PATCH "/notification-settings$scope_query" "$temporary_root/notification-patched.json" \
-  "$temporary_root/notification-patched.headers" "$notification" -H "If-Match: $notification_etag"
+for _ in {1..60}; do
+  if api_request GET "/connector-types$scope_query" "$temporary_root/connectors.json" \
+      "$temporary_root/connectors.headers" "" &&
+      jq -e '.[] | select(.key == "webhook")' "$temporary_root/connectors.json" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e '.[] | select(.key == "webhook")' "$temporary_root/connectors.json" >/dev/null
+connector='{"connectorType":"webhook","name":"standalone Webhook","destinationRef":"fixture-webhook","enabled":true,"includeBody":false}'
+api_request POST "/notification-connectors$scope_query" "$temporary_root/connector.json" \
+  "$temporary_root/connector.headers" "$connector"
 
 api_request GET "/retention-policy$scope_query" "$temporary_root/retention.json" "$temporary_root/retention.headers" ""
 retention_etag=$(header_value ETag "$temporary_root/retention.headers")

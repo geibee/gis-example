@@ -95,6 +95,71 @@ describe("Feedback JSON Schema", () => {
     expect(validate({ ...event, eventType: "feedback.unknown.v1" })).toBe(false);
   });
 
+  it("connector protocolはmanifest・delivery・resultと互換versionを固定する", () => {
+    const localAjv = new Ajv2020({ allErrors: true, strict: false });
+    addFormats(localAjv);
+    const eventSchema = JSON.parse(readFileSync(new URL("../schemas/webhook-event.schema.json", import.meta.url), "utf8"));
+    localAjv.addSchema(eventSchema, "https://feedback.example/schemas/webhook-event.schema.json");
+    const connectorSchema = JSON.parse(readFileSync(new URL("../schemas/connector-protocol.schema.json", import.meta.url), "utf8"));
+    const validate = localAjv.compile(connectorSchema);
+    const event = {
+      schemaVersion: "1",
+      eventId: "00000000-0000-4000-8000-000000000001",
+      requestId: "request-1",
+      eventType: "feedback.message.created.v1",
+      occurredAt: "2026-08-09T00:00:00Z",
+      tenantKey: "tenant-1",
+      applicationKey: "sample-app",
+      environmentKey: "production",
+      externalWorkspaceKey: "workspace-1",
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      threadId: "00000000-0000-4000-8000-000000000003",
+      actor: { principalId: "issuer|subject" },
+      deepLink: "https://app.example/review?feedbackThread=1"
+    };
+    expect(validate({
+      kind: "manifest",
+      protocolVersion: "1",
+      compatibleProtocolVersions: ["1"],
+      connectorKey: "teams",
+      displayName: "Teams",
+      supportedEvents: ["feedback.message.created.v1"],
+      healthPath: "/health/ready"
+    }), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({
+      kind: "delivery-request",
+      protocolVersion: "1",
+      deliveryId: "00000000-0000-4000-8000-000000000004",
+      eventId: event.eventId,
+      destinationRef: "review-channel",
+      occurredAt: event.occurredAt,
+      event
+    }), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({
+      kind: "delivery-request",
+      protocolVersion: "1",
+      deliveryId: "00000000-0000-4000-8000-000000000004",
+      eventId: event.eventId,
+      destinationRef: "review-channel",
+      occurredAt: event.occurredAt,
+      event: { ...event, evidenceUrl: "/feedback/v1/evidence" }
+    })).toBe(false);
+    expect(validate({
+      kind: "delivery-result",
+      protocolVersion: "1",
+      deliveryId: "00000000-0000-4000-8000-000000000004",
+      status: "accepted",
+      receivedAt: "2026-08-09T00:00:01Z"
+    }), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({
+      kind: "delivery-request",
+      protocolVersion: "2",
+      deliveryId: "00000000-0000-4000-8000-000000000004",
+      destinationRef: "review-channel",
+      event
+    })).toBe(false);
+  });
+
   it("token exchange JWTはactorとFeedback scope claimを必須にする", () => {
     const validate = validator("token-exchange-jwt");
     const claims = {

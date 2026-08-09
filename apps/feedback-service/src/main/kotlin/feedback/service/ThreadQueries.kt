@@ -1,7 +1,9 @@
 package feedback.service
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.sql.Connection
 import java.sql.ResultSet
 import java.util.UUID
@@ -220,7 +222,7 @@ fun FeedbackDatabase.createThread(
                 statement.setString(13, request.participantName)
                 statement.executeUpdate()
             }
-            insertMessage(connection, threadId, principal, request.body.trim(), request.participantName)
+            val initialMessage = insertMessage(connection, threadId, principal, request.body.trim(), request.participantName)
             request.evidence?.let { evidence ->
                 val bytes = decodeEvidence(evidence, evidenceMaxBytes)
                 val objectKey = "$evidenceKeyPrefix${scope.tenantId}/${scope.workspaceId}/$threadId"
@@ -255,6 +257,18 @@ fun FeedbackDatabase.createThread(
                     statement.executeUpdate()
                 }
             }
+            appendFeedbackChange(
+                connection,
+                scope,
+                "feedback.thread.created.v1",
+                "thread",
+                threadId,
+                buildJsonObject {
+                    put("threadId", threadId)
+                    put("messageId", initialMessage.id)
+                    put("evidenceIncluded", request.evidence != null)
+                }
+            )
             enqueueEvent(connection, scope, "feedback.thread.created.v1", sessionId, threadId, principal, request.body, requestId)
             connection.incrementOperationalMetric("posts_total", scope.tenantId)
             readThreadById(connection, threadId)
@@ -304,6 +318,14 @@ fun FeedbackDatabase.createMessage(
         it.executeUpdate()
     }
     enqueueEvent(connection, scope, "feedback.message.created.v1", thread.sessionId, threadId, principal, request.body, requestId)
+    appendFeedbackChange(
+        connection,
+        scope,
+        "feedback.message.created.v1",
+        "message",
+        message.id,
+        buildJsonObject { put("threadId", threadId) }
+    )
     connection.incrementOperationalMetric("posts_total", scope.tenantId)
     message
 }
@@ -312,7 +334,8 @@ fun FeedbackDatabase.patchMessage(
     messageId: String,
     principal: FeedbackPrincipal,
     expectedVersion: Int,
-    request: FeedbackMessagePatchRequest
+    request: FeedbackMessagePatchRequest,
+    scope: ResourceScope
 ): FeedbackMessage = transaction { connection ->
     validateBody(request.body)
     request.participantName?.let { validateKey(it, "participantName", 100) }
@@ -357,7 +380,20 @@ fun FeedbackDatabase.patchMessage(
         statement.setString(1, messageId)
         statement.executeUpdate()
     }
-    readMessageById(connection, messageId)
+    val updated = readMessageById(connection, messageId)
+    appendFeedbackChange(
+        connection,
+        scope,
+        "feedback.message.updated.v1",
+        "message",
+        messageId,
+        buildJsonObject {
+            put("threadId", updated.threadId)
+            put("fromVersion", current.version)
+            put("toVersion", updated.version)
+        }
+    )
+    updated
 }
 
 fun FeedbackDatabase.listMessageVersions(messageId: String): List<FeedbackMessageVersion> =
@@ -412,6 +448,17 @@ fun FeedbackDatabase.patchThreadStatus(
         if (statement.executeUpdate() != 1) preconditionFailed()
     }
     val eventType = if (status == "resolved") "feedback.thread.resolved.v1" else "feedback.thread.reopened.v1"
+    appendFeedbackChange(
+        connection,
+        scope,
+        eventType,
+        "thread",
+        threadId,
+        buildJsonObject {
+            put("fromStatus", current.status)
+            put("toStatus", status)
+        }
+    )
     enqueueEvent(connection, scope, eventType, current.sessionId, threadId, principal, null, requestId)
     readThreadById(connection, threadId)
 }
@@ -653,5 +700,40 @@ private fun enqueueEvent(
         statement.setString(4, eventType)
         statement.setString(5, serviceJson.encodeToString(NotificationWebhookEvent.serializer(), payload))
         statement.executeUpdate()
+    }
+    val connectorCount = connection.prepareStatement(
+        """
+        INSERT INTO feedback.connector_delivery_queue (id, outbox_id, connector_id)
+        SELECT gen_random_uuid(), ?::uuid, connector.id
+        FROM feedback.notification_connectors connector
+        JOIN feedback.connector_installations installation ON installation.id = connector.installation_id
+        WHERE connector.workspace_id = ?::uuid
+          AND connector.enabled
+          AND connector.deleted_at IS NULL
+          AND installation.enabled
+          AND ? = ANY(installation.supported_events)
+        """.trimIndent()
+    ).use { statement ->
+        statement.setString(1, eventId)
+        statement.setString(2, scope.workspaceId)
+        statement.setString(3, eventType)
+        statement.executeUpdate()
+    }
+    if (connectorCount == 0) {
+        connection.prepareStatement(
+            """
+            UPDATE feedback.notification_outbox outbox
+            SET status = 'delivered', delivered_at = now(), last_error = NULL
+            WHERE outbox.id = ?::uuid
+              AND NOT EXISTS (
+                  SELECT 1 FROM feedback.notification_settings settings
+                  WHERE settings.workspace_id = outbox.workspace_id
+                    AND settings.webhook_enabled
+              )
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, eventId)
+            statement.executeUpdate()
+        }
     }
 }

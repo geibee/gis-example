@@ -23,7 +23,7 @@ provision し、旧ユーザー ID は履歴上の principal ID としてのみ�
 GIS repositoryで `./gradlew installLegacyMigrationDist` を実行して作る
 `build/install/feedback-legacy-migration/bin/feedback-legacy-migration` を使う。接続先と evidence storage は
 Feedback Service と同じ環境変数を参照する。CLI は専用 `feedback_migration` schema と専用Flyway履歴を
-作成し、Feedback Service schema が固定対象version 4でない場合は実行を拒否する。この配布物は独立
+作成し、Feedback Service schema が固定対象version 5でない場合は実行を拒否する。この配布物は独立
 Feedback Service image/repositoryには含めない。
 
 ```bash

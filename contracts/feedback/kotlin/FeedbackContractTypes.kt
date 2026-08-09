@@ -15,6 +15,8 @@ typealias FeedbackTargetV1 = JsonObject
 
 typealias FeedbackWebhookEventV1 = JsonObject
 
+typealias FeedbackConnectorProtocolV1 = JsonObject
+
 @Serializable
 data class FeedbackCapabilities(
     val apiVersion: String,
@@ -276,6 +278,100 @@ data class FeedbackExportJob(
 )
 
 @Serializable
+data class FeedbackBackupPolicy(
+    val enabled: Boolean,
+    val timezone: String,
+    val fullBackupAt: String,
+    val incrementalIntervalMinutes: Long,
+    val includeEvidence: Boolean,
+    val retentionDays: Long?
+)
+
+@Serializable
+data class FeedbackBackupPolicyView(
+    val policy: FeedbackBackupPolicy,
+    val nextExecutionAt: String?,
+    val nextFullAt: String?,
+    val nextIncrementalAt: String?,
+    val lastSuccessfulAt: String?,
+    val changeCursor: Long,
+    val auditCursor: Long
+)
+
+@Serializable
+data class FeedbackBackupRun(
+    val id: String,
+    val kind: String,
+    val status: String,
+    val scheduledFor: String,
+    val downloadUrl: String? = null,
+    val fromChangeSequence: Long,
+    val toChangeSequence: Long? = null,
+    val fromAuditSequence: Long,
+    val toAuditSequence: Long? = null,
+    val archiveSha256: String? = null,
+    val archiveBytes: Long? = null,
+    val entryCounts: Map<String, Long>? = null,
+    val historyCoverageStartedAt: String,
+    val expiresAt: String? = null,
+    val completedAt: String? = null,
+    val createdAt: String,
+    val error: String? = null
+)
+
+@Serializable
+data class FeedbackBackupRunPage(
+    val items: List<FeedbackBackupRun>,
+    val nextCursor: String?
+)
+
+@Serializable
+data class FeedbackConnectorType(
+    val key: String,
+    val displayName: String,
+    val protocolVersion: String,
+    val supportedEvents: List<String>,
+    val enabled: Boolean,
+    val healthStatus: String,
+    val healthCheckedAt: String?,
+    val healthError: String?
+)
+
+@Serializable
+data class FeedbackNotificationConnectorCreateRequest(
+    val connectorType: String,
+    val name: String,
+    val destinationRef: String,
+    val enabled: Boolean? = null,
+    val includeBody: Boolean? = null
+)
+
+@Serializable
+data class FeedbackNotificationConnectorPatchRequest(
+    val name: String,
+    val destinationRef: String,
+    val enabled: Boolean,
+    val includeBody: Boolean
+)
+
+@Serializable
+data class FeedbackNotificationConnector(
+    val id: String,
+    val connectorType: String,
+    val displayName: String,
+    val name: String,
+    val destinationRef: String,
+    val enabled: Boolean,
+    val includeBody: Boolean,
+    val healthStatus: String,
+    val healthCheckedAt: String?,
+    val healthError: String?,
+    val version: Long,
+    val createdAt: String,
+    val updatedAt: String
+)
+
+@Serializable
 data class FeedbackRetentionPolicy(
     val evidenceRetentionDays: Long?,
     val exportRetentionDays: Long? = null
@@ -302,6 +398,8 @@ data class FeedbackNotificationAttempt(
 @Serializable
 data class FeedbackNotificationDelivery(
     val id: String,
+    val connectorId: String? = null,
+    val connectorName: String? = null,
     val eventType: String,
     val status: String,
     val retryCycle: Long,

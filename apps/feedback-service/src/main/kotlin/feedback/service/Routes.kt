@@ -115,7 +115,9 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                             "message-history",
                             "private-evidence",
                             "rate-limit",
-                            "notification-outbox"
+                            "notification-outbox",
+                            "automatic-backup",
+                            "notification-connectors"
                         )
                     )
                 )
@@ -359,7 +361,8 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                     messageId,
                     principal,
                     parseEtag(call.request.headers[HttpHeaders.IfMatch]),
-                    request
+                    request,
+                    scope
                 )
                 call.response.header(HttpHeaders.ETag, etag(message.version))
                 auditMutation(database, call, context, "message.patch", "message", message.id)
@@ -469,6 +472,53 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                 call.respondBytes(export.bytes, ContentType.parse(export.contentType))
             }
 
+            route("/backup-policy") {
+                get { respondBackupPolicy(database, call, patch = false) }
+                patch { respondBackupPolicy(database, call, patch = true) }
+            }
+
+            get("/backups") {
+                val context = workspaceQueryAuthorization(database, call, FeedbackPermission.MANAGE)
+                call.respond(
+                    database.listBackups(
+                        context.scope,
+                        parseLimit(call.request.queryParameters["limit"]),
+                        decodeCursor(call.request.queryParameters["cursor"])
+                    )
+                )
+            }
+
+            get("/backups/{backupId}") {
+                val backupId = validateUuid(call.parameters["backupId"], "backupId")
+                val principal = call.feedbackPrincipal()
+                val scope = database.resolveResourceScope(principal.userId, ScopeKind.BACKUP, backupId)
+                authorize(database, call, FeedbackPermission.MANAGE, scope, hideExistence = true)
+                call.respond(database.getBackup(backupId))
+            }
+
+            get("/backups/{backupId}/download") {
+                val backupId = validateUuid(call.parameters["backupId"], "backupId")
+                val principal = call.feedbackPrincipal()
+                val scope = database.resolveResourceScope(principal.userId, ScopeKind.BACKUP, backupId)
+                val context = authorize(database, call, FeedbackPermission.MANAGE, scope, hideExistence = true)
+                val backup = database.getStoredBackup(backupId, dependencies.exportStorage)
+                auditMutation(database, call, context, "backup.read", "backup", backupId)
+                call.response.header(
+                    HttpHeaders.ContentDisposition,
+                    ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, backup.fileName).toString()
+                )
+                call.response.header(HttpHeaders.ETag, "\"sha256:${backup.sha256}\"")
+                call.respondBytes(backup.bytes, ContentType.parse(backup.contentType))
+            }
+
+            post("/backups/{backupId}/retry") {
+                val backupId = validateUuid(call.parameters["backupId"], "backupId")
+                val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                val backup = database.retryBackup(context.scope, backupId)
+                auditMutation(database, call, context, "backup.retry", "backup", backupId)
+                call.respond(backup)
+            }
+
             route("/retention-policy") {
                 get { respondRetentionPolicy(database, call, patch = false) }
                 patch { respondRetentionPolicy(database, call, patch = true) }
@@ -477,6 +527,56 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
             route("/notification-settings") {
                 get { respondNotificationSettings(database, dependencies.notificationCipher, call, patch = false) }
                 patch { respondNotificationSettings(database, dependencies.notificationCipher, call, patch = true) }
+            }
+
+            get("/connector-types") {
+                workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                call.respond(database.listConnectorTypes())
+            }
+
+            route("/notification-connectors") {
+                get {
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    call.respond(database.listNotificationConnectors(context.scope))
+                }
+                post {
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    enforceWriteRateLimit(database, dependencies, call, context.scope, context.principal)
+                    val connector = database.createNotificationConnector(
+                        context.scope,
+                        call.receive<FeedbackNotificationConnectorCreateRequest>()
+                    )
+                    auditMutation(database, call, context, "notification-connector.create", "notification-connector", connector.id)
+                    call.response.header(HttpHeaders.ETag, etag(connector.version))
+                    call.respond(HttpStatusCode.Created, connector)
+                }
+            }
+
+            route("/notification-connectors/{connectorId}") {
+                patch {
+                    val connectorId = validateUuid(call.parameters["connectorId"], "connectorId")
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    val connector = database.patchNotificationConnector(
+                        context.scope,
+                        connectorId,
+                        parseEtag(call.request.headers[HttpHeaders.IfMatch]),
+                        call.receive()
+                    )
+                    auditMutation(database, call, context, "notification-connector.patch", "notification-connector", connectorId)
+                    call.response.header(HttpHeaders.ETag, etag(connector.version))
+                    call.respond(connector)
+                }
+                delete {
+                    val connectorId = validateUuid(call.parameters["connectorId"], "connectorId")
+                    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+                    database.deleteNotificationConnector(
+                        context.scope,
+                        connectorId,
+                        parseEtag(call.request.headers[HttpHeaders.IfMatch])
+                    )
+                    auditMutation(database, call, context, "notification-connector.delete", "notification-connector", connectorId)
+                    call.respond(HttpStatusCode.NoContent)
+                }
             }
 
             route("/memberships") {
@@ -534,7 +634,8 @@ fun Route.feedbackRoutes(dependencies: FeedbackDependencies) {
                     database.listNotificationDeliveries(
                         context.scope,
                         call.request.queryParameters["status"],
-                        parseLimit(call.request.queryParameters["limit"])
+                        parseLimit(call.request.queryParameters["limit"]),
+                        call.request.queryParameters["connectorId"]?.let { validateUuid(it, "connectorId") }
                     )
                 )
             }
@@ -578,6 +679,21 @@ private suspend fun respondRetentionPolicy(database: FeedbackDatabase, call: App
     call.response.header(HttpHeaders.ETag, etag(version))
     if (patch) auditMutation(database, call, context, "retention.patch", "retention-policy", requireNotNull(context.scope.workspaceId))
     call.respond(policy)
+}
+
+private suspend fun respondBackupPolicy(database: FeedbackDatabase, call: ApplicationCall, patch: Boolean) {
+    val context = workspaceQueryAuthorization(database, call, FeedbackPermission.ADMIN)
+    val (view, version) = if (patch) {
+        database.patchBackupPolicy(context.scope, parseEtag(call.request.headers[HttpHeaders.IfMatch]), call.receive())
+        database.getBackupPolicyView(context.scope)
+    } else {
+        database.getBackupPolicyView(context.scope)
+    }
+    call.response.header(HttpHeaders.ETag, etag(version))
+    if (patch) {
+        auditMutation(database, call, context, "backup-policy.patch", "backup-policy", requireNotNull(context.scope.workspaceId))
+    }
+    call.respond(view)
 }
 
 private suspend fun respondNotificationSettings(

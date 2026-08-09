@@ -148,6 +148,10 @@ verify_feedback() {
       || fail "FEEDBACK_DATABASE_URL が未設定です (通常 PostgreSQL の独立統合テストに必要)"
     [[ -n "${FEEDBACK_DATABASE_USER:-}" && -n "${FEEDBACK_DATABASE_PASSWORD:-}" ]] \
       || fail "FEEDBACK_DATABASE_USER / FEEDBACK_DATABASE_PASSWORD が未設定です"
+    [[ -n "${FEEDBACK_TEST_S3_ENDPOINT:-}" && -n "${FEEDBACK_TEST_S3_BUCKET:-}" ]] \
+      || fail "FEEDBACK_TEST_S3_ENDPOINT / FEEDBACK_TEST_S3_BUCKET が未設定です (S3互換統合テストに必要)"
+    [[ -n "${FEEDBACK_TEST_S3_ACCESS_KEY:-}" && -n "${FEEDBACK_TEST_S3_SECRET_KEY:-}" ]] \
+      || fail "FEEDBACK_TEST_S3_ACCESS_KEY / FEEDBACK_TEST_S3_SECRET_KEY が未設定です"
     (cd apps/feedback-service && ./gradlew integrationTest --no-daemon)
     log "feedback integration PASS"
   else

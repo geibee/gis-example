@@ -599,6 +599,124 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /backup-policy:
+    get:
+      tags: [administration]
+      operationId: getFeedbackBackupPolicy
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: workspaceの自動証跡バックアップ方針
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackBackupPolicyView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    patch:
+      tags: [administration]
+      operationId: patchFeedbackBackupPolicy
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/FeedbackBackupPolicy" }
+      responses:
+        "200":
+          description: 更新した自動バックアップ方針
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackBackupPolicyView" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+
+  /backups:
+    get:
+      tags: [administration]
+      operationId: listFeedbackBackups
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: 自動バックアップ実行履歴
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackBackupRunPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /backups/{backupId}:
+    parameters:
+      - $ref: "#/components/parameters/BackupId"
+    get:
+      tags: [administration]
+      operationId: getFeedbackBackup
+      responses:
+        "200":
+          description: 自動バックアップ実行状態
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackBackupRun" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /backups/{backupId}/download:
+    parameters:
+      - $ref: "#/components/parameters/BackupId"
+    get:
+      tags: [administration]
+      operationId: downloadFeedbackBackup
+      responses:
+        "200":
+          description: manifest・CSV・証跡画像を含む自己完結ZIP
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            ETag:
+              schema: { type: string }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /backups/{backupId}/retry:
+    parameters:
+      - $ref: "#/components/parameters/BackupId"
+    post:
+      tags: [administration]
+      operationId: retryFeedbackBackup
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: 再試行待ちへ戻したバックアップ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackBackupRun" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /retention-policy:
     get:
       tags: [administration]
@@ -654,6 +772,7 @@ paths:
 
   /notification-settings:
     get:
+      deprecated: true
       tags: [administration]
       operationId: getFeedbackNotificationSettings
       parameters:
@@ -674,6 +793,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
     patch:
+      deprecated: true
       tags: [administration]
       operationId: patchFeedbackNotificationSettings
       parameters:
@@ -704,6 +824,104 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "412":
           $ref: "#/components/responses/PreconditionFailed"
+
+  /connector-types:
+    get:
+      tags: [administration]
+      operationId: listFeedbackConnectorTypes
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: platform operatorが登録した別プロセス通知コネクタ
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackConnectorType" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /notification-connectors:
+    get:
+      tags: [administration]
+      operationId: listFeedbackNotificationConnectors
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      responses:
+        "200":
+          description: workspaceの通知コネクタ一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackNotificationConnector" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [administration]
+      operationId: createFeedbackNotificationConnector
+      parameters:
+        - $ref: "#/components/parameters/ApplicationKeyQuery"
+        - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackNotificationConnectorCreateRequest" }
+      responses:
+        "201":
+          description: 追加した通知コネクタ
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackNotificationConnector" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /notification-connectors/{connectorId}:
+    parameters:
+      - $ref: "#/components/parameters/ConnectorId"
+      - $ref: "#/components/parameters/ApplicationKeyQuery"
+      - $ref: "#/components/parameters/ExternalWorkspaceKeyQuery"
+      - $ref: "#/components/parameters/IfMatch"
+    patch:
+      tags: [administration]
+      operationId: patchFeedbackNotificationConnector
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/FeedbackNotificationConnectorPatchRequest" }
+      responses:
+        "200":
+          description: 更新した通知コネクタ
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackNotificationConnector" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+    delete:
+      tags: [administration]
+      operationId: deleteFeedbackNotificationConnector
+      responses:
+        "204": { description: 通知コネクタを削除 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
 
   /memberships:
     get:
@@ -797,6 +1015,9 @@ paths:
         - name: status
           in: query
           schema: { enum: [pending, processing, delivered, failed] }
+        - name: connectorId
+          in: query
+          schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
@@ -875,6 +1096,16 @@ components:
       schema: { type: string, format: uuid }
     ExportId:
       name: exportId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BackupId:
+      name: backupId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ConnectorId:
+      name: connectorId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -988,6 +1219,8 @@ components:
       $ref: "./schemas/target.schema.json"
     FeedbackWebhookEventV1:
       $ref: "./schemas/webhook-event.schema.json"
+    FeedbackConnectorProtocolV1:
+      $ref: "./schemas/connector-protocol.schema.json"
 
     FeedbackCapabilities:
       type: object
@@ -1381,6 +1614,122 @@ components:
         createdAt: { type: string, format: date-time }
         error: { type: [string, "null"], maxLength: 2000 }
 
+    FeedbackBackupPolicy:
+      type: object
+      additionalProperties: false
+      required: [enabled, timezone, fullBackupAt, incrementalIntervalMinutes, includeEvidence, retentionDays]
+      properties:
+        enabled: { type: boolean, default: false }
+        timezone: { type: string, default: Asia/Tokyo, maxLength: 100 }
+        fullBackupAt: { type: string, pattern: "^[0-2][0-9]:[0-5][0-9]$", default: "02:00" }
+        incrementalIntervalMinutes: { type: integer, minimum: 15, maximum: 1440, default: 60 }
+        includeEvidence: { type: boolean, default: true }
+        retentionDays: { type: [integer, "null"], minimum: 1, maximum: 3650 }
+
+    FeedbackBackupPolicyView:
+      type: object
+      additionalProperties: false
+      required: [policy, nextExecutionAt, nextFullAt, nextIncrementalAt, lastSuccessfulAt, changeCursor, auditCursor]
+      properties:
+        policy: { $ref: "#/components/schemas/FeedbackBackupPolicy" }
+        nextExecutionAt: { type: [string, "null"], format: date-time }
+        nextFullAt: { type: [string, "null"], format: date-time }
+        nextIncrementalAt: { type: [string, "null"], format: date-time }
+        lastSuccessfulAt: { type: [string, "null"], format: date-time }
+        changeCursor: { type: integer, minimum: 0 }
+        auditCursor: { type: integer, minimum: 0 }
+
+    FeedbackBackupRun:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, scheduledFor, fromChangeSequence, fromAuditSequence, historyCoverageStartedAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { enum: [full, incremental] }
+        status: { enum: [queued, running, completed, failed, superseded] }
+        scheduledFor: { type: string, format: date-time }
+        downloadUrl: { type: [string, "null"], format: uri-reference }
+        fromChangeSequence: { type: integer, minimum: 0 }
+        toChangeSequence: { type: [integer, "null"], minimum: 0 }
+        fromAuditSequence: { type: integer, minimum: 0 }
+        toAuditSequence: { type: [integer, "null"], minimum: 0 }
+        archiveSha256: { type: [string, "null"], pattern: "^[a-f0-9]{64}$" }
+        archiveBytes: { type: [integer, "null"], minimum: 0 }
+        entryCounts:
+          type: [object, "null"]
+          additionalProperties: { type: integer, minimum: 0 }
+        historyCoverageStartedAt: { type: string, format: date-time }
+        expiresAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        error: { type: [string, "null"], maxLength: 2000 }
+
+    FeedbackBackupRunPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackBackupRun" }
+        nextCursor: { type: [string, "null"] }
+
+    FeedbackConnectorType:
+      type: object
+      additionalProperties: false
+      required: [key, displayName, protocolVersion, supportedEvents, enabled, healthStatus, healthCheckedAt, healthError]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100 }
+        displayName: { type: string, minLength: 1, maxLength: 200 }
+        protocolVersion: { type: string, const: "1" }
+        supportedEvents:
+          type: array
+          items: { type: string, minLength: 1, maxLength: 100 }
+        enabled: { type: boolean }
+        healthStatus: { enum: [unknown, healthy, unhealthy] }
+        healthCheckedAt: { type: [string, "null"], format: date-time }
+        healthError: { type: [string, "null"], maxLength: 2000 }
+
+    FeedbackNotificationConnectorCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [connectorType, name, destinationRef]
+      properties:
+        connectorType: { type: string, minLength: 1, maxLength: 100 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        destinationRef: { type: string, minLength: 1, maxLength: 200 }
+        enabled: { type: boolean, default: true }
+        includeBody: { type: boolean, default: false }
+
+    FeedbackNotificationConnectorPatchRequest:
+      type: object
+      additionalProperties: false
+      required: [name, destinationRef, enabled, includeBody]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        destinationRef: { type: string, minLength: 1, maxLength: 200 }
+        enabled: { type: boolean }
+        includeBody: { type: boolean }
+
+    FeedbackNotificationConnector:
+      type: object
+      additionalProperties: false
+      required: [id, connectorType, displayName, name, destinationRef, enabled, includeBody, healthStatus, healthCheckedAt, healthError, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        connectorType: { type: string, minLength: 1, maxLength: 100 }
+        displayName: { type: string, minLength: 1, maxLength: 200 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        destinationRef: { type: string, minLength: 1, maxLength: 200 }
+        enabled: { type: boolean }
+        includeBody: { type: boolean }
+        healthStatus: { enum: [unknown, healthy, unhealthy] }
+        healthCheckedAt: { type: [string, "null"], format: date-time }
+        healthError: { type: [string, "null"], maxLength: 2000 }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
     FeedbackRetentionPolicy:
       type: object
       additionalProperties: false
@@ -1417,6 +1766,8 @@ components:
       required: [id, eventType, status, retryCycle, attemptCount, availableAt, createdAt, attempts]
       properties:
         id: { type: string, format: uuid }
+        connectorId: { type: [string, "null"], format: uuid }
+        connectorName: { type: [string, "null"], maxLength: 200 }
         eventType: { type: string, minLength: 1, maxLength: 100 }
         status: { enum: [pending, processing, delivered, failed] }
         retryCycle: { type: integer, minimum: 0 }

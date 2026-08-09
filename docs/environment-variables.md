@@ -148,20 +148,63 @@ Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flywa
 | `FEEDBACK_EXPORT_S3_ENDPOINT_URL` | 任意 (**dev の S3 互換 storage 専用**) | なし | — |
 | `FEEDBACK_EXPORT_KEY_PREFIX` | 任意 | `exports/` | タスク定義 |
 | `FEEDBACK_EXPORT_POLL_MS` | export worker で任意 | `2000` | タスク定義 |
+| `FEEDBACK_BACKUP_KEY_PREFIX` | export/retention worker で任意 | `backups/` | タスク定義 |
+| `FEEDBACK_BACKUP_MAX_ATTEMPTS` | export worker で任意 | `5` | タスク定義 |
 | `FEEDBACK_NOTIFICATION_POLL_MS` | notification worker で任意 | `2000` | タスク定義 |
 | `FEEDBACK_NOTIFICATION_MAX_ATTEMPTS` | notification worker で任意 | `5` | タスク定義 |
-| `FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP` | 任意 (**ローカル fixture 専用**) | 未設定 (`https` と public address のみ) | —。APIとworkerの双方へ設定し、本番で `1` にしない |
-| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | notification worker では**必須** | なし (32文字以上、compose が注入) | **Secrets Manager** |
+| `FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP` | 任意 (**ローカル fixture 専用**) | 未設定 (`https` と public address のみ) | —。API、notification worker、connector register/runtimeへ設定し、本番で `1` にしない |
 | `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | API/notification worker で**必須** | なし (base64 で 32 byte) | **Secrets Manager** |
 | `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY_PREVIOUS` | key rotation 中だけ任意 | なし (base64 で 32 byte) | **Secrets Manager** |
 | `FEEDBACK_RETENTION_POLL_MS` | retention worker で任意 | `3600000` | タスク定義 |
 | `FEEDBACK_ORPHAN_GRACE_SECONDS` | retention worker で任意 | `3600` (最小 300) | タスク定義 |
+
+### 自動バックアップ搬送CLI
+
+| 変数 | 必須 | 説明 |
+|---|---:|---|
+| `FEEDBACK_PULL_API_BASE_URL` | 必須 | `/feedback/v1`までを含むFeedback Service URL |
+| `FEEDBACK_PULL_TOKEN_URL` | 必須 | OAuth 2.0 client credentialsのtoken endpoint |
+| `FEEDBACK_PULL_CLIENT_ID` | 必須 | `feedback.manage` membershipを付与したservice principalのclient ID |
+| `FEEDBACK_PULL_CLIENT_SECRET` | 必須 | **Secrets Manager**から注入するclient secret |
+| `FEEDBACK_PULL_SCOPE` | 任意 | `feedback.manage`。追加scopeが必要なIdPでは空白区切りで加える (`feedback.manage`は必須) |
+| `FEEDBACK_PULL_APPLICATION_KEY` | 必須 | 搬送対象application |
+| `FEEDBACK_PULL_EXTERNAL_WORKSPACE_KEY` | 必須 | 搬送対象workspace |
+| `FEEDBACK_PULL_DESTINATION_DIR` | 必須 | OS側でマウント済みの共有フォルダ。filesystem rootは拒否する |
+
+### 別プロセス通知コネクタ
+
+登録CLI (`bin/feedback-connector-register`) と参照runtime
+(`bin/feedback-connector-runtime`) は次を使う。接続先URL、SMTP資格情報、宛先はFeedback Serviceへ渡さず、
+各connector processのsecretとして管理する。
+
+| 変数 | 対象 | 必須・既定 |
+|---|---|---|
+| `FEEDBACK_CONNECTOR_KEY` | register | 必須。installationの安定key |
+| `FEEDBACK_CONNECTOR_DISPLAY_NAME` | register/runtime | registerで必須、runtimeはprovider名 |
+| `FEEDBACK_CONNECTOR_DESCRIPTOR_URL` | register | 必須。内部HTTPSの`/connector/v1/manifest` |
+| `FEEDBACK_CONNECTOR_DELIVERY_URL` | register | 必須。内部HTTPSの`/connector/v1/deliveries` |
+| `FEEDBACK_CONNECTOR_ALLOWED_HOSTS` | register | 任意。追加で許可する内部hostのカンマ区切り。descriptor/delivery/healthのhostは自動追加 |
+| `FEEDBACK_CONNECTOR_SUPPORTED_EVENTS` | register | 任意。既定は4種類すべて |
+| `FEEDBACK_CONNECTOR_ENABLED` | register | 任意。`0`で無効 |
+| `FEEDBACK_CONNECTOR_LEGACY_REF_MAP` | register (`webhook`) | 任意。旧Webhook endpointのSHA-256から`destinationRef`へのJSON object。旧設定を有効なままbackfillするとき必須 |
+| `FEEDBACK_CONNECTOR_ALLOW_PRIVATE_NETWORK` | notification worker | 内部HTTPS connectorをprivate networkで動かす場合のみ`1`。HTTPは許可しない |
+| `FEEDBACK_CONNECTOR_PROVIDER` | runtime | 必須。`webhook` / `teams` / `slack` / `smtp-mail` |
+| `FEEDBACK_CONNECTOR_PORT` | runtime | `8091` |
+| `FEEDBACK_CONNECTOR_SHARED_SECRET` | 両方 | 必須、32文字以上。**Secrets Manager** |
+| `FEEDBACK_CONNECTOR_DESTINATIONS` | runtime | 必須。`destinationRef`から送信先へのJSON object。secret扱い |
+| `FEEDBACK_CONNECTOR_IDEMPOTENCY_FILE` | runtime | 必須。delivery IDを永続化する専用volume上のファイル。複数runtimeで共有しない |
+| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | webhook runtime | 必須、32文字以上。外部Webhookへのtimestamp付きHMAC鍵。**Secrets Manager** |
+| `FEEDBACK_SMTP_HOST` / `FEEDBACK_SMTP_FROM` | smtp-mail | 必須 |
+| `FEEDBACK_SMTP_PORT` | smtp-mail | `587` |
+| `FEEDBACK_SMTP_USERNAME` / `FEEDBACK_SMTP_PASSWORD` | smtp-mail | SMTP AUTH利用時に注入。passwordはsecret |
 
 `application_environments.allowed_origins` が CORS allowlist の正本であり、API 起動環境変数で
 origin を上書きしない。S3 認証は AWS SDK の既定チェーン (本番は ECS タスクロール) を使う。
 API、notification worker、export worker、retention worker は同じ image から、それぞれ
 `bin/feedback-service`、`bin/feedback-notification-worker`、`bin/feedback-export-worker`、
 `bin/feedback-retention-worker` を command で選ぶ。export file は認可付き download API だけで配信する。
+同じ配布物に`bin/feedback-backup-pull`、`bin/feedback-connector-register`、
+`bin/feedback-connector-runtime`も含む。自動backup ZIPも認可付きdownload APIだけで配信する。
 local modeはAPI、export worker、retention workerでprivate volumeを共有し、分散配備は専用S3 bucketを共有する。
 
 exchange token は別 issuer/audience の署名・`iat`/`exp` と最大 lifetime を検証し、
@@ -304,7 +347,7 @@ Keycloak の本番モード運用 (ECS) か Cognito への移行を別途判断�
 |---|---|---|
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 開発 PostgreSQL の資格情報。api / worker / martin / seed にも同じ値が配線される | `gis` / `gis` / `gis` |
 | `FEEDBACK_POSTGRES_DB` / `FEEDBACK_POSTGRES_USER` / `FEEDBACK_POSTGRES_PASSWORD` | `--profile feedback` の専用通常 PostgreSQL。Web GIS DB と共有しない | `feedback` / `feedback` / `feedback` |
-| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | dev webhook の HMAC 署名 key | `feedback-dev-signing-secret-32chars` |
+| `FEEDBACK_WEBHOOK_SIGNING_SECRET` | standalone Webhook connectorと受信fixtureが共有する外向きHMAC鍵 (Feedback Service workerは使用しない) | `feedback-local-webhook-secret-0000` |
 | `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY` | dev notification endpoint の暗号鍵 (base64) | `infra/.env.example` の開発専用値 |
 | `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` | 開発 Keycloak の管理者 | `admin` / `admin` |
 | `UPLOAD_STORAGE` / `S3_BUCKET` / `S3_REGION` | アップロード保存先の切替。`s3` にする場合は `--profile s3` で MinIO を同時起動する | `local` / `gis-uploads` / `us-east-1` |

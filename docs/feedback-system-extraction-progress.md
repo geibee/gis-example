@@ -37,7 +37,7 @@
 - v1 利用時の Web GIS 管理 route を独立 Admin Console link へ置換
 - `feedback-legacy-migration`: 匿名 snapshot の dry-run/copy/reconcile/rollback。session/thread/message/history/
   evidence/audit/outbox を写し、ID、display number、SHA-256、個別の evidence expiry を維持する。GIS側の
-  `feedback_migration` schema/Flyway履歴だけを使用し、対象Feedback schema version 4以外は拒否する
+  `feedback_migration` schema/Flyway履歴だけを使用し、対象Feedback schema version 5以外は拒否する
 - `apps/feedback-conformance-consumer`: native History router、在庫・承認画面、mock token exchange、site workspace を
   使う consumer 2。Web GIS 固有依存なしで投稿、DOM pin、deep link、workspace state 分離を検証する
 - 互換 matrix、upgrade、operations、security guide と consumer 2 fail-closed dependency guard

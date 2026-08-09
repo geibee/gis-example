@@ -57,14 +57,18 @@ application manifest 自体は管理主体の token で `PUT /feedback/v1/applic
 | process | command | 必須依存 |
 |---|---|---|
 | HTTP API | `/app/bin/feedback-service` | PostgreSQL、OIDC JWKS、private object storage |
-| notification worker | `/app/bin/feedback-notification-worker` | PostgreSQL、`FEEDBACK_WEBHOOK_SIGNING_SECRET` |
-| export worker | `/app/bin/feedback-export-worker` | PostgreSQL、Export storage |
+| notification worker | `/app/bin/feedback-notification-worker` | PostgreSQL、`FEEDBACK_NOTIFICATION_ENCRYPTION_KEY`、内部connector endpoint |
+| export/backup worker | `/app/bin/feedback-export-worker` | PostgreSQL、Evidence/Export storage |
 | retention worker | `/app/bin/feedback-retention-worker` | PostgreSQL、Evidence/Export storage |
 | provisioning | `/app/bin/feedback-bootstrap` | PostgreSQL、`FEEDBACK_BOOTSTRAP_*` |
 
 notification worker は outbox を `FOR UPDATE SKIP LOCKED` で claim し、delivery ID、timestamp、
-`v1=<HMAC-SHA256>` 署名を付ける。API の request ID は outbox payload へ引き継ぐ。本文と evidence URL は
-workspace の notification setting でそれぞれ明示的に許可した場合だけ送る。
+`v1=<HMAC-SHA256>` 署名を付ける。API の request ID は outbox payload へ引き継ぐ。本文はconnectorで
+明示的に許可した場合だけ送り、evidence、object key、tokenは常に送らない。
+
+自動証跡バックアップと別プロセス通知コネクタは
+[`feedback-backup-and-connectors.md`](feedback-backup-and-connectors.md)を参照する。従来の単一Webhook設定は
+互換用として残るが、新規連携はconnector installationを使用する。
 
 暗号鍵を更新するときは、新しい鍵を `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY`、直前の鍵を
 `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY_PREVIOUS` に設定して API/worker を同時に更新する。既存 endpoint は

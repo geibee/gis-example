@@ -125,7 +125,6 @@ services:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
       FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
       FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
-      FEEDBACK_WEBHOOK_SIGNING_SECRET: ${FEEDBACK_WEBHOOK_SIGNING_SECRET:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
       FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
     depends_on:
       feedback-bootstrap:
@@ -142,8 +141,12 @@ services:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
       FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
       FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+      FEEDBACK_EVIDENCE_STORAGE: local
+      FEEDBACK_EVIDENCE_DIR: /data/evidence
       FEEDBACK_EXPORT_DIR: /data/exports
+      FEEDBACK_BACKUP_KEY_PREFIX: backups/
     volumes:
+      - feedback-evidence-data:/data/evidence:ro
       - feedback-export-data:/data/exports
     depends_on:
       feedback-bootstrap:

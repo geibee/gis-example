@@ -4,7 +4,7 @@ import org.flywaydb.core.Flyway
 
 /** 旧Web GISコピーCLIだけが所有するschemaとFlyway履歴。 */
 object LegacyMigrationDatabase {
-    const val targetFeedbackSchemaVersion = "4"
+    const val targetFeedbackSchemaVersion = "5"
 
     fun prepare(database: FeedbackDatabase) {
         requireFeedbackSchemaVersion(database)

@@ -2,6 +2,7 @@ package feedback.service
 
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.ContentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
@@ -67,7 +68,10 @@ fun Application.module(settings: ServiceSettings = ServiceSettings.fromEnv()) {
             }
         }
     }
-    install(ContentNegotiation) { json(serviceJson) }
+    install(ContentNegotiation) {
+        json(serviceJson)
+        json(serviceJson, ContentType.parse("application/merge-patch+json"))
+    }
     install(StatusPages) {
         exception<FeedbackApiException> { call, exception ->
             if (exception.status == HttpStatusCode.TooManyRequests) {

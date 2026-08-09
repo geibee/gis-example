@@ -19,6 +19,8 @@ interface EvidenceStorage : AutoCloseable {
     fun get(objectKey: String): ByteArray
     fun delete(objectKey: String)
     fun list(prefix: String): List<EvidenceObjectRef>
+    fun putFile(objectKey: String, contentType: String, path: Path) =
+        put(objectKey, contentType, Files.readAllBytes(path))
     override fun close() = Unit
 }
 
@@ -37,6 +39,12 @@ class LocalEvidenceStorage(private val root: Path) : EvidenceStorage {
         val target = resolve(objectKey)
         Files.createDirectories(target.parent)
         Files.write(target, bytes, StandardOpenOption.CREATE_NEW)
+    }
+
+    override fun putFile(objectKey: String, contentType: String, path: Path) {
+        val target = resolve(objectKey)
+        Files.createDirectories(target.parent)
+        Files.copy(path, target)
     }
 
     override fun get(objectKey: String): ByteArray = Files.readAllBytes(resolve(objectKey))
@@ -67,6 +75,13 @@ class S3EvidenceStorage(
         client.putObject(
             { it.bucket(bucket).key(objectKey).contentType(contentType).contentLength(bytes.size.toLong()) },
             RequestBody.fromBytes(bytes)
+        )
+    }
+
+    override fun putFile(objectKey: String, contentType: String, path: Path) {
+        client.putObject(
+            { it.bucket(bucket).key(objectKey).contentType(contentType).contentLength(Files.size(path)) },
+            RequestBody.fromFile(path)
         )
     }
 

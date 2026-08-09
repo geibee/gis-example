@@ -50,6 +50,8 @@ roots=(
 git ls-files --cached --others --exclude-standard -- "${roots[@]}" | sort -u >"$manifest"
 while IFS= read -r source; do
   [[ -n "$source" ]] || continue
+  # commit前の作業treeではindexに残る削除済みfileを列挙し得る。
+  [[ -f "$source" ]] || continue
   case "$source" in
     */node_modules/* | */dist/* | */build/* | */.gradle/* | */.kotlin/*) continue ;;
     apps/feedback-service/src/main/kotlin/feedback/service/LegacyMigration*.kt) continue ;;
@@ -82,7 +84,7 @@ scripts=(
 )
 for name in "${scripts[@]}"; do cp -p "scripts/$name" "$output/scripts/$name"; done
 
-# 現repositoryの適用済みV1〜V4は変更せず、抽出物だけを収束済みのclean V1にする。
+# 現repositoryのversioned migrationは変更せず、抽出物だけをV1〜V5収束済みのclean V1にする。
 baseline="$output/apps/feedback-service/src/main/resources/db/migration/V1__feedback_baseline.sql"
 {
   echo "-- Feedback System独立DBの収束済みbaseline。旧consumer移行台帳は含めない。"
@@ -90,6 +92,7 @@ baseline="$output/apps/feedback-service/src/main/resources/db/migration/V1__feed
   sed -n '1,$p' apps/feedback-service/src/main/resources/db/migration/V2__export_delivery_admin.sql
   sed -n '4,13p' apps/feedback-service/src/main/resources/db/migration/V3__legacy_copy_journal.sql
   sed -n '1,$p' apps/feedback-service/src/main/resources/db/migration/V4__standalone_operational_guards.sql
+  sed -n '1,$p' apps/feedback-service/src/main/resources/db/migration/V5__backup_and_connector_foundation.sql
 } >"$baseline"
 
 chmod +x "$output/apps/feedback-service/gradlew" "$output/scripts/"*.sh

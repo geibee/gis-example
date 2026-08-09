@@ -205,12 +205,54 @@ services:
     restart: unless-stopped
     environment:
       <<: *database-environment
-      FEEDBACK_WEBHOOK_SIGNING_SECRET: ${FEEDBACK_WEBHOOK_SIGNING_SECRET:?deploy/.envを作成してください}
       FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?deploy/.envを作成してください}
       FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP: "1"
     depends_on:
+      feedback-connector-register:
+        condition: service_completed_successfully
+
+  feedback-webhook-connector:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    command: ["/app/bin/feedback-connector-runtime"]
+    restart: unless-stopped
+    environment:
+      FEEDBACK_CONNECTOR_PROVIDER: webhook
+      FEEDBACK_CONNECTOR_DISPLAY_NAME: Webhook
+      FEEDBACK_CONNECTOR_PORT: "8091"
+      FEEDBACK_CONNECTOR_SHARED_SECRET: ${FEEDBACK_CONNECTOR_SHARED_SECRET:?deploy/.envを作成してください}
+      FEEDBACK_CONNECTOR_DESTINATIONS: '{"fixture-webhook":"http://feedback-conformance-consumer:8080/fixture-webhook"}'
+      FEEDBACK_CONNECTOR_IDEMPOTENCY_FILE: /data/connector/delivery-ids.log
+      FEEDBACK_WEBHOOK_SIGNING_SECRET: ${FEEDBACK_WEBHOOK_SIGNING_SECRET:?deploy/.envを作成してください}
+      FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP: "1"
+    volumes:
+      - feedback-webhook-connector-data:/data/connector
+    depends_on:
+      feedback-conformance-consumer:
+        condition: service_started
+
+  feedback-connector-register:
+    build:
+      context: ..
+      dockerfile: apps/feedback-service/Dockerfile
+    command: ["/app/bin/feedback-connector-register"]
+    restart: on-failure
+    environment:
+      <<: *database-environment
+      FEEDBACK_NOTIFICATION_ENCRYPTION_KEY: ${FEEDBACK_NOTIFICATION_ENCRYPTION_KEY:?deploy/.envを作成してください}
+      FEEDBACK_NOTIFICATION_ALLOW_LOCAL_HTTP: "1"
+      FEEDBACK_CONNECTOR_KEY: webhook
+      FEEDBACK_CONNECTOR_DISPLAY_NAME: Webhook
+      FEEDBACK_CONNECTOR_DESCRIPTOR_URL: http://feedback-webhook-connector:8091/connector/v1/manifest
+      FEEDBACK_CONNECTOR_DELIVERY_URL: http://feedback-webhook-connector:8091/connector/v1/deliveries
+      FEEDBACK_CONNECTOR_SHARED_SECRET: ${FEEDBACK_CONNECTOR_SHARED_SECRET:?deploy/.envを作成してください}
+      FEEDBACK_CONNECTOR_LEGACY_REF_MAP: '{"4e0698ee37ed5f6d296c598cc1028882e25dfe8e71448fefc10e09cfec0ed56a":"fixture-webhook"}'
+    depends_on:
       feedback-bootstrap-west:
         condition: service_completed_successfully
+      feedback-webhook-connector:
+        condition: service_started
 
   feedback-export-worker:
     build:
@@ -292,3 +334,4 @@ volumes:
   feedback-postgres-data:
   feedback-object-data:
   feedback-dev-certificates:
+  feedback-webhook-connector-data:

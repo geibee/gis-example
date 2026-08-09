@@ -41,6 +41,27 @@ val exportWorkerStartScripts by tasks.registering(CreateStartScripts::class) {
     classpath = tasks.startScripts.get().classpath
 }
 
+val connectorBootstrapStartScripts by tasks.registering(CreateStartScripts::class) {
+    applicationName = "feedback-connector-register"
+    mainClass.set("feedback.service.ConnectorBootstrapMainKt")
+    outputDir = layout.buildDirectory.dir("scripts-connector-bootstrap").get().asFile
+    classpath = tasks.startScripts.get().classpath
+}
+
+val backupPullStartScripts by tasks.registering(CreateStartScripts::class) {
+    applicationName = "feedback-backup-pull"
+    mainClass.set("feedback.service.BackupPullMainKt")
+    outputDir = layout.buildDirectory.dir("scripts-backup-pull").get().asFile
+    classpath = tasks.startScripts.get().classpath
+}
+
+val connectorRuntimeStartScripts by tasks.registering(CreateStartScripts::class) {
+    applicationName = "feedback-connector-runtime"
+    mainClass.set("feedback.service.ConnectorRuntimeMainKt")
+    outputDir = layout.buildDirectory.dir("scripts-connector-runtime").get().asFile
+    classpath = tasks.startScripts.get().classpath
+}
+
 // 旧Web GISコピーCLIはGIS repositoryだけの別配布物にし、ServiceのinstallDist/imageへ混ぜない。
 if (file("src/main/kotlin/feedback/service/LegacyMigrationMain.kt").isFile) {
     val legacyMigrationStartScripts by tasks.registering(CreateStartScripts::class) {
@@ -81,6 +102,9 @@ distributions {
             }
             into("bin") {
                 from(exportWorkerStartScripts)
+                from(connectorBootstrapStartScripts)
+                from(backupPullStartScripts)
+                from(connectorRuntimeStartScripts)
                 filePermissions { unix("rwxr-xr-x") }
             }
         }
@@ -112,6 +136,7 @@ dependencies {
     implementation("org.flywaydb:flyway-core:12.9.0")
     implementation("org.flywaydb:flyway-database-postgresql:12.9.0")
     implementation("software.amazon.awssdk:s3:2.29.52")
+    implementation("com.sun.mail:jakarta.mail:2.0.1")
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
     testImplementation(kotlin("test"))

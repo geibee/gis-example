@@ -5,12 +5,26 @@ fun main() {
     database.migrate()
     val settings = ExportStorageSettings.fromEnv()
     val storage = createExportStorage(settings)
+    val evidenceStorage = createEvidenceStorage(EvidenceStorageSettings.fromEnv())
     val worker = ExportWorker(database, storage, settings.keyPrefix)
+    val backupWorker = BackupWorker(
+        database = database,
+        evidenceStorage = evidenceStorage,
+        backupStorage = storage,
+        keyPrefix = (System.getenv("FEEDBACK_BACKUP_KEY_PREFIX") ?: "backups/").let {
+            if (it.endsWith('/')) it else "$it/"
+        },
+        maxAttempts = (System.getenv("FEEDBACK_BACKUP_MAX_ATTEMPTS") ?: "5").toInt()
+    )
+    val pollMillis = (System.getenv("FEEDBACK_EXPORT_POLL_MS") ?: "2000").toLong()
     Runtime.getRuntime().addShutdownHook(Thread {
+        evidenceStorage.close()
         storage.close()
         database.close()
     })
-    worker.runForever()
+    while (!Thread.currentThread().isInterrupted) {
+        if (!backupWorker.runOnce() && !worker.runOnce()) Thread.sleep(pollMillis)
+    }
 }
 
 class ExportWorker(

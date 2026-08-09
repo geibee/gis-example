@@ -95,9 +95,13 @@ function createRequest() {
       ]
     }, etag: '"v1"' };
     if (path.startsWith("/retention-policy")) return { value: { evidenceRetentionDays: null, exportRetentionDays: 7 }, etag: '"v1"' };
+    if (path.startsWith("/backup-policy")) return { value: { policy: { enabled: false, timezone: "Asia/Tokyo", fullBackupAt: "02:00", incrementalIntervalMinutes: 60, includeEvidence: true, retentionDays: null }, nextExecutionAt: null, nextFullAt: null, nextIncrementalAt: null, lastSuccessfulAt: null, changeCursor: 0, auditCursor: 0 }, etag: '"v1"' };
+    if (path.startsWith("/backups")) return { value: { items: [] }, etag: null };
     if (path.startsWith("/memberships")) return { value: [], etag: null };
     if (path.startsWith("/notification-settings")) return { value: { webhookEnabled: false, webhookEndpoint: null, includeBody: false, includeEvidence: false }, etag: '"v1"' };
     if (path.startsWith("/notification-deliveries")) return { value: [], etag: null };
+    if (path.startsWith("/connector-types")) return { value: [], etag: null };
+    if (path.startsWith("/notification-connectors")) return { value: [], etag: null };
     throw new Error(`unexpected: ${path}`);
   };
 }

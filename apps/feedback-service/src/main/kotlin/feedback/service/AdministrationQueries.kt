@@ -99,6 +99,17 @@ fun FeedbackDatabase.patchNotificationSettings(
 ): Pair<FeedbackNotificationSettings, Int> = transaction { connection ->
     validateNotificationSettings(value)
     ensureNotificationSettings(connection, requireNotNull(scope.workspaceId))
+    val connectorSynchronized = connection.syncLegacyWebhookConnector(
+        requireNotNull(scope.workspaceId),
+        value.webhookEnabled,
+        value.includeBody
+    )
+    if (value.webhookEnabled && !connectorSynchronized) {
+        conflict(
+            "Webhook connectorを登録してlegacy destinationRefを構成してから有効化してください",
+            "notification.webhook_connector_required"
+        )
+    }
     val encrypted = value.webhookEndpoint?.let(cipher::encrypt)
     connection.prepareStatement(
         """

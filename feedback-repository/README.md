@@ -23,4 +23,4 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml up --build
 `@feedback/maplibre` / `@feedback/admin-react` と `/feedback/v1`。ホスト固有の旧APIや移行CLIは含まない。
 
 詳細は `docs/quickstart.md`、`docs/react-integration.md`、`docs/authentication.md`、
-`docs/operations.md`、`docs/upgrade.md`、`docs/api-compatibility.md` を参照する。
+`docs/operations.md`、`docs/backup-and-connectors.md`、`docs/upgrade.md`、`docs/api-compatibility.md` を参照する。

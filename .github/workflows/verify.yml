@@ -206,11 +206,29 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
+      - name: S3互換storage (MinIO) を起動
+        run: |
+          docker run -d --name feedback-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=feedback-minio \
+            -e MINIO_ROOT_PASSWORD=feedback-minio-secret \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          docker logs feedback-minio
+          exit 1
       - name: clean baselineを空の通常 PostgreSQL で検証
         env:
           FEEDBACK_DATABASE_URL: jdbc:postgresql://localhost:5432/feedback
           FEEDBACK_DATABASE_USER: feedback
           FEEDBACK_DATABASE_PASSWORD: feedback
+          FEEDBACK_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          FEEDBACK_TEST_S3_REGION: us-east-1
+          FEEDBACK_TEST_S3_BUCKET: feedback-integration
+          FEEDBACK_TEST_S3_ACCESS_KEY: feedback-minio
+          FEEDBACK_TEST_S3_SECRET_KEY: feedback-minio-secret
         run: |
           mkdir -p "$RUNNER_TEMP/feedback-system"
           bash scripts/assemble-feedback-repository --output "$RUNNER_TEMP/feedback-system"

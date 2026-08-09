@@ -141,7 +141,7 @@ class LegacyMigrationIntegrationTest {
             }
         }
         val error = assertFailsWith<IllegalArgumentException> { LegacyMigrationDatabase.prepare(database) }
-        assertTrue(error.message.orEmpty().contains("対象Feedback schema versionは 4"))
+        assertTrue(error.message.orEmpty().contains("対象Feedback schema versionは 5"))
     }
 
     private fun provisionMigrationScope() {

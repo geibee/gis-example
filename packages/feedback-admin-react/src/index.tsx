@@ -15,8 +15,13 @@ type Schemas = components["schemas"];
 type Session = Schemas["FeedbackSessionV1"];
 type Thread = Schemas["FeedbackThreadV1"];
 type ExportJob = Schemas["FeedbackExportJob"];
+type BackupPolicy = Schemas["FeedbackBackupPolicy"];
+type BackupPolicyView = Schemas["FeedbackBackupPolicyView"];
+type BackupRun = Schemas["FeedbackBackupRun"];
 type Member = Schemas["FeedbackWorkspaceMember"];
 type Delivery = Schemas["FeedbackNotificationDelivery"];
+type ConnectorType = Schemas["FeedbackConnectorType"];
+type NotificationConnector = Schemas["FeedbackNotificationConnector"];
 type ManifestRoute = Schemas["FeedbackApplicationManifestV1"]["routes"][number];
 
 export type FeedbackAdminConsoleProps = {
@@ -328,10 +333,20 @@ function RetentionAndExport({
   const [etag, setEtag] = useState<string | null>(null);
   const [format, setFormat] = useState<"csv" | "xlsx">("csv");
   const [job, setJob] = useState<ExportJob | null>(null);
+  const [backupPolicy, setBackupPolicy] = useState<BackupPolicy | null>(null);
+  const [backupPolicyView, setBackupPolicyView] = useState<BackupPolicyView | null>(null);
+  const [backupEtag, setBackupEtag] = useState<string | null>(null);
+  const [backups, setBackups] = useState<BackupRun[]>([]);
   const load = useCallback(async () => {
     try {
-      const resource = await transport.request<Schemas["FeedbackRetentionPolicy"]>(`/retention-policy?${scopeQuery}`);
-      setPolicy(resource.value); setEtag(resource.etag);
+      const [retention, backup, runs] = await Promise.all([
+        transport.request<Schemas["FeedbackRetentionPolicy"]>(`/retention-policy?${scopeQuery}`),
+        transport.request<BackupPolicyView>(`/backup-policy?${scopeQuery}`),
+        transport.request<Schemas["FeedbackBackupRunPage"]>(`/backups?${scopeQuery}`)
+      ]);
+      setPolicy(retention.value); setEtag(retention.etag);
+      setBackupPolicy(backup.value.policy); setBackupPolicyView(backup.value); setBackupEtag(backup.etag);
+      setBackups(runs.value.items);
     } catch (caught) { onError(messageOf(caught)); }
   }, [onError, scopeQuery, transport]);
   useEffect(() => { void load(); }, [load]);
@@ -349,6 +364,30 @@ function RetentionAndExport({
         body: { applicationKey, environmentKey, externalWorkspaceKey, format, locale, timezone }
       });
       setJob(resource.value);
+    } catch (caught) { onError(messageOf(caught)); }
+  };
+  const saveBackupPolicy = async () => {
+    if (!backupPolicy || !backupEtag) return;
+    try {
+      await transport.request(`/backup-policy?${scopeQuery}`, {
+        method: "PATCH", ifMatch: backupEtag, body: backupPolicy
+      });
+      await load();
+    } catch (caught) { onError(messageOf(caught)); }
+  };
+  const downloadBackup = async (backup: BackupRun) => {
+    if (!backup.downloadUrl) return;
+    try {
+      const binary = await transport.requestBinary(`/backups/${backup.id}/download`);
+      const url = URL.createObjectURL(new Blob([binary.bytes.slice().buffer as ArrayBuffer], { type: binary.contentType }));
+      const anchor = document.createElement("a"); anchor.href = url; anchor.download = `feedback-backup-${backup.id}.zip`; anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) { onError(messageOf(caught)); }
+  };
+  const retryBackup = async (backup: BackupRun) => {
+    try {
+      await transport.request(`/backups/${backup.id}/retry?${scopeQuery}`, { method: "POST" });
+      await load();
     } catch (caught) { onError(messageOf(caught)); }
   };
   const refreshJob = async () => {
@@ -378,6 +417,32 @@ function RetentionAndExport({
         {job?.downloadUrl ? <button type="button" onClick={() => void download()}>Download</button> : null}</div>
       {job ? <p>{job.status} {job.error}</p> : null}
     </div>
+    <div className="feedback-admin-card"><h2>自動証跡バックアップ</h2>{backupPolicy ? <>
+      <label><input type="checkbox" checked={backupPolicy.enabled} onChange={(event) => setBackupPolicy({ ...backupPolicy, enabled: event.target.checked })} />有効</label>
+      <label>Timezone<input value={backupPolicy.timezone} onChange={(event) => setBackupPolicy({ ...backupPolicy, timezone: event.target.value })} /></label>
+      <label>日次フル実行時刻<input type="time" value={backupPolicy.fullBackupAt} onChange={(event) => setBackupPolicy({ ...backupPolicy, fullBackupAt: event.target.value })} /></label>
+      <label>差分間隔（分）<input type="number" min={15} max={1440} value={backupPolicy.incrementalIntervalMinutes} onChange={(event) => setBackupPolicy({ ...backupPolicy, incrementalIntervalMinutes: Number(event.target.value) })} /></label>
+      <label><input type="checkbox" checked={backupPolicy.includeEvidence} onChange={(event) => setBackupPolicy({ ...backupPolicy, includeEvidence: event.target.checked })} />証跡画像を含める</label>
+      <label>保存日数（空欄は無期限）<input type="number" value={backupPolicy.retentionDays ?? ""} onChange={(event) => setBackupPolicy({ ...backupPolicy, retentionDays: event.target.value ? Number(event.target.value) : null })} /></label>
+      <dl>
+        <dt>次回実行</dt><dd>{backupPolicyView?.nextExecutionAt ? new Date(backupPolicyView.nextExecutionAt).toLocaleString(locale) : "停止中"}</dd>
+        <dt>次回フル</dt><dd>{backupPolicyView?.nextFullAt ? new Date(backupPolicyView.nextFullAt).toLocaleString(locale) : "-"}</dd>
+        <dt>次回差分</dt><dd>{backupPolicyView?.nextIncrementalAt ? new Date(backupPolicyView.nextIncrementalAt).toLocaleString(locale) : "-"}</dd>
+        <dt>最終成功</dt><dd>{backupPolicyView?.lastSuccessfulAt ? new Date(backupPolicyView.lastSuccessfulAt).toLocaleString(locale) : "未実行"}</dd>
+        <dt>変更 / 監査カーソル</dt><dd>{backupPolicyView?.changeCursor ?? 0} / {backupPolicyView?.auditCursor ?? 0}</dd>
+      </dl>
+      <button type="button" onClick={() => void saveBackupPolicy()}>バックアップ方針を保存</button>
+    </> : null}</div>
+    <div className="feedback-admin-card"><h2>バックアップ履歴</h2>{backups.map((backup) => <article key={backup.id}>
+      <strong>{backup.kind}</strong> {backup.status} {new Date(backup.scheduledFor).toLocaleString(locale)}
+      {backup.archiveSha256 ? <code>{backup.archiveSha256.slice(0, 16)}…</code> : null}
+      <p>変更 {backup.fromChangeSequence} → {backup.toChangeSequence ?? "-"} / 監査 {backup.fromAuditSequence} → {backup.toAuditSequence ?? "-"}</p>
+      {backup.error ? <p>{backup.error}</p> : null}
+      <div className="feedback-admin-actions">
+        {backup.downloadUrl ? <button type="button" onClick={() => void downloadBackup(backup)}>ZIPを取得</button> : null}
+        {backup.status === "failed" ? <button type="button" onClick={() => void retryBackup(backup)}>再試行</button> : null}
+      </div>
+    </article>)}</div>
   </div>;
 }
 
@@ -436,13 +501,22 @@ function NotificationAdministration({ transport, scopeQuery, onError }: {
 }) {
   const [settings, setSettings] = useState<Schemas["FeedbackNotificationSettings"] | null>(null);
   const [etag, setEtag] = useState<string | null>(null); const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [connectorTypes, setConnectorTypes] = useState<ConnectorType[]>([]);
+  const [connectors, setConnectors] = useState<NotificationConnector[]>([]);
+  const [connectorType, setConnectorType] = useState("");
+  const [connectorName, setConnectorName] = useState("");
+  const [destinationRef, setDestinationRef] = useState("");
   const load = useCallback(async () => {
     try {
-      const [settingResource, deliveryResource] = await Promise.all([
+      const [settingResource, deliveryResource, typeResource, connectorResource] = await Promise.all([
         transport.request<Schemas["FeedbackNotificationSettings"]>(`/notification-settings?${scopeQuery}`),
-        transport.request<Delivery[]>(`/notification-deliveries?${scopeQuery}`)
+        transport.request<Delivery[]>(`/notification-deliveries?${scopeQuery}`),
+        transport.request<ConnectorType[]>(`/connector-types?${scopeQuery}`),
+        transport.request<NotificationConnector[]>(`/notification-connectors?${scopeQuery}`)
       ]);
       setSettings(settingResource.value); setEtag(settingResource.etag); setDeliveries(deliveryResource.value);
+      setConnectorTypes(typeResource.value); setConnectors(connectorResource.value);
+      setConnectorType((current) => current || typeResource.value.find((type) => type.enabled)?.key || "");
     } catch (caught) { onError(messageOf(caught)); }
   }, [onError, scopeQuery, transport]);
   useEffect(() => { void load(); }, [load]);
@@ -455,13 +529,56 @@ function NotificationAdministration({ transport, scopeQuery, onError }: {
     try { await transport.request(`/notification-deliveries/${id}/retry?${scopeQuery}`, { method: "POST" }); await load(); }
     catch (caught) { onError(messageOf(caught)); }
   };
+  const createConnector = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await transport.request(`/notification-connectors?${scopeQuery}`, {
+        method: "POST",
+        body: { connectorType, name: connectorName, destinationRef, enabled: true, includeBody: false }
+      });
+      setConnectorName(""); setDestinationRef(""); await load();
+    } catch (caught) { onError(messageOf(caught)); }
+  };
+  const toggleConnector = async (connector: NotificationConnector) => {
+    try {
+      await transport.request(`/notification-connectors/${connector.id}?${scopeQuery}`, {
+        method: "PATCH", ifMatch: versionEtag(connector.version),
+        body: { name: connector.name, destinationRef: connector.destinationRef, enabled: !connector.enabled, includeBody: connector.includeBody }
+      });
+      await load();
+    } catch (caught) { onError(messageOf(caught)); }
+  };
+  const removeConnector = async (connector: NotificationConnector) => {
+    try {
+      await transport.request(`/notification-connectors/${connector.id}?${scopeQuery}`, {
+        method: "DELETE", ifMatch: versionEtag(connector.version)
+      });
+      await load();
+    } catch (caught) { onError(messageOf(caught)); }
+  };
   return <div className="feedback-admin-grid"><div className="feedback-admin-card"><h2>Webhook設定</h2>{settings ? <>
+    <p>互換用の旧Webhook設定です。新規連携は通知コネクタを使用してください。</p>
     <label><input type="checkbox" checked={settings.webhookEnabled} onChange={(event) => setSettings({ ...settings, webhookEnabled: event.target.checked })} />有効</label>
     <label>Endpoint<input value={settings.webhookEndpoint ?? ""} onChange={(event) => setSettings({ ...settings, webhookEndpoint: event.target.value || null })} /></label>
     <label><input type="checkbox" checked={settings.includeBody} onChange={(event) => setSettings({ ...settings, includeBody: event.target.checked })} />本文を含める</label>
-    <label><input type="checkbox" checked={settings.includeEvidence} onChange={(event) => setSettings({ ...settings, includeEvidence: event.target.checked })} />証跡URLを含める</label>
+    <label><input type="checkbox" checked={settings.includeEvidence} onChange={(event) => setSettings({ ...settings, includeEvidence: event.target.checked })} />旧互換フラグ（コネクタ配送では証跡を送信しません）</label>
     <button type="button" onClick={() => void save()}>保存</button></> : null}</div>
+    <form className="feedback-admin-card" onSubmit={(event) => void createConnector(event)}><h2>通知コネクタを追加</h2>
+      <label>種別<select required value={connectorType} onChange={(event) => setConnectorType(event.target.value)}>
+        <option value="">選択</option>{connectorTypes.filter((type) => type.enabled).map((type) => <option key={type.key} value={type.key}>{type.displayName}</option>)}
+      </select></label>
+      <label>表示名<input required value={connectorName} onChange={(event) => setConnectorName(event.target.value)} /></label>
+      <label>Destination ref<input required value={destinationRef} onChange={(event) => setDestinationRef(event.target.value)} /></label>
+      <button type="submit">追加</button>
+    </form>
+    <div className="feedback-admin-card"><h2>有効なコネクタ</h2>{connectors.map((connector) => <article key={connector.id}>
+      <strong>{connector.name}</strong> {connector.displayName} / {connector.destinationRef} / {connector.enabled ? "enabled" : "disabled"}
+      <p>Health: {connector.healthStatus}{connector.healthCheckedAt ? ` (${new Date(connector.healthCheckedAt).toLocaleString()})` : ""}</p>
+      {connector.healthError ? <p>{connector.healthError}</p> : null}
+      <div className="feedback-admin-actions"><button type="button" onClick={() => void toggleConnector(connector)}>{connector.enabled ? "無効化" : "有効化"}</button><button type="button" onClick={() => void removeConnector(connector)}>削除</button></div>
+    </article>)}</div>
     <div className="feedback-admin-card"><h2>配送 / Dead letter</h2>{deliveries.map((delivery) => <article key={delivery.id}><strong>{delivery.eventType}</strong> {delivery.status} ({delivery.attemptCount})
+      {delivery.connectorName ? <span> / {delivery.connectorName}</span> : null}
       {delivery.lastError ? <p>{delivery.lastError}</p> : null}{delivery.status === "failed" ? <button type="button" onClick={() => void retry(delivery.id)}>再送</button> : null}</article>)}</div></div>;
 }
 

@@ -300,6 +300,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/backup-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getFeedbackBackupPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["patchFeedbackBackupPolicy"];
+        trace?: never;
+    };
+    "/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFeedbackBackups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/backups/{backupId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backupId: components["parameters"]["BackupId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getFeedbackBackup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/backups/{backupId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backupId: components["parameters"]["BackupId"];
+            };
+            cookie?: never;
+        };
+        get: operations["downloadFeedbackBackup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/backups/{backupId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backupId: components["parameters"]["BackupId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryFeedbackBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/retention-policy": {
         parameters: {
             query?: never;
@@ -323,13 +409,70 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @deprecated */
         get: operations["getFeedbackNotificationSettings"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
+        /** @deprecated */
         patch: operations["patchFeedbackNotificationSettings"];
+        trace?: never;
+    };
+    "/connector-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFeedbackConnectorTypes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notification-connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFeedbackNotificationConnectors"];
+        put?: never;
+        post: operations["createFeedbackNotificationConnector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notification-connectors/{connectorId}": {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                connectorId: components["parameters"]["ConnectorId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteFeedbackNotificationConnector"];
+        options?: never;
+        head?: never;
+        patch: operations["patchFeedbackNotificationConnector"];
         trace?: never;
     };
     "/memberships": {
@@ -413,6 +556,7 @@ export interface components {
         FeedbackLocationV1: components["schemas"]["location.schema"];
         FeedbackTargetV1: components["schemas"]["target.schema"];
         FeedbackWebhookEventV1: components["schemas"]["webhook-event.schema"];
+        FeedbackConnectorProtocolV1: components["schemas"]["connector-protocol.schema"];
         FeedbackCapabilities: {
             /** @constant */
             apiVersion: "1.0";
@@ -685,6 +829,114 @@ export interface components {
             createdAt: string;
             error?: string | null;
         };
+        FeedbackBackupPolicy: {
+            /** @default false */
+            enabled: boolean;
+            /** @default Asia/Tokyo */
+            timezone: string;
+            /** @default 02:00 */
+            fullBackupAt: string;
+            /** @default 60 */
+            incrementalIntervalMinutes: number;
+            /** @default true */
+            includeEvidence: boolean;
+            retentionDays: number | null;
+        };
+        FeedbackBackupPolicyView: {
+            policy: components["schemas"]["FeedbackBackupPolicy"];
+            /** Format: date-time */
+            nextExecutionAt: string | null;
+            /** Format: date-time */
+            nextFullAt: string | null;
+            /** Format: date-time */
+            nextIncrementalAt: string | null;
+            /** Format: date-time */
+            lastSuccessfulAt: string | null;
+            changeCursor: number;
+            auditCursor: number;
+        };
+        FeedbackBackupRun: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {unknown} */
+            kind: "full" | "incremental";
+            /** @enum {unknown} */
+            status: "queued" | "running" | "completed" | "failed" | "superseded";
+            /** Format: date-time */
+            scheduledFor: string;
+            /** Format: uri-reference */
+            downloadUrl?: string | null;
+            fromChangeSequence: number;
+            toChangeSequence?: number | null;
+            fromAuditSequence: number;
+            toAuditSequence?: number | null;
+            archiveSha256?: string | null;
+            archiveBytes?: number | null;
+            entryCounts?: {
+                [key: string]: number;
+            } | null;
+            /** Format: date-time */
+            historyCoverageStartedAt: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** Format: date-time */
+            completedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            error?: string | null;
+        };
+        FeedbackBackupRunPage: {
+            items: components["schemas"]["FeedbackBackupRun"][];
+            nextCursor: string | null;
+        };
+        FeedbackConnectorType: {
+            key: string;
+            displayName: string;
+            /** @constant */
+            protocolVersion: "1";
+            supportedEvents: string[];
+            enabled: boolean;
+            /** @enum {unknown} */
+            healthStatus: "unknown" | "healthy" | "unhealthy";
+            /** Format: date-time */
+            healthCheckedAt: string | null;
+            healthError: string | null;
+        };
+        FeedbackNotificationConnectorCreateRequest: {
+            connectorType: string;
+            name: string;
+            destinationRef: string;
+            /** @default true */
+            enabled: boolean;
+            /** @default false */
+            includeBody: boolean;
+        };
+        FeedbackNotificationConnectorPatchRequest: {
+            name: string;
+            destinationRef: string;
+            enabled: boolean;
+            includeBody: boolean;
+        };
+        FeedbackNotificationConnector: {
+            /** Format: uuid */
+            id: string;
+            connectorType: string;
+            displayName: string;
+            name: string;
+            destinationRef: string;
+            enabled: boolean;
+            includeBody: boolean;
+            /** @enum {unknown} */
+            healthStatus: "unknown" | "healthy" | "unhealthy";
+            /** Format: date-time */
+            healthCheckedAt: string | null;
+            healthError: string | null;
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         FeedbackRetentionPolicy: {
             evidenceRetentionDays: number | null;
             /** @default 7 */
@@ -712,6 +964,9 @@ export interface components {
         FeedbackNotificationDelivery: {
             /** Format: uuid */
             id: string;
+            /** Format: uuid */
+            connectorId?: string | null;
+            connectorName?: string | null;
             eventType: string;
             /** @enum {unknown} */
             status: "pending" | "processing" | "delivered" | "failed";
@@ -832,6 +1087,87 @@ export interface components {
             /** Format: uri-reference */
             evidenceUrl?: string;
         };
+        /** @constant */
+        protocolVersion: "1";
+        compatibleProtocolVersions: string[];
+        manifest: {
+            /** @constant */
+            kind: "manifest";
+            protocolVersion: components["schemas"]["protocolVersion"];
+            compatibleProtocolVersions: components["schemas"]["compatibleProtocolVersions"];
+            connectorKey: string;
+            displayName: string;
+            supportedEvents: ("feedback.thread.created.v1" | "feedback.message.created.v1" | "feedback.thread.resolved.v1" | "feedback.thread.reopened.v1")[];
+            /** Format: uri-reference */
+            healthPath: string;
+        };
+        deliveryRequest: {
+            /** @constant */
+            kind: "delivery-request";
+            protocolVersion: components["schemas"]["protocolVersion"];
+            /** Format: uuid */
+            deliveryId: string;
+            /** Format: uuid */
+            eventId: string;
+            destinationRef: string;
+            /** Format: date-time */
+            occurredAt: string;
+            event: components["schemas"]["webhook-event.schema"] & unknown;
+        };
+        deliveryResult: {
+            /** @constant */
+            kind: "delivery-result";
+            protocolVersion: components["schemas"]["protocolVersion"];
+            /** Format: uuid */
+            deliveryId: string;
+            /** @enum {unknown} */
+            status: "accepted" | "duplicate";
+            /** Format: date-time */
+            receivedAt: string;
+        };
+        /** FeedbackConnectorProtocolV1 */
+        "connector-protocol.schema": {
+            $defs: {
+                /** @constant */
+                protocolVersion: "1";
+                compatibleProtocolVersions: string[];
+                manifest: {
+                    /** @constant */
+                    kind: "manifest";
+                    protocolVersion: components["schemas"]["protocolVersion"];
+                    compatibleProtocolVersions: components["schemas"]["compatibleProtocolVersions"];
+                    connectorKey: string;
+                    displayName: string;
+                    supportedEvents: ("feedback.thread.created.v1" | "feedback.message.created.v1" | "feedback.thread.resolved.v1" | "feedback.thread.reopened.v1")[];
+                    /** Format: uri-reference */
+                    healthPath: string;
+                };
+                deliveryRequest: {
+                    /** @constant */
+                    kind: "delivery-request";
+                    protocolVersion: components["schemas"]["protocolVersion"];
+                    /** Format: uuid */
+                    deliveryId: string;
+                    /** Format: uuid */
+                    eventId: string;
+                    destinationRef: string;
+                    /** Format: date-time */
+                    occurredAt: string;
+                    event: components["schemas"]["webhook-event.schema"] & unknown;
+                };
+                deliveryResult: {
+                    /** @constant */
+                    kind: "delivery-result";
+                    protocolVersion: components["schemas"]["protocolVersion"];
+                    /** Format: uuid */
+                    deliveryId: string;
+                    /** @enum {unknown} */
+                    status: "accepted" | "duplicate";
+                    /** Format: date-time */
+                    receivedAt: string;
+                };
+            };
+        } & (components["schemas"]["manifest"] | components["schemas"]["deliveryRequest"] | components["schemas"]["deliveryResult"]);
     };
     responses: {
         /** @description 契約または manifest に適合しない入力 */
@@ -935,6 +1271,8 @@ export interface components {
         ThreadId: string;
         MessageId: string;
         ExportId: string;
+        BackupId: string;
+        ConnectorId: string;
         UserId: string;
         DeliveryId: string;
         Cursor: string;
@@ -1578,6 +1916,175 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getFeedbackBackupPolicy: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description workspaceの自動証跡バックアップ方針 */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackBackupPolicyView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    patchFeedbackBackupPolicy: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["FeedbackBackupPolicy"];
+            };
+        };
+        responses: {
+            /** @description 更新した自動バックアップ方針 */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackBackupPolicyView"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            412: components["responses"]["PreconditionFailed"];
+        };
+    };
+    listFeedbackBackups: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+                limit?: components["parameters"]["Limit"];
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自動バックアップ実行履歴 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackBackupRunPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getFeedbackBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backupId: components["parameters"]["BackupId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自動バックアップ実行状態 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackBackupRun"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    downloadFeedbackBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backupId: components["parameters"]["BackupId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description manifest・CSV・証跡画像を含む自己完結ZIP */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    retryFeedbackBackup: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header?: never;
+            path: {
+                backupId: components["parameters"]["BackupId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 再試行待ちへ戻したバックアップ */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackBackupRun"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     getFeedbackRetentionPolicy: {
         parameters: {
             query: {
@@ -1695,6 +2202,156 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            412: components["responses"]["PreconditionFailed"];
+        };
+    };
+    listFeedbackConnectorTypes: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description platform operatorが登録した別プロセス通知コネクタ */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackConnectorType"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listFeedbackNotificationConnectors: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description workspaceの通知コネクタ一覧 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackNotificationConnector"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createFeedbackNotificationConnector: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackNotificationConnectorCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 追加した通知コネクタ */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackNotificationConnector"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    deleteFeedbackNotificationConnector: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                connectorId: components["parameters"]["ConnectorId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 通知コネクタを削除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+        };
+    };
+    patchFeedbackNotificationConnector: {
+        parameters: {
+            query: {
+                applicationKey: components["parameters"]["ApplicationKeyQuery"];
+                externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
+            };
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                connectorId: components["parameters"]["ConnectorId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["FeedbackNotificationConnectorPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新した通知コネクタ */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackNotificationConnector"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             412: components["responses"]["PreconditionFailed"];
         };
     };
@@ -1832,6 +2489,7 @@ export interface operations {
                 applicationKey: components["parameters"]["ApplicationKeyQuery"];
                 externalWorkspaceKey: components["parameters"]["ExternalWorkspaceKeyQuery"];
                 status?: "pending" | "processing" | "delivered" | "failed";
+                connectorId?: string;
                 limit?: components["parameters"]["Limit"];
             };
             header?: never;

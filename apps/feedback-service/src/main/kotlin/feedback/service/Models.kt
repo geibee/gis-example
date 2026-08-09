@@ -264,6 +264,8 @@ data class FeedbackNotificationAttempt(
 @Serializable
 data class FeedbackNotificationDelivery(
     val id: String,
+    val connectorId: String? = null,
+    val connectorName: String? = null,
     val eventType: String,
     val status: String,
     val retryCycle: Int,
@@ -296,10 +298,111 @@ data class FeedbackExportJob(
     val error: String? = null
 )
 
+@Serializable
+data class FeedbackBackupPolicy(
+    val enabled: Boolean = false,
+    val timezone: String = "Asia/Tokyo",
+    val fullBackupAt: String = "02:00",
+    val incrementalIntervalMinutes: Int = 60,
+    val includeEvidence: Boolean = true,
+    val retentionDays: Int? = null
+)
+
+@Serializable
+data class FeedbackBackupPolicyView(
+    val policy: FeedbackBackupPolicy,
+    val nextExecutionAt: String? = null,
+    val nextFullAt: String? = null,
+    val nextIncrementalAt: String? = null,
+    val lastSuccessfulAt: String? = null,
+    val changeCursor: Long = 0,
+    val auditCursor: Long = 0
+)
+
+@Serializable
+data class FeedbackBackupRun(
+    val id: String,
+    val kind: String,
+    val status: String,
+    val scheduledFor: String,
+    val downloadUrl: String? = null,
+    val fromChangeSequence: Long,
+    val toChangeSequence: Long? = null,
+    val fromAuditSequence: Long,
+    val toAuditSequence: Long? = null,
+    val archiveSha256: String? = null,
+    val archiveBytes: Long? = null,
+    val entryCounts: Map<String, Long>? = null,
+    val historyCoverageStartedAt: String,
+    val expiresAt: String? = null,
+    val completedAt: String? = null,
+    val createdAt: String,
+    val error: String? = null
+)
+
+@Serializable
+data class FeedbackBackupRunPage(
+    val items: List<FeedbackBackupRun>,
+    val nextCursor: String? = null
+)
+
+@Serializable
+data class FeedbackConnectorType(
+    val key: String,
+    val displayName: String,
+    val protocolVersion: String,
+    val supportedEvents: List<String>,
+    val enabled: Boolean,
+    val healthStatus: String,
+    val healthCheckedAt: String? = null,
+    val healthError: String? = null
+)
+
+@Serializable
+data class FeedbackNotificationConnectorCreateRequest(
+    val connectorType: String,
+    val name: String,
+    val destinationRef: String,
+    val enabled: Boolean = true,
+    val includeBody: Boolean = false
+)
+
+@Serializable
+data class FeedbackNotificationConnectorPatchRequest(
+    val name: String,
+    val destinationRef: String,
+    val enabled: Boolean,
+    val includeBody: Boolean = false
+)
+
+@Serializable
+data class FeedbackNotificationConnector(
+    val id: String,
+    val connectorType: String,
+    val displayName: String,
+    val name: String,
+    val destinationRef: String,
+    val enabled: Boolean,
+    val includeBody: Boolean,
+    val healthStatus: String,
+    val healthCheckedAt: String? = null,
+    val healthError: String? = null,
+    val version: Int,
+    val createdAt: String,
+    val updatedAt: String
+)
+
 data class StoredExport(
     val fileName: String,
     val contentType: String,
     val bytes: ByteArray
+)
+
+data class StoredBackup(
+    val fileName: String,
+    val contentType: String = "application/zip",
+    val bytes: ByteArray,
+    val sha256: String
 )
 
 @Serializable
@@ -360,7 +463,8 @@ enum class ScopeKind {
     SESSION,
     THREAD,
     MESSAGE,
-    EXPORT
+    EXPORT,
+    BACKUP
 }
 
 data class RoutePolicy(

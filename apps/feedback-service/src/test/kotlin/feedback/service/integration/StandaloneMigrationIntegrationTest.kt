@@ -30,6 +30,7 @@ import com.sun.net.httpserver.HttpServer
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.client.request.get
+import io.ktor.client.request.delete
 import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.options
@@ -331,7 +332,8 @@ class StandaloneMigrationIntegrationTest {
                 message.id,
                 principal,
                 message.version,
-                FeedbackMessagePatchRequest("編集後のコメント")
+                FeedbackMessagePatchRequest("編集後のコメント"),
+                scope
             )
             assertEquals(2, edited.version)
             assertEquals(listOf(1, 2), database.listMessageVersions(message.id).map { it.version })
@@ -436,7 +438,8 @@ class StandaloneMigrationIntegrationTest {
                             messageId,
                             fixture.principal,
                             1,
-                            FeedbackMessagePatchRequest("並行編集$index")
+                            FeedbackMessagePatchRequest("並行編集$index"),
+                            fixture.scope
                         )
                     }
                 }, pool)
@@ -679,52 +682,77 @@ class StandaloneMigrationIntegrationTest {
         val receivedBodies = mutableListOf<String>()
         val receivedDeliveryIds = mutableListOf<String>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/webhook") { exchange ->
+        server.createContext("/connector/v1/deliveries") { exchange ->
             receivedBodies += exchange.requestBody.readAllBytes().toString(Charsets.UTF_8)
-            receivedDeliveryIds += requireNotNull(exchange.requestHeaders.getFirst("X-Feedback-Delivery-Id"))
-            val status = if (responses.incrementAndGet() <= 2) 500 else 204
-            exchange.sendResponseHeaders(status, -1)
+            val deliveryId = requireNotNull(exchange.requestHeaders.getFirst("X-Feedback-Delivery-Id"))
+            receivedDeliveryIds += deliveryId
+            val status = if (responses.incrementAndGet() <= 2) 500 else 202
+            val response = if (status in 200..299) {
+                """{"kind":"delivery-result","protocolVersion":"1","deliveryId":"$deliveryId","status":"accepted","receivedAt":"2026-08-09T00:00:01Z"}"""
+            } else ""
+            exchange.sendResponseHeaders(status, if (response.isEmpty()) -1 else response.toByteArray().size.toLong())
+            if (response.isNotEmpty()) exchange.responseBody.use { it.write(response.toByteArray()) }
+            exchange.close()
+        }
+        server.createContext("/health/ready") { exchange ->
+            exchange.sendResponseHeaders(204, -1)
             exchange.close()
         }
         server.start()
         try {
             val cipher = NotificationCipher(ByteArray(32) { 7 })
-            val (_, settingsVersion) = database.getNotificationSettings(fixture.scope, cipher)
-            database.patchNotificationSettings(
-                fixture.scope,
-                settingsVersion,
-                FeedbackNotificationSettings(
-                    webhookEnabled = true,
-                    webhookEndpoint = "https://fixture.invalid/webhook",
-                    includeBody = false,
-                    includeEvidence = true
-                ),
-                cipher
-            )
-            val localEndpoint = cipher.encrypt("http://127.0.0.1:${server.address.port}/webhook")
+            database.getNotificationSettings(fixture.scope, cipher)
+            val legacyEndpoint = cipher.encrypt("https://fixture.invalid/webhook")
             database.dataSource.connection.use { connection ->
                 connection.prepareStatement(
                     """
                     UPDATE feedback.notification_settings
-                    SET webhook_endpoint_ciphertext = ?, webhook_endpoint_nonce = ?
+                    SET webhook_enabled = true, include_body = false, include_evidence = true,
+                        webhook_endpoint_ciphertext = ?, webhook_endpoint_nonce = ?
                     WHERE workspace_id = ?::uuid
                     """.trimIndent()
                 ).use { statement ->
-                    statement.setBytes(1, localEndpoint.ciphertext)
-                    statement.setBytes(2, localEndpoint.nonce)
+                    statement.setBytes(1, legacyEndpoint.ciphertext)
+                    statement.setBytes(2, legacyEndpoint.nonce)
                     statement.setString(3, fixture.scope.workspaceId)
                     statement.executeUpdate()
                 }
+                connection.prepareStatement(
+                    "UPDATE feedback.notification_outbox SET status = 'pending', delivered_at = NULL WHERE workspace_id = ?::uuid"
+                ).use { statement ->
+                    statement.setString(1, fixture.scope.workspaceId)
+                    statement.executeUpdate()
+                }
             }
+            database.registerConnectorInstallation(
+                ConnectorInstallationInput(
+                    connectorKey = "webhook",
+                    displayName = "Webhook",
+                    manifestUrl = "http://127.0.0.1:${server.address.port}/connector/v1/manifest",
+                    deliveryUrl = "http://127.0.0.1:${server.address.port}/connector/v1/deliveries",
+                    healthUrl = "http://127.0.0.1:${server.address.port}/health/ready",
+                    signingSecret = "phase3-fixture-signing-secret-32chars",
+                    supportedEvents = listOf("feedback.thread.created.v1"),
+                    legacyDestinationRefs = mapOf(
+                        sha256("https://fixture.invalid/webhook".toByteArray()) to "phase3-review"
+                    )
+                ),
+                cipher
+            )
+            val (legacySettings, settingsVersion) = database.getNotificationSettings(fixture.scope, cipher)
+            assertEquals("https://fixture.invalid/webhook", legacySettings.webhookEndpoint)
+            database.patchNotificationSettings(
+                fixture.scope,
+                settingsVersion,
+                legacySettings.copy(webhookEnabled = true, includeBody = false),
+                cipher
+            )
             val notificationWorker = NotificationWorker(
                 database = database,
                 pollMillis = 100,
                 maxAttempts = 2,
                 notificationCipher = cipher,
-                dispatcher = WebhookDispatcher(
-                    signingSecret = "phase3-fixture-signing-secret-32chars",
-                    allowLocalDestinations = true
-                )
+                connectorDispatcher = ConnectorHttpDispatcher(allowLocalDestinations = true)
             )
             assertTrue(notificationWorker.runOnce())
             makeNotificationsAvailable(fixture.scope)
@@ -741,8 +769,9 @@ class StandaloneMigrationIntegrationTest {
             assertEquals(1, receivedDeliveryIds.toSet().size)
             receivedBodies.forEach { body ->
                 assertFalse(body.contains("=SUM(1,1)"))
-                assertContains(body, "\"evidenceUrl\":\"/feedback/v1/threads/${fixture.threadId}/evidence\"")
                 assertContains(body, "\"deepLink\":\"https://phase3.example/orders/ORDER-1?feedbackThread=${fixture.threadId}\"")
+                assertFalse(body.contains("evidenceUrl"))
+                assertFalse(body.contains("objectKey"))
             }
         } finally {
             server.stop(0)
@@ -1139,6 +1168,106 @@ class StandaloneMigrationIntegrationTest {
         }
         assertConformsTo(deliveries, "get", "/notification-deliveries", 200)
 
+        val administrationQuery = "applicationKey=http-app&externalWorkspaceKey=workspace-http"
+        val backupPolicy = client.get("/feedback/v1/backup-policy?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(backupPolicy, "get", "/backup-policy", 200)
+        assertContains(backupPolicy.bodyAsText(), "\"nextExecutionAt\"")
+        assertContains(backupPolicy.bodyAsText(), "\"changeCursor\":0")
+        val backupPolicyBody =
+            """{"enabled":true,"timezone":"Asia/Tokyo","fullBackupAt":"02:00","incrementalIntervalMinutes":60,"includeEvidence":true,"retentionDays":null}"""
+        assertRequestConforms(
+            backupPolicyBody,
+            "patch",
+            "/backup-policy",
+            "application/merge-patch+json"
+        )
+        val backupPolicyUpdated = client.patch("/feedback/v1/backup-policy?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header(HttpHeaders.IfMatch, requireNotNull(backupPolicy.headers[HttpHeaders.ETag]))
+            contentType(ContentType.parse("application/merge-patch+json"))
+            setBody(backupPolicyBody)
+        }
+        assertConformsTo(backupPolicyUpdated, "patch", "/backup-policy", 200)
+        assertContains(backupPolicyUpdated.bodyAsText(), "\"nextFullAt\"")
+
+        val backups = client.get("/feedback/v1/backups?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(backups, "get", "/backups", 200)
+        val absentBackupId = UUID.randomUUID().toString()
+        val absentBackup = client.get("/feedback/v1/backups/$absentBackupId") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(absentBackup, "get", "/backups/{backupId}", 404)
+        val absentBackupRetry = client.post("/feedback/v1/backups/$absentBackupId/retry?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(absentBackupRetry, "post", "/backups/{backupId}/retry", 404)
+
+        database.registerConnectorInstallation(
+            ConnectorInstallationInput(
+                connectorKey = "contract-webhook",
+                displayName = "Contract Webhook",
+                manifestUrl = "https://connector.example.invalid/connector/v1/manifest",
+                deliveryUrl = "https://connector.example.invalid/connector/v1/deliveries",
+                healthUrl = "https://connector.example.invalid/health/ready",
+                signingSecret = "contract-connector-shared-secret-32chars",
+                supportedEvents = listOf("feedback.message.created.v1")
+            ),
+            NotificationCipher(ByteArray(32) { 1 })
+        )
+        val connectorTypes = client.get("/feedback/v1/connector-types?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(connectorTypes, "get", "/connector-types", 200)
+        assertContains(connectorTypes.bodyAsText(), "\"healthStatus\":\"unknown\"")
+        val connectorBody =
+            """{"connectorType":"contract-webhook","name":"Contract通知","destinationRef":"review","enabled":true,"includeBody":false}"""
+        assertRequestConforms(connectorBody, "post", "/notification-connectors")
+        val connectorCreated = client.post("/feedback/v1/notification-connectors?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(connectorBody)
+        }
+        assertConformsTo(connectorCreated, "post", "/notification-connectors", 201)
+        val connectorId = serviceJson.parseToJsonElement(connectorCreated.bodyAsText()).jsonObject
+            .getValue("id").jsonPrimitive.content
+        val connectors = client.get("/feedback/v1/notification-connectors?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        assertConformsTo(connectors, "get", "/notification-connectors", 200)
+        val connectorPatchBody =
+            """{"name":"Contract通知更新","destinationRef":"review","enabled":false,"includeBody":false}"""
+        assertRequestConforms(
+            connectorPatchBody,
+            "patch",
+            "/notification-connectors/{connectorId}",
+            "application/merge-patch+json"
+        )
+        val connectorUpdated = client.patch("/feedback/v1/notification-connectors/$connectorId?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header(HttpHeaders.IfMatch, requireNotNull(connectorCreated.headers[HttpHeaders.ETag]))
+            contentType(ContentType.parse("application/merge-patch+json"))
+            setBody(connectorPatchBody)
+        }
+        assertConformsTo(connectorUpdated, "patch", "/notification-connectors/{connectorId}", 200)
+        val absentConnector = client.patch(
+            "/feedback/v1/notification-connectors/${UUID.randomUUID()}?$administrationQuery"
+        ) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header(HttpHeaders.IfMatch, "\"v1\"")
+            contentType(ContentType.parse("application/merge-patch+json"))
+            setBody(connectorPatchBody)
+        }
+        assertConformsTo(absentConnector, "patch", "/notification-connectors/{connectorId}", 404)
+        val connectorDeleted = client.delete("/feedback/v1/notification-connectors/$connectorId?$administrationQuery") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header(HttpHeaders.IfMatch, requireNotNull(connectorUpdated.headers[HttpHeaders.ETag]))
+        }
+        assertEquals(HttpStatusCode.NoContent, connectorDeleted.status)
+
         val exchangeAuthorized = client.get(
             "/feedback/v1/retention-policy?applicationKey=http-app&externalWorkspaceKey=workspace-http"
         ) {
@@ -1206,10 +1335,15 @@ class StandaloneMigrationIntegrationTest {
         )
     }
 
-    private fun assertRequestConforms(body: String, method: String, path: String) {
+    private fun assertRequestConforms(
+        body: String,
+        method: String,
+        path: String,
+        mediaType: String = "application/json"
+    ) {
         val violations = FeedbackOpenApiSpecSupport.validate(
             serviceJson.parseToJsonElement(body),
-            FeedbackOpenApiSpecSupport.requestSchema(method, path)
+            FeedbackOpenApiSpecSupport.requestSchema(method, path, mediaType)
         )
         assertTrue(
             violations.isEmpty(),
@@ -1388,6 +1522,13 @@ class StandaloneMigrationIntegrationTest {
         database.dataSource.connection.use { connection ->
             connection.prepareStatement(
                 "UPDATE feedback.notification_outbox SET available_at = now() WHERE workspace_id = ?::uuid"
+            ).use { statement -> statement.setString(1, scope.workspaceId); statement.executeUpdate() }
+            connection.prepareStatement(
+                """
+                UPDATE feedback.connector_delivery_queue queue SET available_at = now()
+                FROM feedback.notification_connectors connector
+                WHERE connector.id = queue.connector_id AND connector.workspace_id = ?::uuid
+                """.trimIndent()
             ).use { statement -> statement.setString(1, scope.workspaceId); statement.executeUpdate() }
         }
     }

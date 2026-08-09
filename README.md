@@ -205,6 +205,8 @@ Phase 5 として、レビュー画面に管理パネルを実装済み。プロ
 
 Phase 6 として、コメントの本人編集と全版履歴、証跡閲覧成功の監査、証跡の保存期間管理を実装済み。保存期間はプロジェクト既定をセッション単位で上書きでき、未設定は自動削除なし。期限切れ証跡は物理削除前でも API・一覧・集計から遮断され、editor が管理画面または外部スケジューラ向け API から小分けに完全削除できる。
 
+独立 Feedback Service では、コメント全版・状態変更・監査ログ・証跡画像を日次フル＋差分の自己完結ZIPへ自動保存し、認証付きCLIから共有ファイルサーバへ搬送できる。通知は本体と分離したConnector Protocol v1で拡張し、Webhook、Teams、Slack、SMTP Mailの参照コネクタを提供する。詳細は [`docs/feedback-backup-and-connectors.md`](docs/feedback-backup-and-connectors.md)。
+
 権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 
 ## Notes

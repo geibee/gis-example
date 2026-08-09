@@ -22,6 +22,9 @@ class RetentionWorker(
     private val storage: EvidenceStorage,
     private val exportStorage: EvidenceStorage? = null,
     private val evidencePrefix: String = EvidenceStorageSettings.fromEnv().keyPrefix,
+    private val backupPrefix: String = (System.getenv("FEEDBACK_BACKUP_KEY_PREFIX") ?: "backups/").let {
+        if (it.endsWith('/')) it else "$it/"
+    },
     private val pollMillis: Long = (System.getenv("FEEDBACK_RETENTION_POLL_MS") ?: "3600000").toLong(),
     private val orphanGraceSeconds: Long = (System.getenv("FEEDBACK_ORPHAN_GRACE_SECONDS") ?: "3600").toLong()
 ) {
@@ -40,7 +43,11 @@ class RetentionWorker(
                 while (purgeExpiredExports() > 0) {
                     // exportも小さなbatchで期限切れを排出する
                 }
+                while (purgeExpiredBackups() > 0) {
+                    // 明示的な保存期限があるbackupだけを小さなbatchで排出する
+                }
                 cleanupOrphans()
+                cleanupBackupOrphans()
             }.onFailure { exception ->
                 org.slf4j.LoggerFactory.getLogger(RetentionWorker::class.java)
                     .error("feedback retention cycle failed", exception)
@@ -205,6 +212,77 @@ class RetentionWorker(
             }
             expired.size
         }
+    }
+
+    fun purgeExpiredBackups(limit: Int = 100): Int {
+        require(limit in 1..1000)
+        val targetStorage = exportStorage ?: return 0
+        return database.transaction { connection ->
+            val expired = connection.prepareStatement(
+                """
+                SELECT id::text, object_key, tenant_id::text, application_id::text, workspace_id::text
+                FROM feedback.backup_runs
+                WHERE status = 'completed' AND expires_at <= now() AND object_key IS NOT NULL
+                ORDER BY expires_at FOR UPDATE SKIP LOCKED LIMIT ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setInt(1, limit)
+                statement.executeQuery().use { result ->
+                    buildList {
+                        while (result.next()) add(
+                            ExpiredExport(
+                                result.getString(1), result.getString(2), result.getString(3),
+                                result.getString(4), result.getString(5)
+                            )
+                        )
+                    }
+                }
+            }
+            expired.forEach { backup ->
+                targetStorage.delete(backup.objectKey)
+                connection.prepareStatement("UPDATE feedback.backup_runs SET object_key = NULL WHERE id = ?::uuid").use {
+                    it.setString(1, backup.id)
+                    it.executeUpdate()
+                }
+                connection.prepareStatement(
+                    """
+                    INSERT INTO feedback.audit_logs (
+                        id, tenant_id, application_id, workspace_id, action, resource_type,
+                        resource_id, outcome, request_id, changes
+                    ) VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, 'backup.purge', 'backup', ?,
+                              'succeeded', ?, '{"reason":"retention-policy"}'::jsonb)
+                    """.trimIndent()
+                ).use { statement ->
+                    statement.setString(1, UUID.randomUUID().toString())
+                    statement.setString(2, backup.tenantId)
+                    statement.setString(3, backup.applicationId)
+                    statement.setString(4, backup.workspaceId)
+                    statement.setString(5, backup.id)
+                    statement.setString(6, "retention:${UUID.randomUUID()}")
+                    statement.executeUpdate()
+                }
+            }
+            expired.size
+        }
+    }
+
+    fun cleanupBackupOrphans(now: Instant = Instant.now()): Int {
+        val targetStorage = exportStorage ?: return 0
+        val cutoff = now.minusSeconds(orphanGraceSeconds)
+        var removed = 0
+        targetStorage.list(backupPrefix).filter { it.lastModified.isBefore(cutoff) }.forEach { candidate ->
+            val exists = database.dataSource.connection.use { connection ->
+                connection.prepareStatement("SELECT 1 FROM feedback.backup_runs WHERE object_key = ?").use { statement ->
+                    statement.setString(1, candidate.objectKey)
+                    statement.executeQuery().use { it.next() }
+                }
+            }
+            if (!exists) {
+                targetStorage.delete(candidate.objectKey)
+                removed += 1
+            }
+        }
+        return removed
     }
 }
 

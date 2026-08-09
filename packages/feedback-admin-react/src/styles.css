@@ -7,5 +7,6 @@
 .feedback-admin-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
 .feedback-admin-error { color: var(--feedback-admin-error, #b91c1c); }
 .feedback-admin img { max-width: 100%; }
+.feedback-admin code { display: block; overflow-wrap: anywhere; margin-block: .35rem; }
 .feedback-admin table { width: 100%; border-collapse: collapse; }
 .feedback-admin th, .feedback-admin td { border: 1px solid var(--feedback-admin-border, #cbd5e1); padding: .35rem; text-align: start; }
