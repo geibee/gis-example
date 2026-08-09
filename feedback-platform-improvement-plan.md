@@ -1,1054 +1,584 @@
-# Feedback Platform 改善・独立化プラン
+# Feedback Platform Go移行・独立化計画
 
-## 1. 目的
+> 状態: レビュー用。Go採用を明示的に承認した後に実装を開始する。
+> 基準実装: `afe6d04`（フィードバックのバックアップと拡張通知基盤を実装）
+> 作成基準日: 2026-08-09
 
-`geibee/gis-example` に実装したフィードバック収集機能を、GIS固有機能から切り離し、任意のWebアプリケーションへ低負荷・低侵襲で組み込める独立した Feedback Platform として再設計する。
+## 関連文書
 
-本改善では以下を実現する。
+- 本文書: KotlinからGoへのv1完全互換移行、切替、Kotlin撤去まで
+- [`docs/feedback-platform-post-go-roadmap.md`](docs/feedback-platform-post-go-roadmap.md): Go移行完了後の製品化・汎用化ロードマップ
+- [`docs/feedback-go-agent-execution-plan.md`](docs/feedback-go-agent-execution-plan.md): 最大4スロットでのサブエージェント並行実装・統合計画
+- [`docs/feedback-backup-and-connectors.md`](docs/feedback-backup-and-connectors.md): 現行backup/connectorの実装・運用契約
 
-- フロントエンドはフレームワーク非依存のSDKを中心に提供する
-- React等の主要フレームワーク向けbindingを追加提供する
-- UIの最低共通実装としてWeb Componentを提供する
-- バックエンドSDKは提供せず、HTTP/OpenAPIを製品境界とする
-- アプリケーションとのバックエンド統合はGo製Sidecarを推奨方式とする
-- Feedback ServerもGoへ移行し、軽量な単一バイナリ/コンテナとして提供する
-- GIS、MapLibre等のアプリ固有連携はAdapter/Pluginとして分離する
-- 閉域・公共部門を含むオンプレミス/顧客環境への配備を可能にする
+Go移行の完了前は本文書だけを実装scopeとし、移行後ロードマップのAPI・schema・package変更を混在させない。
 
----
+## 1. 要約
 
-## 2. 基本方針
+`apps/feedback-service` のKotlin実装を、公開API、データ、運用インターフェース、失敗時の挙動を維持したGo実装へ置換する。
+Go移行中に製品仕様を再設計せず、最初の到達点を **v1完全互換** とする。
 
-### 2.1 製品境界
+採用を承認した場合の決定事項は次のとおり。
 
-Feedback Platformの本質的な製品境界はSDKではなく、以下とする。
+- 最終的なBackend実装はGoとし、Kotlin版は互換性確認とロールバックのために一時併存させる。
+- `contracts/feedback/openapi.yaml` とConnector Protocol v1を公開契約のSSoTとして維持する。
+- PostgreSQLの既存データとV1〜V5のDDL、Object Storage上の既存objectを移行せず、そのまま利用する。
+- APIだけでなく、worker、provisioning、connector runtime、backup pull、旧consumer移行CLIまでGo化対象に含める。
+- 初期移行ではworker統合、新API、データモデル再設計、Frontend再設計、独立repositoryへの物理移動を行わない。
+- 本番相当の並行検証では同じ書込みを二重実行しない。Kotlin版とGo版を別DBへ同一入力で実行するか、workspace単位で排他的に振り分ける。
+- Kotlinへ即時ロールバックできる期間は、Kotlinが解釈できないGo専用DDLを適用しない。
 
-1. **Feedback Protocol**
-   - OpenAPIで定義されたHTTP API
-   - Feedback、Thread、Reply、Attachment、Review Scope等の契約を定義する
+完了とは、Go版が全互換ゲートを満たし、14日間の観察期間と2回以上のフルバックアップ周期を問題なく通過し、
+Kotlin/JDK/GradleをFeedback Serviceの実行・ビルド要件から除去できた状態を指す。
 
-2. **Frontend Integration Contract**
-   - Host ApplicationからUser / Page / Target / Review Scope等を取得するAdapter Interface
+## 2. 現行v1の基準
 
-3. **Deployment Contract**
-   - Sidecar / Serverの設定、認証、ヘルスチェック、可観測性等の運用契約
+### 2.1 SSoT
 
-SDKやReact bindingはこれらを利用しやすくするための実装であり、製品の中心契約にはしない。
+| 項目 | 基準 |
+|---|---|
+| HTTP API | `contracts/feedback/openapi.yaml` |
+| Connector Protocol | `contracts/feedback/schemas/connector-protocol.schema.json` |
+| DB DDL | `apps/feedback-service/src/main/resources/db/migration/V*.sql` |
+| 環境変数 | `docs/environment-variables.md` |
+| 運用挙動 | `docs/feedback-service.md`、`docs/feedback-operations-guide.md` |
+| 独立配布形状 | `scripts/assemble-feedback-repository` と `feedback-repository/` |
+| 基準コード | Git commit `afe6d04` |
 
----
+Go移行中にSSoT間の不一致を発見した場合、Kotlinコードを暗黙の正解として写経しない。
+OpenAPI、統合テスト、運用文書、Kotlin実挙動を比較し、契約修正または互換テスト追加を先に行う。
 
-## 3. 目標アーキテクチャ
+### 2.2 維持する機能
 
-```text
-┌──────────────────────────────────────────────┐
-│ Host Web Application                         │
-│                                              │
-│ Business UI                                  │
-│    │                                         │
-│    ├─ Host Adapter                           │
-│    │    ├ User Context                       │
-│    │    ├ Page Context                       │
-│    │    ├ Target Context                     │
-│    │    └ Review Scope                       │
-│    │                                         │
-│    └─ Feedback Frontend                      │
-│         ├ @feedback/core                     │
-│         ├ @feedback/web-component            │
-│         ├ @feedback/react        (optional)  │
-│         └ @feedback/*-adapter    (optional)  │
-└───────────────────┬──────────────────────────┘
-                    │ same-origin HTTP
-                    ▼
-┌──────────────────────────────────────────────┐
-│ feedback-sidecar (Go)                        │
-│                                              │
-│ - Host identity受領                          │
-│ - Feedback用identity/token変換               │
-│ - application/tenant context付与             │
-│ - CSRF / rate limit                          │
-│ - request validation                         │
-│ - audit / trace context                      │
-│ - attachment proxy                          │
-└───────────────────┬──────────────────────────┘
-                    │ Feedback Protocol
-                    ▼
-┌──────────────────────────────────────────────┐
-│ feedback-server (Go)                         │
-│                                              │
-│ - Feedback / Thread / Reply                  │
-│ - Review Scope                               │
-│ - Anchor metadata                            │
-│ - Attachment metadata                        │
-│ - Notification                              │
-│ - Retention / Export                         │
-│ - Administration API                         │
-└───────────────┬──────────────────┬───────────┘
-                │                  │
-          PostgreSQL         Object Storage
-```
+HTTP APIは `/feedback/v1` 配下の現行resourceをすべて維持する。
 
----
+- capability、現在ユーザー、application manifest、review context
+- review sessionの一覧・作成・取得・更新
+- threadの作成・取得、deep link、status変更
+- messageの投稿・更新・version履歴
+- evidenceのupload/download、Range応答、quota、checksum
+- exportの作成・状態取得・download
+- 自動backup policy、full/incremental run、download、retry
+- retention policy
+- 従来notification settingの互換API
+- connector type、notification connectorのCRUD
+- notification deliveryの参照・retry
+- workspace membershipの管理
 
-## 4. Go移行方針
+非HTTP機能も互換対象とする。
 
-### 4.1 対象
+- OIDC Bearer JWTとtoken exchange JWTの検証
+- `feedback.read`、`feedback.comment`、`feedback.manage`、`feedback.admin` の認可
+- tenant/application/environment/workspace境界と非メンバーへの404
+- mutate成功および401/403の監査、before/after変更記録
+- tenant/principal/IP単位rate limitとevidence quota
+- notification outbox、connector delivery queue、lease、retry、dead-letter相当状態
+- AES-256-GCMによるsecret暗号化と旧鍵からのrotation
+- HMAC署名、timestamp、delivery ID、重複排除
+- full/incremental backup、CSV/ZIP/manifest/checksum/cursor
+- export/evidence/backupのretentionとorphan cleanup
+- PostgreSQLとS3互換Object Storageのreadiness
+- Prometheus metrics、structured log、request/correlation ID
 
-原則として現在の `apps/feedback-service` の責務をGoへ移行する。
+### 2.3 維持するプロセスとCLI
 
-対象例:
+既存の実行名はdeployment contractとして維持する。Go版は単一の静的バイナリとし、subcommandまたはsymlinkで
+次のentrypointを提供する。
 
-- API Server
-- Authentication / Authorization
-- Feedback CRUD
-- Thread / Reply
-- Review Scope
-- Attachment metadata
-- Notification processing
-- Retention worker
-- Export worker
-- Bootstrap / migration処理
+| 既存entrypoint | Go版の責務 |
+|---|---|
+| `feedback-service` | HTTP API |
+| `feedback-notification-worker` | outboxとconnector配送 |
+| `feedback-export-worker` | exportと自動backup |
+| `feedback-retention-worker` | retentionとorphan cleanup |
+| `feedback-bootstrap` | tenant/application/workspace/membershipの冪等登録 |
+| `feedback-connector-register` | connector manifest登録 |
+| `feedback-connector-runtime` | Webhook、Teams、Slack、SMTP参照connector |
+| `feedback-backup-pull` | OAuth client credentialsによる共有サーバ搬送 |
+| `feedback-legacy-migration` | 旧Web GISデータのdry-run/copy/reconcile/rollback |
+| `feedback-migrate`（追加） | Flyway handoff後のone-shot schema migration |
 
-### 4.2 Goを採用する理由
+初期互換期間はプロセスを統合しない。負荷と障害分離を観測した後のworker統合は別変更として扱う。
 
-今回のFeedback機能は、複雑な業務ドメインを表現することよりも、任意システムへ容易に組み込み・配布・運用できることの価値が大きい。
+## 3. 移行範囲と非対象
 
-Go化によって以下を狙う。
+### 3.1 Go移行に含めるもの
 
-- JVM不要の単一バイナリ配布
-- 小さいコンテナイメージ
-- 高速起動
-- メモリ使用量削減
-- Sidecarとしての導入容易性
-- クロスコンパイル
-- 依存ライブラリ/runtime管理の単純化
-- systemd、Docker、Kubernetes等への展開容易性
+- HTTP routing、DTO、validation、Problem Details、CORS
+- OIDC/JWKS、token exchange、permission判定
+- PostgreSQL query、transaction、locking、idempotency、audit
+- S3互換storage clientとfilesystem local adapter
+- evidence、export、backup、retention
+- notification、connector protocol、SMTP/Webhook/Teams/Slack
+- health、readiness、metrics、structured logging
+- すべてのworker、bootstrap、backup pull、legacy migration CLI
+- OCI image、Compose、CI、独立repository抽出処理、運用文書
+- OpenAPIから生成するGo DTO/handler interfaceとdrift check
 
-### 4.3 避けること
+### 3.2 v1完全互換まで実施しないもの
 
-Go移行時にKotlin実装を1対1で翻訳しない。
+次の内容は有用だが、Go移行と同時には行わない。
 
-現在のサービス境界・worker構成を再評価し、以下の単位で責務を再構成する。
+- `/feedback` や `/review-scopes` などへのresource再編
+- Stable Anchor、Review Dimension、Review Scopeの新しいwire model
+- Web Component追加やReact binding再設計
+- Host Adapterの新規公開契約
+- 独立した `feedback-sidecar` の新設
+- notification/export/retention workerの統合
+- queue製品、ORM、DI framework、service meshの導入
+- `gis-example` から独立repositoryへの物理移転
 
-```text
-cmd/
-  feedback-server/
-  feedback-sidecar/
-  feedback-worker/       # 必要なら統合worker
-  feedback-migrate/
+これらはGo版をdefaultにした後、OpenAPIの後方互換ルールに従う別ロードマップとして扱う。
 
-internal/
-  feedback/
-  thread/
-  review/
-  anchor/
-  attachment/
-  identity/
-  notification/
-  retention/
-  export/
-  persistence/
-  transport/
-```
+## 4. Go実装の技術方針
 
-初期段階では過剰なClean Architecture化はせず、明確なパッケージ境界とdependency directionを維持する。
+### 4.1 Runtime topology
 
----
-
-## 5. フロントエンド構成
-
-### 5.1 パッケージ構成
+v1移行では現在の責務分離を維持し、独立したSidecar製品は追加しない。
 
 ```text
-packages/
-  feedback-core/
-  feedback-web-component/
-  feedback-react/
-  feedback-admin-react/
-  feedback-maplibre/
-  feedback-testing/
+Frontend SDK / Admin UI
+          │ /feedback/v1
+          ▼
+feedback-service (Go) ───── OIDC / token exchange
+          │
+          ├──────── PostgreSQL
+          └──────── S3-compatible Object Storage
+                         ▲
+                         │
+notification / export-backup / retention workers (Go)
+          │
+          └──────── connector runtime (Go) ── Webhook / Teams / Slack / SMTP
 ```
 
-現行の `feedback-core`、`feedback-react`、`feedback-maplibre` 等の分離思想は維持する。
+Go版 `feedback-service` は中央配置にもapplication隣接配置にも対応するが、どちらも同じHTTP契約と認証境界を使う。
+API transaction内では外部通知を行わず、outbox/queueを介してworkerへ渡す。
 
-### 5.2 `@feedback/core`
+### 4.2 Toolchainと配布
 
-フレームワーク非依存のHeadless SDKとする。
+- 実装開始時点の安定版であるGo 1.26.5を `go.mod`、CI、Docker build imageで固定する。
+- `CGO_ENABLED=0` のLinux amd64/arm64静的バイナリを生成する。
+- runtime imageはnon-rootのdistroless系を使用し、CA証明書とtimezone dataだけを含める。
+- 1つの `feedback` バイナリへsubcommandを実装し、既存entrypoint名のsymlinkをimageへ配置する。
+- Windows amd64、macOS arm64のbinaryはCLIとローカル検証用に配布し、serverの本番保証対象はLinuxとする。
+- module、generator、toolのversionはすべて `go.mod` / `go.sum` とtool定義へ固定する。
 
-責務:
+Go 1.27は基準日時点で未リリースのため採用しない。Goのminor security releaseは通常の依存更新PRで追随する。
 
-- Feedback API client
-- Feedback / Thread状態管理
-- Host Adapter Interface
-- Target / Anchor生成
-- Review Scope管理
-- event handling
-- retry/error normalization
-- SDK extension point
+### 4.3 Repository layout
 
-UIは持たない。
-
-想定API:
-
-```ts
-const feedback = createFeedback({
-  endpoint: "/feedback",
-  applicationId: "sales-management",
-  host: {
-    getUser,
-    getPageContext,
-    getTargetContext,
-    getReviewScope,
-  },
-})
-```
-
-### 5.3 Host Adapter
-
-Feedback Platformは業務アプリケーションの内部構造を理解しない。
-
-```ts
-interface HostAdapter {
-  getUser(): UserContext | Promise<UserContext>
-  getPageContext(): PageContext
-  getTargetContext(target: EventTarget): TargetContext | null
-  getReviewScope(): ReviewScope
-}
-```
-
-アプリ固有情報はすべてAdapterで変換する。
-
-例:
-
-通常Webアプリ:
-
-```json
-{
-  "type": "element",
-  "route": "/orders/123",
-  "stableId": "delivery-date"
-}
-```
-
-GIS:
-
-```json
-{
-  "type": "map-feature",
-  "layer": "road",
-  "featureId": "12345"
-}
-```
-
-### 5.4 UI提供方法
-
-#### 標準
-
-Web Componentを提供する。
-
-```html
-<feedback-widget
-  application-id="sample-app"
-  endpoint="/feedback">
-</feedback-widget>
-```
-
-メリット:
-
-- React/Vue/Angular/Svelte/Vanilla JSから利用可能
-- Shadow DOMによりCSS干渉を抑制
-- 既存システムにも導入しやすい
-
-#### React
-
-React利用者向けには薄いbindingを提供する。
-
-```tsx
-<FeedbackProvider client={feedback}>
-  <App />
-  <FeedbackWidget />
-</FeedbackProvider>
-```
-
-React固有の状態管理・業務ロジックは持ち込まない。
-
----
-
-## 6. コメント対象位置のAnchor設計
-
-汎用化において最重要論点の一つとする。
-
-DOM selectorや座標だけを永続化すると、画面変更によってコメント位置が失われるため、Anchorは複数情報を組み合わせる。
-
-推奨モデル:
-
-```json
-{
-  "targetType": "element",
-  "stableId": "order.delivery-date",
-  "route": "/orders/:id",
-  "entity": {
-    "type": "order",
-    "id": "123"
-  },
-  "fallback": {
-    "cssSelector": "...",
-    "textQuote": "...",
-    "boundingBox": {}
-  }
-}
-```
-
-優先順位:
-
-1. Host Applicationが提供するstableId
-2. 業務entity identifier
-3. Plugin固有identifier
-4. CSS selector / text / geometry等のfallback
-
-Feedback Platform側でDOM構造そのものを業務IDとして扱わない。
-
----
-
-## 7. Review Scope設計
-
-レビュー対象とレビュー観点を明示的なモデルとして扱う。
-
-例:
-
-```json
-{
-  "scopeId": "prototype-2026-08",
-  "areas": [
-    {
-      "id": "order-list",
-      "enabled": true,
-      "dimensions": {
-        "business-flow": true,
-        "wording": true,
-        "visual-design": false,
-        "performance": false
-      }
-    }
-  ]
-}
-```
-
-これにより以下を可能にする。
-
-- 現在レビュー対象かどうかを画面上で表現
-- 将来レビューする観点をdisabled状態で表示
-- コメント時にレビュー観点を選択
-- フェーズ単位で対象範囲を変更
-- 「今回レビューしてほしくない内容」へのコメントをUI上で抑制
-- 集計時にレビュー観点別に分析
-
-Review ScopeはHost Application内部にハードコードせず、Feedback Serverから取得できるようにする。
-
----
-
-## 8. Sidecar設計
-
-### 8.1 Sidecarを推奨統合方式とする
-
-バックエンドSDKは提供しない。
-
-Host ApplicationはFeedback Protocolを直接呼び出してもよいが、企業システムではSidecar経由を推奨する。
-
-### 8.2 Sidecarの責務
-
-- same-origin endpoint提供
-- Host Applicationの認証済みidentity受領
-- Feedback identityへの変換
-- applicationId / tenantId付与
-- authorization context付与
-- CSRF protection
-- rate limiting
-- request size制御
-- trace / correlation ID
-- audit metadata付与
-- attachment upload proxy
-- upstream timeout/retry
-- Feedback Server障害時のfail-safe
-
-### 8.3 Sidecarに持たせない責務
-
-- Feedbackの永続化
-- Thread状態管理
-- Review Scopeのmaster管理
-- Notification business rule
-- Host Applicationの業務ロジック
-
-Sidecarはstatelessを原則とする。
-
----
-
-## 9. 認証・認可
-
-Feedback Serverが各Host Applicationの認証方式を理解する設計は禁止する。
-
-対応すべきHost認証方式例:
-
-- Entra ID
-- Keycloak
-- Cognito
-- Session Cookie
-- 独自JWT
-- reverse proxy authentication
-
-これらはHost/Sidecar境界で吸収する。
-
-### 推奨trust boundary
+Go版は並行検証のため、Kotlin版を上書きせず `apps/feedback-service-go` に追加する。
 
 ```text
-Browser
-  ↓
-Host Application / Reverse Proxy
-  ↓ authenticated user context
-Feedback Sidecar
-  ↓ platform identity
-Feedback Server
+apps/feedback-service-go/
+├ go.mod
+├ cmd/feedback/
+├ internal/
+│  ├ contract/       # OpenAPI生成物。手編集禁止
+│  ├ httpapi/        # routing、decode/encode、middleware
+│  ├ auth/           # OIDC、token exchange、permission
+│  ├ usecase/        # transaction単位のapplication logic
+│  ├ postgres/       # queryとrow mapping
+│  ├ objectstore/    # S3/filesystem
+│  ├ jobs/           # claim、lease、retry
+│  ├ connector/      # Connector Protocol runtime/client
+│  ├ migration/      # Go migration handoff後のrunner
+│  ├ observability/  # log、metrics、health
+│  └ config/         # 環境変数decode/validation
+├ migrations/
+├ tests/
+└ Dockerfile
 ```
 
-Feedback Serverが扱うidentityは共通形式とする。
+依存方向は `httpapi/jobs -> usecase -> interface <- postgres/objectstore` とする。
+HTTP handlerへSQLを書かず、PostgreSQL固有の処理をdomain modelへ漏らさない。一方で、抽象化のためだけのrepository層や
+巨大なinterfaceを作らず、transactionとqueryの境界に必要な最小interfaceだけを置く。
+
+### 4.4 Library方針
+
+- HTTPは標準 `net/http` を中心とし、OpenAPIからGo DTOとhandler interfaceを生成する。
+- OpenAPI generatorは `oapi-codegen/v2` を固定versionで使用し、生成物をcommitする。
+- PostgreSQLは `pgx/v5` と `pgxpool`、値はbind parameter、動的識別子は既存allowlist相当を必須とする。
+- ORMとSQL自動生成は採用せず、既存SQLの意味を監査できるhand-written queryを使用する。
+- S3はAWS SDK for Go v2を使用し、AWS S3とMinIOで同じintegration suiteを通す。
+- JWT/JWKSは `lestrrat-go/jwx/v3` を使用し、issuer、audience、algorithm、time claimを明示検証する。
+- JSONはunknown field拒否、null/未指定の区別、timestamp/UUID validationを共通decoderで統一する。
+- loggingは `log/slog`、traceはOpenTelemetry、metricsはPrometheus clientを使用する。
+- dependency injection frameworkは使わず、`main` で明示的に依存を組み立てる。
 
-```json
-{
-  "subject": "user-123",
-  "displayName": "User A",
-  "applicationId": "sales-management",
-  "tenantId": "tenant-a",
-  "roles": ["reviewer"]
-}
-```
+### 4.5 Configuration
+
+- 既存の `FEEDBACK_*` 環境変数名、必須/任意、default、範囲検証を維持する。
+- secretをfileやcommand line argumentから読まず、環境変数または実行基盤のsecret injectionを使用する。
+- secretに開発用fallbackを設けない。
+- 未知の環境変数は無視するが、既知変数の不正値は起動失敗とする。
+- Go固有設定を追加する場合も `docs/environment-variables.md` とCompose/CIを同じ変更で更新する。
 
-ユーザー表示名等をクライアントから無条件に信用しない。
+## 5. 互換性契約
+
+### 5.1 HTTPとJSON
 
----
+Go版は次をKotlin版と一致させる。
 
-## 10. Feedback Protocol / API設計
+- path、method、query、header、request body、response body
+- status code、Problem Detailsの `type/title/status/detail/code/requestId`
+- Content-Type、Range、Content-Range、Retry-After、download filename
+- absent/null/empty collection、enum文字列、日時精度、UUID表現
+- pagination順序、default limit、同値時のtie-break order
+- 401/403/404による情報隠蔽
+- idempotency keyとrequest IDの引継ぎ
+- `application/merge-patch+json` の部分更新意味論
 
-OpenAPIをSSoTとする。
+OpenAPIに表現できない挙動は `contracts/feedback/behavior/` の機械可読fixtureとして追加し、Kotlin版とGo版へ同じ試験を適用する。
 
-主なresource:
+### 5.2 AuthenticationとAuthorization
 
-```text
-/applications
-/review-scopes
-/feedback
-/feedback/{id}
-/feedback/{id}/replies
-/feedback/{id}/attachments
-/feedback/{id}/status
-/targets
-/exports
-```
+- direct OIDCとtoken exchangeを別trust boundaryとして維持する。
+- JWKS cache/refresh失敗時に未検証tokenを許可しない。
+- `alg=none`、想定外algorithm、issuer/audience不一致、期限切れ、未来のiatを拒否する。
+- token permission、DB membership、tenant/application/environment/workspace claimをすべて満たす場合だけ許可する。
+- permission matrixは純粋関数として実装し、Kotlinの全期待表を同じtable-driven testへ移す。
+- 認証拒否と認可拒否の監査記録を成功応答より先に失わない。
 
-Feedbackモデル例:
+### 5.3 Databaseと並行処理
 
-```json
-{
-  "id": "...",
-  "applicationId": "...",
-  "reviewScopeId": "...",
-  "target": {},
-  "dimension": "business-flow",
-  "body": "...",
-  "status": "open",
-  "author": {},
-  "createdAt": "..."
-}
-```
+- Go版は既存 `feedback` schemaを直接利用し、移植目的のtable/column変更を行わない。
+- transaction isolation、lock順序、`FOR UPDATE SKIP LOCKED`、advisory lock、lease期限をKotlin版と一致させる。
+- thread番号、message version、change sequence、audit sequenceの単調性を維持する。
+- outboxと業務更新、connector queueとthread更新、backup cursorと成功runを同一transaction境界で扱う。
+- DB transaction中に外部HTTPやObject Storageの長時間I/Oを行わない。
+- process停止、timeout、commit結果不明の場合もat-least-onceとidempotencyで収束させる。
 
-API設計上、UI都合のDTOと永続モデルを直接一致させない。
+### 5.4 Object Storageと成果物
 
----
+- 既存object keyを読めることを必須とし、Go移行だけを理由にobjectをcopy/renameしない。
+- evidenceのSHA-256、Content-Type、size、Range downloadを維持する。
+- export/backup ZIPのentry名、UTF-8 BOM、CRLF、RFC 4180 quoting、CSV formula対策を維持する。
+- backup manifestのversion、件数、cursor、history coverage、entry checksumを一致させる。
+- upload成功後にDB commitが失敗したobjectをorphanとして回収する。
+- download CLIは同一directory内temp fileとatomic renameを使い、path traversalとroot出力を拒否する。
 
-## 11. データ所有・保持
+### 5.5 NotificationとConnector Protocol
 
-Feedback Platformを複数システムで利用する場合、データ境界を明示する。
+- Connector Protocol v1のmanifest、health、delivery、result schemaを変更しない。
+- delivery bodyへtoken、evidence URL、object key、未知fieldを含めない。
+- 本文送信はconnector単位の明示opt-inを維持する。
+- timestamp/HMAC、request size、HTTPS/private network/allowlist規則を維持する。
+- accepted/duplicate、retryable/permanent failure、429/timeoutの分類を一致させる。
+- persistent delivery IDと並列重複実行の排他を維持する。
+- legacy notification settingは互換adapterとしてGo版でも1 release以上維持する。
 
-最低限以下をキーとして管理する。
+### 5.6 運用インターフェース
 
-```text
-tenant
-  └ application
-      └ review scope
-          └ feedback
-```
+- `/health/live`、`/health/ready`、`/metrics` のpathと意味を維持する。
+- readinessはdatabase/evidence/exportを必須、notification状態をdegradedな任意依存として区別する。
+- 主要metric名、label、counter増分条件を維持し、移行期間中にdashboardを二重管理しない。
+- structured logのrequestId、tenant、application、environment、workspace、eventIdを維持する。
+- SIGTERMで新規claimを停止し、処理中request/jobを最大30秒でgraceful shutdownする。
 
-設定可能とする項目:
+## 6. Migration ownershipの引継ぎ
 
-- retention period
-- attachment retention
-- logical delete / physical delete
-- export policy
-- audit retention
-- personal information handling
-- maximum attachment size
-- allowed MIME types
+Flywayのversion履歴を別libraryへ暗黙変換しない。次のhandoffを1回だけ実施する。
 
-公共部門・閉域利用を考慮し、外部SaaS依存を必須としない。
+1. Kotlin互換releaseへ `V6__go_migration_handoff.sql` を追加する。
+2. V6はGo migrator用version tableとbaseline markerを作成するだけとし、既存業務tableを変更しない。
+3. 既存環境ではKotlin/FlywayがV6を適用し、V1〜V6がsuccessであることとschema fingerprintをGo版が検証する。
+4. fresh install向けにはV6収束済みbaselineを生成し、同じschema fingerprintとbaseline markerを作る。
+5. Go版default化までは新しい業務DDLを追加しない。
+6. Go版default化後の新規migrationはV7から開始し、Go migratorだけがversion tableを更新する。
+7. `feedback.flyway_schema_history` は監査証跡として保持し、編集・削除しない。
 
----
+Go migratorはPostgreSQL advisory lockで単一起動を保証し、migrationごとにtransaction、SHA-256、開始/完了状態を記録する。
+本番ではone-shot `feedback-migrate` を先に実行する。現行の起動時migration互換のため、API起動時にも未適用確認を行うが、
+本番で未適用migrationを検出した場合はfail-closedとする。ローカルComposeだけは明示設定により自動適用を許可する。
 
-## 12. 添付ファイル
+Kotlinへ戻せる期間はV6 schemaのまま運用する。V7適用をKotlin撤去後に限定することで、rollback境界を明確にする。
 
-添付ファイル本体をRDBへ格納しない。
+## 7. 実装フェーズ
 
-```text
-PostgreSQL
-  └ attachment metadata
+各phaseは独立した統合コミットまたはPRとする。Phase 0とPhase 1、Phase 7以降は直列ゲートとする。
+Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実装できるが、統合とrelease候補への昇格は依存DAG順とし、
+未通過の先行ゲートを飛び越えない。具体的なagent配置、path ownership、統合手順は
+[`docs/feedback-go-agent-execution-plan.md`](docs/feedback-go-agent-execution-plan.md) に従う。
 
-S3-compatible Object Storage
-  └ actual object
-```
+### Phase 0: Contract freezeと比較基盤
 
-S3互換APIを前提とすることで以下へ対応可能とする。
+実施内容:
 
-- AWS S3
-- MinIO
-- Azure等のAdapter実装
-- オンプレミスS3互換storage
+- 基準commit、OpenAPI、Connector schema、V1〜V5 checksumを固定する。
+- 全endpoint・worker・CLI・環境変数・metric・成果物formatのinventoryを生成する。
+- OpenAPI生成Go型と未実装handlerを追加する。
+- Kotlin/Goへ同一fixtureを流すdifferential test harnessを作る。
+- V6 handoff migrationとclean baseline収束テストを追加する。
 
-ウイルススキャン連携用hookを用意する。
+完了ゲート:
 
----
+- inventoryに未分類項目がない。
+- OpenAPI全operationが生成interfaceへ対応し、未登録routeをCIが検出する。
+- Kotlin版の既存単体・統合・standalone smokeが引き続き成功する。
 
-## 13. Notification / Worker
+### Phase 1: Runtime foundation
 
-既存の複数workerはGo移行時に統合可能性を評価する。
+実施内容:
 
-初期案:
+- config、DB pool、transaction helper、Problem Details、request ID、structured logを実装する。
+- health/readiness/metrics、graceful shutdownを実装する。
+- direct OIDC、token exchange、permission matrix、audit denialを実装する。
+- application/environment/workspace/principal解決とCORSを実装する。
+- bootstrapをGo化する。
 
-```text
-feedback-server
-feedback-worker
-```
+完了ゲート:
 
-程度まで単純化する。
+- `/capabilities`、`/me`、manifest、review-contextがKotlin版と一致する。
+- invalid JWT、issuer/audience、permission、membership境界のnegative testが一致する。
+- PostgreSQL停止、JWKS障害、Object Storage障害のreadinessが一致する。
 
-worker内でjob typeを分ける。
+### Phase 2: Review session、thread、message
 
-```text
-notification
-retention
-export
-attachment-cleanup
-```
+実施内容:
 
-ジョブ量が増えた場合のみ個別分離する。
+- session CRUD、thread作成/取得/status/deep-linkを実装する。
+- message投稿/更新/version履歴を実装する。
+- audit、change journal、idempotency、rate limit、notification outboxをtransactionへ統合する。
 
-最初からマイクロサービス化しない。
+完了ゲート:
 
----
+- 全HTTP fixtureが一致する。
+- 並列thread番号、message version、idempotency、rate limit試験が収束する。
+- transaction rollback時にoutbox/change journal/auditの片残りがない。
 
-## 14. Admin UI
+### Phase 3: EvidenceとObject Storage
 
-Feedback Adminは独立アプリケーションとして維持する。
+実施内容:
 
-責務:
+- upload、metadata、quota、SHA-256、Range downloadを実装する。
+- filesystem/S3 adapter、delete retry、orphan検出を実装する。
 
-- Feedback一覧
-- Thread確認
-- Status変更
-- Review Scope設定
-- Review dimension設定
-- Application設定
-- Export
-- Retention設定
-- Reviewer/Administrator権限管理
+完了ゲート:
 
-Admin UIからHost Application内部の業務データを直接更新しない。
+- PostgreSQL 16とMinIOを使うintegration testが成功する。
+- 不正Range、巨大upload、MIME不一致、path traversal、storage timeoutをfail-closedに処理する。
+- 既存Kotlin版が作成したobjectをGo版からdownloadでき、その逆も成立する。
 
-必要ならHost Applicationへのlink/deep linkだけ保持する。
+### Phase 4: Export、Backup、Retention
 
----
+実施内容:
 
-## 15. 配布モデル
+- export claim/build/downloadをGo化する。
+- full/incremental backup scheduler、cursor、ZIP/manifest、retryをGo化する。
+- retention policy、expiry、orphan cleanupをGo化する。
+- backup pull CLIをGo化する。
 
-### Level 1: SaaS / Central Server
+完了ゲート:
 
-```text
-Frontend SDK
-      ↓
-Central Feedback Server
-```
+- Kotlin/Goが同じfixture DBから生成したCSV内容とmanifestを比較し、許可した非決定値以外が一致する。
+- full優先、同一workspace単一実行、失敗時cursor不更新、object/DB片失敗を検証する。
+- download CLIのchecksum、atomic replacement、再実行、破損archive拒否を検証する。
 
-PoC・小規模利用向け。
+### Phase 5: NotificationとConnector
 
-### Level 2: Enterprise推奨
+実施内容:
 
-```text
-Frontend SDK
-      ↓
-Feedback Sidecar
-      ↓
-Central Feedback Server
-```
+- notification administration、outbox claim、delivery履歴、retryをGo化する。
+- connector installation/health/queue/attemptをGo化する。
+- Webhook、Teams、Slack、SMTPのreference runtimeとregister CLIをGo化する。
+- legacy webhook compatibilityとencryption key rotationを維持する。
 
-認証・same-origin・企業NW境界を吸収する。
+完了ゲート:
 
-### Level 3: Private Deployment
+- Connector Protocol schema testと別process smokeが成功する。
+- timeout、429、4xx、5xx、duplicate、process crash、secret rotationを検証する。
+- 通知payloadへ禁止情報が含まれないことをschemaとnegative testで保証する。
 
-```text
-Frontend SDK
-Feedback Sidecar
-Feedback Server
-PostgreSQL
-Object Storage
-```
+### Phase 6: Administrationと移行CLI
 
-全コンポーネントを利用者環境へ配備。
+実施内容:
 
-対象:
+- membership、retention、backup、notification connector/delivery管理APIの残差を完了する。
+- Admin UIの既存操作をGo版へ向けたE2Eで検証する。
+- legacy migration CLIのdry-run/copy/reconcile/rollbackをGo化する。
 
-- 公共部門
-- 金融
-- 閉域ネットワーク
-- データ持出制限案件
+完了ゲート:
 
----
+- 全OpenAPI operationにGo実装があり、未実装responseがない。
+- Admin UI、conformance consumer、旧Web GIS copy fixtureがGo版だけで完走する。
+- Kotlin版とGo版のfeature inventory差分が0件になる。
 
-## 16. Deployment
+### Phase 7: Packagingと独立抽出
 
-提供物:
+実施内容:
 
-```text
-OCI Images
-  feedback-server
-  feedback-sidecar
-  feedback-worker
+- Go OCI image、multi-arch binary、SBOM、署名対象artifactを生成する。
+- Composeのdefault backendを切替可能なprofileにする。
+- `assemble-feedback-repository` をGo版も含むallowlistへ更新する。
+- clean抽出先でGo test、Frontend test、Docker build、standalone smokeを完走させる。
+- 環境変数、upgrade、rollback、障害対応runbookをGo版へ更新する。
 
-Binary
-  Linux amd64
-  Linux arm64
-  Windows amd64
-  macOS arm64   # local development用途
+完了ゲート:
 
-Helm Chart
+- repository外のcacheや生成物なしで抽出ゲートが成功する。
+- Kotlin版とGo版の両方を明示的に選択でき、default切替前のrollback演習が成功する。
+- image、binary、SBOMのchecksumをrelease artifactとして出力できる。
 
-Docker Compose
+### Phase 8: Canary、default切替、Kotlin撤去
 
-Example manifests
-```
+実施内容:
 
-Sidecar導入例:
+- APIをworkspace単位のsticky routingでGo canaryへ切り替える。
+- worker roleを1種類ずつ排他的にGo版へ切り替える。
+- error、latency、queue lag、delivery failure、backup checksum、audit件数を比較する。
+- 全trafficをGoへ移し、14日間かつ2回以上のfull backup周期を観察する。
+- 完了後にKotlin source、Gradle/JDK image、Kotlin生成契約を削除する。
+- Compose、CI、抽出repositoryのdefaultをGo版だけにする。
 
-```yaml
-containers:
-  - name: application
-    image: example-app
+完了ゲート:
 
-  - name: feedback-sidecar
-    image: feedback/sidecar
-    env:
-      - name: FEEDBACK_SERVER
-        value: http://feedback-server
-      - name: FEEDBACK_APPLICATION_ID
-        value: example-app
-```
+- Sev 1/2障害、データ欠落、互換性逸脱が0件である。
+- queue backlog、backup cursor、retention、notification duplicateが基準範囲内である。
+- rollback演習とbackup restore演習の証跡がある。
+- `VERIFY_SCOPE=feedback` がJDKなしで成功する。
 
----
+## 8. Test strategy
 
-## 17. Versioning / Compatibility
+### 8.1 Unit
 
-Frontend SDK、Sidecar、Serverを独立リリースするため、互換性ルールを最初から定義する。
+- permission matrix、scope解決、validation、Problem mapping
+- SQL predicate/identifier、row mapping、transaction error classification
+- encryption、HMAC、key rotation、secret masking
+- CSV、ZIP、manifest、checksum、path guard、atomic rename
+- retry/backoff、lease、cursor、retention期限計算
+- Connector Protocol decode/encode、payload redaction
 
-### Protocol
+`go test ./...` と `go test -race ./...` をCI必須とする。parser、validator、path、CSV、connector payloadには
+Go fuzz testを追加し、発見したcrash inputをcorpusへ固定する。
 
-```text
-/api/v1/
-```
+### 8.2 Contract differential
 
-破壊的変更のみmajor versionを変更する。
+Kotlin版とGo版を別の同一snapshot DB/Object Storageで起動し、同じrequest列を実行する。
 
-### Capability negotiation
+- response status/header/JSONを比較する。
+- UUID、時刻、request IDは意味を検証し、fixtureで固定できる値は固定する。
+- DBの業務table、audit、journal、outbox、queueの結果を正規化して比較する。
+- ZIPはentry単位で展開し、manifest/checksumとCSV byte列を比較する。
+- external notificationはcapture serverでheader、署名、payload、再試行回数を比較する。
 
-必要に応じて:
+OpenAPI schema適合だけで合格にせず、順序、null、監査副作用、失敗時副作用まで比較する。
 
-```text
-GET /capabilities
-```
+### 8.3 Integration and failure injection
 
-を提供する。
+- PostgreSQL 16 clean migration、既存V5 upgrade、V6 handoff、schema convergence
+- MinIOによるevidence/export/backup round trip
+- concurrent create/update/claim、worker crash、lease expiry、commit結果不明
+- JWKS rotation/timeout、Object Storage timeout、connector timeout/429/4xx/5xx
+- DB接続枯渇、graceful shutdown、再起動後のidempotent recovery
+- Admin UIとconformance consumerの実HTTP response検証
 
-例:
+統合テストは専用DB schema/bucketを破棄するため、接続先guardを維持し、開発・本番接続先では起動拒否する。
 
-```json
-{
-  "protocolVersion": "1.2",
-  "features": [
-    "thread",
-    "review-scope",
-    "attachments",
-    "map-anchor"
-  ]
-}
-```
+### 8.4 Security and supply chain
 
-SDKはServer versionそのものではなくcapabilityを見る。
+- `go vet`、`staticcheck`、`govulncheck`
+- secret scan、Trivy、CycloneDX SBOM
+- non-root/read-only filesystem、capability drop、egress制限
+- JWT algorithm confusion、SSRF、CSV injection、ZIP slip、path traversal、oversized body
+- tenant/application/workspace越境のtable-driven negative test
 
----
+## 9. RolloutとRollback
 
-## 18. Observability
+### 9.1 禁止する切替方式
 
-Sidecar / Server共通で以下を実装する。
+- 同一requestをKotlin版とGo版から同じDBへ二重書込みしない。
+- 同じworker roleを両実装で無制御に同時稼働させない。
+- Go版だけが理解するV7以降のDDLを観察期間前に適用しない。
+- object keyや暗号形式を切替と同時に変更しない。
 
-- structured logging
-- OpenTelemetry trace
-- metrics
-- health endpoint
-- readiness endpoint
-- correlation ID
+### 9.2 切替順序
 
-推奨endpoint:
+1. V6 handoffをKotlin/Flywayで適用し、DB/Object Storage backupを取得する。
+2. Go APIをread-only smokeへ接続する。
+3. 限定workspaceをGo APIへsticky routingし、1workspaceずつ拡大する。
+4. notification、export/backup、retentionの順にworker ownershipをGoへ切り替える。
+5. bootstrap、connector runtime、運用CLIをGo版へ切り替える。
+6. 全traffic移行後、14日間の観察ゲートを開始する。
+7. ゲート通過後にKotlin版を撤去し、その後に限りV7以降を許可する。
 
-```text
-/health/live
-/health/ready
-/metrics
-```
+### 9.3 Rollback条件と操作
 
-Feedback障害によってHost Application自体を利用不能にしない。
+次のいずれかで即時rollbackする。
 
-Frontend SDKもFeedback API失敗時は業務画面を壊さず、Feedback機能のみdegradeさせる。
+- 認可越境、監査欠落、データ欠落、backup検証失敗
+- error rateまたはp95 latencyが基準を継続超過
+- queue lagがlease/retry設計で回復しない
+- Kotlin版との契約差分がconsumerへ影響する
 
----
+rollbackは対象workspaceのroutingをKotlinへ戻し、対象worker roleのGo replicaを0、Kotlin replicaを1以上にする。
+V6はKotlin互換なのでDB rollbackは行わない。処理中leaseの期限とidempotency keyを確認してからworkerを再開する。
 
-## 19. セキュリティ
+## 10. 非機能acceptance criteria
 
-最低限以下を標準機能とする。
+同じarm64/amd64 CI runner、同じPostgreSQL/MinIO、同じfixtureを使って測定する。
 
-- CSPを考慮したFrontend SDK
-- XSS sanitize
-- CSRF protection
-- upload MIME/type/size validation
-- authorization
-- tenant isolation
-- rate limit
-- audit log
-- secrets非ログ出力
-- OpenAPI schema validation
-- dependency / container vulnerability scan
+| 指標 | 合格条件 |
+|---|---|
+| Runtime image | uncompressed 100MB以下、Kotlin版より70%以上削減 |
+| Idle RSS | 各server/worker 100MiB以下、Kotlin版より50%以上削減 |
+| 起動 | 依存先readyかつmigrationなしで2秒以内にreadiness成功 |
+| Build | warm module cacheで `go test ./...` が15秒以内 |
+| HTTP performance | 同一resource limitでp95がKotlin版より10%以上悪化しない |
+| Reliability | 24時間fault testで未回収lease、cursor欠落、重複確定処理が0件 |
+| Shutdown | SIGTERM後30秒以内に安全停止し、新規claimを行わない |
 
-Feedback本文はuntrusted inputとして扱う。
+性能目標のためにAPI意味論、監査、暗号、validationを省略してはならない。未達時はprofiling結果を記録し、
+目標の見直しではなく原因修正を先に行う。
 
-HTMLを保存・描画する場合は必ずsanitizeする。
+## 11. 主なriskとcontrol
 
----
+| Risk | Control |
+|---|---|
+| Go移行に新仕様が混入する | v1 freeze、非対象の明記、OpenAPI/behavior fixture差分を別PRにする |
+| JSONのnull/順序/default差 | generated DTO、golden response、differential test |
+| transaction/lock差による重複や欠落 | 同一SQL意味論、concurrency test、fault injection、DB結果比較 |
+| Flyway履歴を壊す | V6 handoff、V1〜V6不変、Flyway table read-only |
+| Object Storageの片失敗 | idempotency、orphan cleanup、failure injection |
+| JWT library差による認証緩和 | algorithm/issuer/audience/timeのnegative test、fail-closed |
+| workerの二重実行 | role単位ownership、replica切替runbook、queue metric監視 |
+| rollback不能 | V7凍結、workspace sticky routing、Kotlin image保持 |
+| 独立抽出物だけ壊れる | clean directory build、Docker build、standalone smokeをCI必須化 |
 
-## 20. Repository再編
+## 12. Go版default化後のロードマップ
 
-Feedback Platformを `gis-example` から独立repositoryへ切り出す。
+詳細は [`docs/feedback-platform-post-go-roadmap.md`](docs/feedback-platform-post-go-roadmap.md) をSSoTとする。
+Go版default化後は次の順序で進める。
 
-推奨:
+| Wave | 到達点 | 前提 |
+|---|---|---|
+| R0 | Go版v1の安定化とGA判定 | 本文書のPhase 8完了 |
+| R1 | 独立repository・配布・upgrade経路の正本化 | R0 |
+| R2 | 既存Host Adapter/SDKの1.0安定化とtesting kit | R0 |
+| R3 | Target v2とanchor aliasによる追跡性向上 | R2 |
+| R4 | Web Componentとframework binding共通化 | R2 |
+| R5 | Review session/scope/perspectiveの再利用・運用高度化 | R1、R2 |
+| R6 | 任意のGo Sidecarと企業認証profile | R1 |
+| R7 | Connector/Adapter ecosystemとconformance公開 | R1、R2 |
+| R8 | 閉域・公共部門向け配布、証跡搬送、DR運用の完成 | R1、R5〜R7 |
+| R9 | 実測に基づくworker/scaling topology最適化 | Go GA後30日以上の本番相当運用データ |
 
-```text
-feedback-platform/
-├ contracts/
-│  └ openapi/
-│
-├ frontend/
-│  ├ core/
-│  ├ web-component/
-│  ├ react/
-│  └ adapters/
-│      └ maplibre/
-│
-├ backend/
-│  ├ cmd/
-│  │  ├ feedback-server/
-│  │  ├ feedback-sidecar/
-│  │  ├ feedback-worker/
-│  │  └ feedback-migrate/
-│  └ internal/
-│
-├ admin/
-│
-├ deploy/
-│  ├ helm/
-│  ├ docker/
-│  └ compose/
-│
-├ examples/
-│  ├ vanilla/
-│  ├ react/
-│  └ sidecar/
-│
-└ docs/
-```
+各Waveは独立してrelease可能とし、未完了Waveを理由に既存v1機能を不安定化させない。
+Go移行と製品再設計を分離すること自体を、本計画の重要なrisk controlとする。
 
-`gis-example` 側には以下のみ残す。
+## 13. 最終完了チェックリスト
 
-```text
-@feedback/core
-@feedback/react
-@feedback/maplibre
-
-Feedback Sidecar
-```
-
-つまり `gis-example` 自体をFeedback Platformのconsumer/reference implementationにする。
-
----
-
-## 21. 移行フェーズ
-
-### Phase 0: Contract固定
-
-最初に現在のFeedback機能を棚卸しする。
-
-成果物:
-
-- Feature inventory
-- OpenAPI v1
-- Feedback domain model
-- Host Adapter Interface
-- Anchor model
-- Authentication contract
-- Review Scope model
-
-ここではまだGo移行しない。
-
-### Phase 1: Frontend境界整理
-
-- `feedback-core` を完全にGIS非依存化
-- Host Adapter確立
-- MapLibre依存をadapterへ移動
-- Web Component追加
-- React binding薄型化
-- conformance test作成
-
-### Phase 2: Go Feedback Server
-
-Kotlin Feedback Serviceと同じOpenAPIをGoで実装する。
-
-優先順:
-
-1. Feedback CRUD
-2. Thread / Reply
-3. Review Scope
-4. Authentication
-5. Attachment
-6. Admin API
-7. Notification
-8. Retention / Export
-
-Contract TestをKotlin版・Go版の双方に適用する。
-
-### Phase 3: Go Sidecar
-
-- identity forwarding
-- application context
-- same-origin API
-- token exchange
-- trace/audit
-- attachment proxy
-- fail-safe
-
-を実装する。
-
-### Phase 4: Parallel Run
-
-```text
-Frontend
-  ↓
-same OpenAPI
-  ├ Kotlin Feedback Service
-  └ Go Feedback Server
-```
-
-Contract / Integration / E2Eテストを双方で実施する。
-
-機能差がなくなった時点でGo版をdefaultとする。
-
-### Phase 5: GIS Exampleをconsumer化
-
-`gis-example` からFeedback Server実装を削除し、外部Feedback Platformを利用する。
-
-GIS固有部分は `feedback-maplibre` adapterとしてのみ残す。
-
-### Phase 6: Kotlin版廃止
-
-- migration確認
-- data compatibility確認
-- operational runbook更新
-- rollback手段確認
-
-後にKotlin `feedback-service` を廃止する。
-
----
-
-## 22. テスト戦略
-
-### Contract Test
-
-OpenAPIを基準にServer実装を検証。
-
-### Frontend Conformance Test
-
-任意Host Adapterが満たすべき条件を共通test suiteとして提供する。
-
-### E2E
-
-最低限:
-
-```text
-Vanilla JS + Web Component
-React
-MapLibre
-Sidecar
-Direct Server
-```
-
-をテストする。
-
-### Anchor Regression
-
-画面変更後も既存Feedbackを可能な限り再表示できることをテストする。
-
-例:
-
-- DOM nesting変更
-- CSS class変更
-- React component変更
-- route parameter変更
-- Map style変更
-
----
-
-## 23. 非機能目標
-
-初期目標値として以下を置く。
-
-### Sidecar
-
-- stateless
-- single binary
-- graceful shutdown
-- fast startup
-- low idle memory
-- Host Application障害と独立してrestart可能
-
-### Server
-
-- horizontal scaling可能
-- DB transaction境界明確化
-- object storage外部化
-- workerとの責務分離
-- zero-downtime migrationを考慮
-
-### Frontend
-
-- Feedback機能障害がHost UIへ波及しない
-- framework runtimeを不要にするcore/componentを提供
-- CSS isolation
-- lazy load可能
-- Feedback無効時のbundle/runtime影響を最小化
-
----
-
-## 24. 設計上の禁止事項
-
-以下は避ける。
-
-1. Feedback ServerがHost ApplicationのDBへ直接アクセスする
-2. Feedback ServerがHost固有認証方式を個別実装する
-3. DOM selectorだけをAnchor IDとする
-4. ReactをFeedback Platform必須dependencyとする
-5. Backend language別SDKを大量に維持する
-6. Sidecarに永続状態を持たせる
-7. Feedback機能障害でHost Applicationを停止させる
-8. GIS固有概念をFeedback Coreへ持ち込む
-9. Server implementation detailをFrontend contractへ漏らす
-10. Go移行を現Kotlinコードの単純翻訳として実施する
-
----
-
-## 25. 最終的な利用者体験
-
-### Frontend
-
-```bash
-npm install @feedback/web-component
-```
-
-または
-
-```bash
-npm install @feedback/react
-```
-
-### Application
-
-```ts
-const feedback = createFeedback({
-  endpoint: "/feedback",
-  applicationId: "my-app",
-  host: myHostAdapter,
-})
-```
-
-### Kubernetes
-
-Feedbackを有効にする場合のみSidecarを追加する。
-
-```yaml
-feedback:
-  enabled: true
-  applicationId: my-app
-  server: http://feedback-server
-```
-
-利用アプリケーション側はFeedback Serverの実装言語、DB、notification方式、retention処理等を意識しない。
-
----
-
-## 26. 完成状態
-
-本改善の完了条件は以下とする。
-
-- `gis-example` からFeedback Platformが独立している
-- Go製Feedback ServerがKotlin版の必要機能を置換している
-- Go製Sidecarを追加するだけでBackend統合できる
-- Vanilla JS / ReactアプリへFeedback UIを導入できる
-- GIS固有機能がPlugin/Adapterとして分離されている
-- Host Application固有の認証方式をFeedback Serverが知らない
-- OpenAPIがServerとの唯一の必須Backend契約となっている
-- Stable Anchorにより画面変更後もコメント追跡が可能
-- Review Scope / Review Dimensionが汎用モデル化されている
-- Public Cloud / Kubernetes / 閉域環境のいずれにも配置できる
-- Feedback Platform障害がHost Application本体へ波及しない
-- SDK / Sidecar / Server間のversion compatibility policyが定義されている
-
----
-
-## 27. 推奨する最初の実装単位
-
-最初から全機能をGoへ移さず、以下を最初のvertical sliceとする。
-
-```text
-React / Web Component
-        ↓
-feedback-core
-        ↓
-Go Sidecar
-        ↓
-Go Feedback Server
-        ↓
-PostgreSQL
-```
-
-対象機能:
-
-1. Feedback投稿
-2. Stable Anchor
-3. Feedback一覧表示
-4. Thread / Reply
-5. Review Dimension
-6. Host identity
-7. applicationId分離
-
-このvertical sliceが成立した時点で、Feedback Platformの基本アーキテクチャは検証できる。
-
-その後にAttachment、Notification、Retention、Export、Admin高度化を順次移行する。
+- [ ] Go採用が明示承認されている。
+- [ ] 基準commitとfeature inventoryが固定されている。
+- [ ] 全OpenAPI operationとConnector Protocol v1をGo版が実装している。
+- [ ] 既存DB/Object Storageを変換せず利用できる。
+- [ ] V6 handoff、fresh baseline、既存upgradeが収束する。
+- [ ] 全worker、bootstrap、connector、backup pull、legacy migration CLIがGo化されている。
+- [ ] Kotlin/Go differential testの差分が0件である。
+- [ ] Admin UI、Frontend SDK、conformance consumerを変更なしまたは後方互換変更だけで利用できる。
+- [ ] security、failure injection、standalone extraction、performance gateが成功している。
+- [ ] workspace/APIとworker role単位のrollback演習が成功している。
+- [ ] 14日間かつ2回以上のfull backup観察ゲートを通過している。
+- [ ] Go版default化後にKotlin/JDK/Gradle依存を撤去している。
+- [ ] `VERIFY_SCOPE=feedback` がJDKなしで成功している。
+- [ ] 運用、upgrade、backup/restore、rollback文書がGo版へ更新されている。
