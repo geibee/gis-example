@@ -1,4 +1,4 @@
-FROM postgres:16-bookworm
+FROM docker.io/library/postgres:16-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM docker.io/library/node:22-alpine AS build
 
 WORKDIR /repo
 COPY package.json package-lock.json ./
@@ -31,7 +31,7 @@ RUN export VITE_FEEDBACK_ADMIN_APPLICATION_KEY="$FEEDBACK_ADMIN_APPLICATION" \
     && npm --workspace @feedback/admin-react run build \
     && npm --workspace @feedback/admin-console run build
 
-FROM nginx:1.27-alpine
+FROM docker.io/library/nginx:1.27-alpine
 
 ARG CSP_CONNECT_SRC_EXTRA="http://localhost:8090 http://localhost:8081"
 COPY apps/feedback-admin/nginx.conf /etc/nginx/conf.d/default.conf

@@ -20,6 +20,22 @@ cp infra/.env.example infra/.env   # 初回のみ (dev 既定の資格情報)
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+Podmanを使う場合も同じComposeファイルを使用できます。`podman compose` は外部の
+Compose providerを利用するため、`depends_on.condition` とprofilesに対応した
+`podman-compose` 1.3.0以上（推奨は最新版）を使用してください。
+
+```bash
+podman compose -f infra/docker-compose.yml up --build
+```
+
+Feedback Serviceと管理画面も起動する場合は、どちらのランタイムでも
+`--profile feedback` を追加します。
+
+```bash
+docker compose -f infra/docker-compose.yml --profile feedback up --build
+podman compose -f infra/docker-compose.yml --profile feedback up --build
+```
+
 Services:
 
 - Web: http://localhost:5173

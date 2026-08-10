@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM docker.io/library/node:22-alpine AS build
 
 WORKDIR /repo
 COPY package.json package-lock.json ./
@@ -7,7 +7,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund --workspace @feedback/token-bro
 COPY apps/feedback-token-broker-reference apps/feedback-token-broker-reference
 RUN npm --workspace @feedback/token-broker-reference run build
 
-FROM node:22-alpine
+FROM docker.io/library/node:22-alpine
 WORKDIR /app
 COPY --from=build /repo/apps/feedback-token-broker-reference/dist ./dist
 USER node

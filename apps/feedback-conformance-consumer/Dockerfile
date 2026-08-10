@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM docker.io/library/node:22-alpine AS build
 
 WORKDIR /repo
 COPY package.json package-lock.json ./
@@ -17,7 +17,7 @@ RUN npm --workspace @feedback/contracts run build \
     && npm --workspace @feedback/react run build \
     && npm --workspace @feedback/conformance-consumer run build
 
-FROM node:22-alpine
+FROM docker.io/library/node:22-alpine
 WORKDIR /app
 COPY --from=build /repo/apps/feedback-conformance-consumer/dist ./dist
 COPY --from=build /repo/apps/feedback-conformance-consumer/build/server ./server-dist

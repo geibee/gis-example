@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+FROM docker.io/library/golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -7,7 +7,9 @@ WORKDIR /src
 COPY apps/feedback-service-go/go.mod apps/feedback-service-go/go.sum ./
 RUN go mod download
 COPY apps/feedback-service-go .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -buildvcs=false -trimpath \
+RUN target_os="${TARGETOS:-$(go env GOOS)}" \
+    && target_arch="${TARGETARCH:-$(go env GOARCH)}" \
+    && CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build -buildvcs=false -trimpath \
     -ldflags='-s -w' -o /out/rootfs/app/feedback ./cmd/feedback \
     && mkdir -p /out/rootfs/app/bin /out/rootfs/data/evidence /out/rootfs/data/exports /out/rootfs/data/connector \
     && for entrypoint in \
