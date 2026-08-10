@@ -64,12 +64,12 @@ export const screenDefinitions: readonly ScreenDefinition[] = [
   }
 ];
 
-/** Feedback ServiceへCI登録し、consumer 1のSDKにも利用する画面manifest。 */
+/** Feedback Serviceへホスト起動時に同期し、consumer 1のSDKにも利用する画面manifest。 */
 export const feedbackApplicationManifest = defineFeedbackManifest({
   schemaVersion: "1",
   applicationKey: "web-gis",
   displayName: "Web GIS MVP",
-  manifestVersion: "1",
+  manifestVersion: "2",
   routes: screenDefinitions.flatMap((screen) => [
     {
       pageKey: screen.meta.pageId,

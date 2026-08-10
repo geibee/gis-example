@@ -100,7 +100,7 @@ services:
         condition: service_started
 
   # 初回 tenant/application/environment/workspace/admin を作る one-shot provisioning CLI。
-  # 以後の manifest/membership は Feedback Admin Console から管理する
+  # manifestはWeb GISが画面定義から自動同期し、以後のmembershipはFeedback Admin Consoleで管理する。
   feedback-bootstrap:
     profiles: ["feedback"]
     restart: "no"
@@ -443,7 +443,7 @@ services:
       context: ..
       dockerfile: apps/web/Dockerfile
       args:
-        VITE_FEEDBACK_API_MODE: ${VITE_FEEDBACK_API_MODE:-legacy}
+        VITE_FEEDBACK_API_MODE: ${VITE_FEEDBACK_API_MODE:-feedback-v1}
         VITE_FEEDBACK_API_BASE: ${VITE_FEEDBACK_API_BASE:-/feedback/v1}
         VITE_FEEDBACK_ADMIN_URL: ${VITE_FEEDBACK_ADMIN_URL:-http://localhost:5174/}
         FEEDBACK_APPLICATION: ${VITE_FEEDBACK_APPLICATION_KEY:-web-gis}

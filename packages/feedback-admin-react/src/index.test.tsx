@@ -90,6 +90,17 @@ describe("FeedbackAdminConsole", () => {
       await waitFor(() => expect(request.mock.calls.some(([path]) => String(path).includes(expectedPath(tab)))).toBe(true));
     }
   });
+
+  it("アプリ設定をJSON編集ではなく同期済み画面一覧として表示する", async () => {
+    render(<FeedbackAdminConsole {...scope} transport={createTransport()} />);
+    await screen.findByText("#1 quality");
+    fireEvent.click(screen.getByRole("button", { name: "アプリ設定" }));
+    expect(await screen.findByText("注文一覧")).toBeTruthy();
+    expect(screen.getAllByText("2画面")).toHaveLength(2);
+    expect(screen.getByText("メインアプリが持つ画面定義を自動で取り込みます。この画面でJSONを編集する必要はありません。")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Manifest JSON" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "アプリ設定を保存" })).toBeNull();
+  });
 });
 
 const scope = {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
@@ -12,6 +12,7 @@ import {
   Users
 } from "lucide-react";
 import { useAuth } from "react-oidc-context";
+import { createFeedbackTransport, FeedbackTransportError } from "@feedback/core";
 import {
   FeedbackOverlay,
   FeedbackPluginProvider,
@@ -29,8 +30,9 @@ import { activeScreenMeta, tabBasePath } from "./routeMeta";
 import { hasProjectPermission, reviewManagePermission } from "./permissions";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
-import { feedbackRoutes } from "./appRoutes";
+import { feedbackApplicationManifest, feedbackRoutes } from "./appRoutes";
 import { resolveWebGisFeedbackThread } from "./feedbackHostAdapter";
+import { syncFeedbackApplicationManifest } from "./feedbackManifestSync";
 
 // ルートレイアウト。認証・レイアウト・ルーター配置のみを担い、
 // サーバ状態は TanStack Query (src/queries/)、画面固有の状態は各 src/screens/、
@@ -55,12 +57,49 @@ function FeedbackSdkHost({ children }: { children: ReactNode }) {
   const feedbackApiMode = configuredMode === "feedback-v1" || configuredMode === "feedback-v1-dual-read"
     ? configuredMode
     : "legacy";
+  const feedbackApiBaseUrl = (feedbackApiMode !== "legacy"
+    ? import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1"
+    : import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+  const [manifestRevision, setManifestRevision] = useState(0);
+  useEffect(() => {
+    if (feedbackApiMode === "legacy") return;
+    const configuredApplicationKey = import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis";
+    if (configuredApplicationKey !== feedbackApplicationManifest.applicationKey) {
+      console.warn("Feedback画面定義を同期できません: applicationKeyがホストのmanifestと一致しません");
+      return;
+    }
+    let active = true;
+    const transport = createFeedbackTransport({
+      baseUrl: feedbackApiBaseUrl,
+      getAccessToken: () => getAccessToken() ?? null,
+      refreshAccessToken: async () => await tryRenewAccessToken() ?? null,
+      fetch: window.fetch.bind(window)
+    });
+    let retryTimer: number | undefined;
+    const synchronize = async (attempt: number): Promise<void> => {
+      try {
+        const result = await syncFeedbackApplicationManifest(transport, feedbackApplicationManifest);
+        if (active && result !== "unchanged") setManifestRevision((value) => value + 1);
+      } catch (caught) {
+        if (active && attempt < 4 && isTemporaryManifestSyncError(caught)) {
+          retryTimer = window.setTimeout(() => void synchronize(attempt + 1), 1_000 * 2 ** attempt);
+          return;
+        }
+        // 画面定義の同期失敗で業務画面を停止しない。Feedback SDK側は従来どおりfail-closedになる。
+        console.warn("Feedback画面定義を同期できません", caught);
+      }
+    };
+    void synchronize(0);
+    return () => {
+      active = false;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [feedbackApiBaseUrl, feedbackApiMode]);
   return (
     <FeedbackPluginProvider
+      key={manifestRevision}
       apiMode={feedbackApiMode}
-      apiBaseUrl={(feedbackApiMode !== "legacy"
-        ? import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1"
-        : import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
+      apiBaseUrl={feedbackApiBaseUrl}
       legacyApiBaseUrl={(import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
       applicationKey={import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis"}
       environmentKey={import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local"}
@@ -76,6 +115,11 @@ function FeedbackSdkHost({ children }: { children: ReactNode }) {
       {children}
     </FeedbackPluginProvider>
   );
+}
+
+function isTemporaryManifestSyncError(caught: unknown): boolean {
+  return caught instanceof TypeError ||
+    (caught instanceof FeedbackTransportError && [404, 429, 502, 503, 504].includes(caught.status));
 }
 
 function handleFeedbackNotification(notification: FeedbackPluginNotification) {
