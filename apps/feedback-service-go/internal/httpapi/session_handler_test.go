@@ -21,7 +21,7 @@ func TestDecodeSessionCreateDefaultsAndNullableValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.OutOfScopePosting != session.OutOfScopeWarn || request.Description != nil {
+	if request.Status != session.StatusDraft || request.OutOfScopePosting != session.OutOfScopeWarn || request.Description != nil {
 		t.Fatalf("default/nullが不正です: %+v", request)
 	}
 	if len(request.Scopes) != 1 || request.Scopes[0].Reviewable || request.Scopes[0].RouteTemplate != nil {
@@ -39,6 +39,7 @@ func TestDecodeSessionCreateRejectsUnknownAndNullNonNullableFields(t *testing.T)
 		`{"applicationKey":"inventory","environmentKey":"prod","externalWorkspaceKey":"main","manifestVersion":"v1","title":"レビュー","unknown":true}`,
 		`{"applicationKey":"inventory","environmentKey":"prod","externalWorkspaceKey":"main","manifestVersion":"v1","title":"レビュー","scopes":null}`,
 		`{"applicationKey":"inventory","environmentKey":"prod","externalWorkspaceKey":"main","manifestVersion":"v1","title":"レビュー","outOfScopePosting":null}`,
+		`{"applicationKey":"inventory","environmentKey":"prod","externalWorkspaceKey":"main","manifestVersion":"v1","title":"レビュー","status":null}`,
 		`{"applicationKey":"inventory","environmentKey":"prod","externalWorkspaceKey":"main","manifestVersion":"v1","title":"レビュー","scopes":[{"pageKey":"home","reviewable":null}]}`,
 		`{"applicationKey":"inventory","environmentKey":"prod","externalWorkspaceKey":"main","manifestVersion":"v1","title":"レビュー","perspectives":[{"code":"ux","label":"UX","status":null}]}`,
 		base + `{}`,
@@ -67,9 +68,26 @@ func TestDecodeSessionPatchDistinguishesAbsentAndNull(t *testing.T) {
 	}
 }
 
+func TestDecodeSessionPatchAcceptsScopeAndPerspectiveForms(t *testing.T) {
+	t.Parallel()
+	patch, err := decodeSessionPatch([]byte(`{
+      "scopes":[{"pageKey":"orders.list","routeTemplate":"/orders","reviewable":true}],
+      "perspectives":[{"code":"USABILITY","label":"操作性","status":"active","guidance":"手数を確認"}]
+    }`), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patch.Scopes == nil || len(*patch.Scopes) != 1 || (*patch.Scopes)[0].PageKey != "orders.list" {
+		t.Fatalf("scopeが不正です: %+v", patch.Scopes)
+	}
+	if patch.Perspectives == nil || len(*patch.Perspectives) != 1 || (*patch.Perspectives)[0].Code != "USABILITY" {
+		t.Fatalf("perspectiveが不正です: %+v", patch.Perspectives)
+	}
+}
+
 func TestDecodeSessionPatchRejectsInvalidShape(t *testing.T) {
 	t.Parallel()
-	for _, value := range []string{`{}`, `{"unknown":true}`, `{"status":null}`, `{"title":1}`, `[]`} {
+	for _, value := range []string{`{}`, `{"unknown":true}`, `{"status":null}`, `{"title":1}`, `{"scopes":null}`, `{"scopes":[{"pageKey":"home","reviewable":true,"unknown":1}]}`, `[]`} {
 		_, err := decodeSessionPatch([]byte(value), 1)
 		if err == nil {
 			t.Fatalf("不正patchを受理しました: %s", value)

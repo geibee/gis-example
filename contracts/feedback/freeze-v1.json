@@ -1,9 +1,9 @@
 {
-  "frozenAt": "2026-08-09",
-  "baselineCommit": "afe6d04",
+  "frozenAt": "2026-08-10",
+  "baselineCommit": "1f30e9a",
   "openapiOperationCount": 42,
   "contracts": {
-    "openapi.yaml": "sha256:6117104ce47080ce584db1d935908e2ee3af2f58a192dd2ad761c12d9777028e",
+    "openapi.yaml": "sha256:076bd1ea46cc78b3b8a6673a5977164c4cd3966b9ddd0afe9530eb39ded4239c",
     "schemas/connector-protocol.schema.json": "sha256:4467a857dc49d6a8282ac75aa8c40ec391b7793cab805ec9a8bc922243b4ed24",
     "token-exchange.openapi.yaml": "sha256:2504d874a5049e94bc9e2fa8998c3e6e0bc73e9e6c1e958622d20dac4a39d4e5",
     "schemas/application-manifest.schema.json": "sha256:a7e92ba7616b7629889db9b10f735dee26befa0d68a5ef3b4bfc2d3ad1121c43",

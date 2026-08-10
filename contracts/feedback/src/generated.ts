@@ -697,6 +697,8 @@ export interface components {
             manifestVersion: string;
             title: string;
             description?: string | null;
+            /** @default draft */
+            status: components["schemas"]["FeedbackSessionStatus"];
             /**
              * @default warn
              * @enum {unknown}
@@ -719,6 +721,8 @@ export interface components {
             startAt?: string | null;
             /** Format: date-time */
             endAt?: string | null;
+            scopes?: components["schemas"]["FeedbackSessionScopeV1"][];
+            perspectives?: components["schemas"]["FeedbackSessionPerspectiveV1"][];
         };
         /** @enum {unknown} */
         FeedbackThreadStatus: "open" | "resolved";

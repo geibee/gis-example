@@ -172,10 +172,14 @@ WHERE tenant_id = $1::uuid AND principal_id = $2 AND endpoint = 'POST /sessions'
 	}
 
 	open := sessiondomain.StatusOpen
+	replacementScopes := []sessiondomain.Scope{{PageKey: "summary", Reviewable: true}}
+	replacementPerspectives := []sessiondomain.Perspective{{Code: "USABILITY", Label: "操作性", Status: sessiondomain.PerspectiveActive}}
 	patched, err := service.Patch(ctx, principal, sessionID, "request-w2-session-patch", func() (sessiondomain.Patch, error) {
-		return sessiondomain.Patch{ExpectedVersion: 1, Status: &open}, nil
+		return sessiondomain.Patch{ExpectedVersion: 1, Status: &open, Scopes: &replacementScopes, Perspectives: &replacementPerspectives}, nil
 	})
-	if err != nil || patched.Session.Version != 2 || patched.Session.Status != sessiondomain.StatusOpen {
+	if err != nil || patched.Session.Version != 2 || patched.Session.Status != sessiondomain.StatusOpen ||
+		len(patched.Session.Scopes) != 1 || patched.Session.Scopes[0].PageKey != "summary" ||
+		len(patched.Session.Perspectives) != 1 || patched.Session.Perspectives[0].Code != "USABILITY" {
 		t.Fatalf("Patch() = %+v, %v", patched, err)
 	}
 	_, err = service.Patch(ctx, principal, sessionID, "request-w2-session-stale", func() (sessiondomain.Patch, error) {

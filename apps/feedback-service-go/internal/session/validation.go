@@ -38,6 +38,9 @@ func ValidateCreate(request CreateRequest) error {
 	if request.Description != nil && utf16Length(*request.Description) > 5000 {
 		return invalid("request.invalid", "description が長すぎます")
 	}
+	if request.Status != "" && !ValidStatus(request.Status) {
+		return invalid("request.invalid", "status が不正です")
+	}
 	posting := request.OutOfScopePosting
 	if posting == "" {
 		posting = OutOfScopeWarn
@@ -61,6 +64,9 @@ func ValidateCreate(request CreateRequest) error {
 
 func NormalizeCreate(request CreateRequest) CreateRequest {
 	request.Title = strings.TrimSpace(request.Title)
+	if request.Status == "" {
+		request.Status = StatusDraft
+	}
 	if request.OutOfScopePosting == "" {
 		request.OutOfScopePosting = OutOfScopeWarn
 	}
@@ -124,6 +130,17 @@ func ValidatePatch(patch Patch, current Session) error {
 	}
 	if start != nil && end != nil && end.Before(*start) {
 		return invalid("request.invalid", "endAt は startAt 以後を指定してください")
+	}
+	nextScopes := current.Scopes
+	if patch.Scopes != nil {
+		nextScopes = *patch.Scopes
+	}
+	nextPerspectives := current.Perspectives
+	if patch.Perspectives != nil {
+		nextPerspectives = *patch.Perspectives
+	}
+	if err := ValidateChildren(nextScopes, nextPerspectives); err != nil {
+		return err
 	}
 	return nil
 }

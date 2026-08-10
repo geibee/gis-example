@@ -45,11 +45,40 @@ describe("FeedbackAdminConsole", () => {
     const openExternal = vi.fn();
     render(<FeedbackAdminConsole {...scope} transport={createTransport()} openExternal={openExternal} />);
     expect(await screen.findByText("#1 quality")).toBeTruthy();
-    const detailRoute = await screen.findByRole("checkbox", { name: "注文詳細 (/orders/{id})" });
+    fireEvent.click(screen.getByRole("button", { name: "編集" }));
+    const detailRoute = await screen.findByRole("checkbox", { name: /注文詳細.*\/orders\/\{id\}/ });
     fireEvent.click(detailRoute);
     expect((detailRoute as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "対象アプリを開く" }));
     await waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://consumer.example/?feedbackThread=thread-1"));
+  });
+
+  it("新規レビューをJSON入力なしで設定できる", async () => {
+    const baseRequest = createRequest();
+    const request = vi.fn(async (path: string, options?: { body?: unknown }) => {
+      if (path === "/sessions") return { value: session, etag: '"v1"' };
+      return baseRequest(path, options);
+    });
+    render(<FeedbackAdminConsole {...scope} transport={createTransport(request)} />);
+    await screen.findByText("#1 quality");
+    fireEvent.click(screen.getByRole("button", { name: "新規作成" }));
+    expect(screen.getByRole("dialog", { name: "レビューセッションの作成" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /注文一覧.*\/orders/ })).toBeTruthy();
+    fireEvent.change(screen.getAllByRole("combobox", { name: "扱い" })[0], { target: { value: "active" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "タイトル" }), { target: { value: "受入レビュー" } });
+    expect(screen.queryByText("Scope JSON")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "セッションを作成" }));
+    await waitFor(() => expect(request.mock.calls.some(([path]) => path === "/sessions")).toBe(true));
+    const createCall = request.mock.calls.find(([path]) => path === "/sessions");
+    expect(createCall?.[1]?.body).toMatchObject({
+      title: "受入レビュー",
+      status: "draft",
+      scopes: [
+        { pageKey: "orders.list", routeTemplate: "/orders", reviewable: true },
+        { pageKey: "orders.detail", routeTemplate: "/orders/{id}", reviewable: true }
+      ],
+      perspectives: [{ code: "BUSINESS_FLOW", label: "業務フロー", status: "active", guidance: null }]
+    });
   });
 
   it("manifest・retention/export・membership・deliveryを独立tabで取得する", async () => {
@@ -70,7 +99,7 @@ const scope = {
 };
 
 function expectedPath(tab: string): string {
-  return ({ Manifest: "/manifest", "保存・Export": "/retention-policy", メンバー: "/memberships", 通知: "/notification-settings" })[tab] ?? "";
+  return ({ "アプリ設定": "/manifest", "保存・エクスポート": "/retention-policy", メンバー: "/memberships", 通知: "/notification-settings" })[tab] ?? "";
 }
 
 function createTransport(request = vi.fn(createRequest())): FeedbackTransport {
@@ -83,7 +112,7 @@ function createTransport(request = vi.fn(createRequest())): FeedbackTransport {
 }
 
 function createRequest() {
-  return async (path: string) => {
+  return async (path: string, _options?: unknown) => {
     if (path.startsWith("/sessions?")) return { value: { items: [session] }, etag: null };
     if (path.endsWith("/threads")) return { value: { items: [thread] }, etag: null };
     if (path.endsWith("/deep-link")) return { value: { url: "https://consumer.example/?feedbackThread=thread-1" }, etag: null };

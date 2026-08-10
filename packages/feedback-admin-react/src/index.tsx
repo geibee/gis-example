@@ -24,6 +24,17 @@ type ConnectorType = Schemas["FeedbackConnectorType"];
 type NotificationConnector = Schemas["FeedbackNotificationConnector"];
 type ManifestRoute = Schemas["FeedbackApplicationManifestV1"]["routes"][number];
 
+const perspectiveDefinitions = [
+  ["BUSINESS_FLOW", "業務フロー", "一連の業務が想定どおり進められるか"],
+  ["INFORMATION", "項目・情報の過不足", "表示・入力する情報が適切か"],
+  ["USABILITY", "操作性", "操作の分かりやすさや手数"],
+  ["MAP_OPERATION", "地図操作", "地図と業務情報の連動や操作"],
+  ["UI_DESIGN", "デザイン・配色", "画面の見た目、配色、文言"],
+  ["PERFORMANCE", "性能", "表示や検索の速度"],
+  ["AUTHORIZATION", "権限制御", "ロールごとの参照・操作可否"],
+  ["ERROR_HANDLING", "エラー処理", "入力誤りや例外時の挙動"]
+] as const;
+
 export type FeedbackAdminConsoleProps = {
   transport: FeedbackTransport;
   applicationKey: string;
@@ -125,6 +136,7 @@ function SessionAdministration({
 }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  const [sessionSearch, setSessionSearch] = useState("");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadStatus, setThreadStatus] = useState<"" | "open" | "resolved">("");
   const [threadPerspective, setThreadPerspective] = useState("");
@@ -132,19 +144,30 @@ function SessionAdministration({
   const [threadSearch, setThreadSearch] = useState("");
   const [title, setTitle] = useState("");
   const [manifestVersion, setManifestVersion] = useState("1");
-  const [scopes, setScopes] = useState('[{"pageKey":"home","routeTemplate":"/","reviewable":true}]');
-  const [perspectives, setPerspectives] = useState('[{"code":"quality","label":"品質","status":"active","guidance":null}]');
-  const [perspectiveCode, setPerspectiveCode] = useState("quality");
-  const [perspectiveLabel, setPerspectiveLabel] = useState("品質");
+  const [scopes, setScopes] = useState("[]");
+  const [perspectives, setPerspectives] = useState("[]");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [description, setDescription] = useState("");
+  const [createStatus, setCreateStatus] = useState<Session["status"]>("draft");
+  const [outOfScopePosting, setOutOfScopePosting] = useState<Session["outOfScopePosting"]>("warn");
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [manifestRoutes, setManifestRoutes] = useState<ManifestRoute[]>([]);
   const [evidenceUrl, setEvidenceUrl] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     try {
       const page = await transport.request<Schemas["FeedbackSessionPage"]>(`/sessions?${scopeQuery}`);
       setSessions(page.value.items);
-      setSelectedId((current) => current || page.value.items[0]?.id || "");
+      setSelectedId((current) => page.value.items.some((item) => item.id === current)
+        ? current
+        : page.value.items.find((item) => item.status === "open")?.id ?? page.value.items[0]?.id ?? "");
       onError(null);
     } catch (caught) { onError(messageOf(caught)); }
+    finally { setLoading(false); }
   }, [onError, scopeQuery, transport]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
@@ -154,6 +177,7 @@ function SessionAdministration({
       (resource) => {
         setManifestVersion(resource.value.manifestVersion);
         setManifestRoutes(resource.value.routes);
+        setScopes((current) => parseScopeDraft(current).length > 0 ? current : JSON.stringify(resource.value.routes.map((route) => ({ pageKey: route.pageKey, routeTemplate: route.template, reviewable: true })), null, 2));
       },
       (caught) => onError(messageOf(caught))
     );
@@ -167,7 +191,7 @@ function SessionAdministration({
   }, [onError, selectedId, transport]);
   useEffect(() => () => { if (evidenceUrl) URL.revokeObjectURL(evidenceUrl); }, [evidenceUrl]);
   const selected = sessions.find((session) => session.id === selectedId);
-  const visibleSessions = sessions;
+  const visibleSessions = sessions.filter((session) => session.title.toLowerCase().includes(sessionSearch.toLowerCase()));
   const visibleThreads = threads.filter((thread) => {
     if (threadStatus && thread.status !== threadStatus) return false;
     if (threadPerspective && thread.perspectiveCode !== threadPerspective) return false;
@@ -179,7 +203,13 @@ function SessionAdministration({
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
+    setBusy(true); setNotice(null);
     try {
+      const requestedScopes = parseScopeDraft(scopes);
+      const requestedPerspectives = parsePerspectiveDraft(perspectives);
+      if (requestedScopes.length === 0) throw new Error("レビュー対象の画面を1つ以上選択してください");
+      if (createStatus === "open" && !requestedPerspectives.some((item) => item.status === "active")) throw new Error("受付中にするには、レビュー観点を1つ以上「今回確認」にしてください");
+      if (startAt && endAt && new Date(endAt) < new Date(startAt)) throw new Error("終了日時は開始日時以降にしてください");
       await transport.request<Session>("/sessions", {
         method: "POST",
         idempotencyKey: idempotencyKey(),
@@ -189,16 +219,26 @@ function SessionAdministration({
           externalWorkspaceKey,
           manifestVersion,
           title,
-          scopes: parseArray(scopes, "scope"),
-          perspectives: parseArray(perspectives, "perspective")
+          description: description.trim() || null,
+          status: createStatus,
+          outOfScopePosting,
+          startAt: dateTimeToISO(startAt),
+          endAt: dateTimeToISO(endAt),
+          scopes: requestedScopes,
+          perspectives: requestedPerspectives
         }
       });
       setTitle("");
+      setDescription("");
+      setCreateOpen(false);
       await refresh();
+      setNotice("レビューセッションを作成しました");
     } catch (caught) { onError(messageOf(caught)); }
+    finally { setBusy(false); }
   };
   const saveSelected = async () => {
     if (!selected) return;
+    setBusy(true); setNotice(null);
     try {
       await transport.request<Session>(`/sessions/${selected.id}`, {
         method: "PATCH",
@@ -214,13 +254,22 @@ function SessionAdministration({
           perspectives: selected.perspectives
         }
       });
+      setEditOpen(false);
       await refresh();
+      setNotice("レビューセッションを更新しました");
     } catch (caught) { onError(messageOf(caught)); }
+    finally { setBusy(false); }
   };
   const patchSessionState = (patch: Partial<Session>) => {
     setSessions((current) => current.map((session) => session.id === selectedId ? { ...session, ...patch } : session));
   };
   const selectedScopes = parseScopeDraft(scopes);
+  const draftPerspectives = parsePerspectiveDraft(perspectives);
+  const updateDraftPerspective = (code: string, label: string, status: string, guidance = "") => {
+    const retained = draftPerspectives.filter((item) => item.code !== code);
+    const next = status ? [...retained, { code, label, status, guidance: guidance || null }] : retained;
+    setPerspectives(JSON.stringify(next, null, 2));
+  };
   const toggleManifestRoute = (route: ManifestRoute, checked: boolean) => {
     const retained = selectedScopes.filter((scope) => scope.pageKey !== route.pageKey);
     const next = checked
@@ -236,6 +285,12 @@ function SessionAdministration({
       : retained;
     patchSessionState({ scopes: next });
   };
+  const updateSelectedPerspective = (code: string, label: string, status: string, guidance = "") => {
+    if (!selected) return;
+    const retained = selected.perspectives.filter((item) => item.code !== code);
+    const next = status ? [...retained, { code, label, status, guidance: guidance || null }] : retained;
+    patchSessionState({ perspectives: next as Session["perspectives"] });
+  };
   const toggleThread = async (thread: Thread) => {
     try {
       await transport.request(`/threads/${thread.id}/status`, {
@@ -245,6 +300,7 @@ function SessionAdministration({
       });
       setSelectedId("");
       queueMicrotask(() => setSelectedId(thread.sessionId));
+      setNotice(thread.status === "open" ? "フィードバックを対応済みにしました" : "フィードバックを再オープンしました");
     } catch (caught) { onError(messageOf(caught)); }
   };
   const showEvidence = async (threadId: string) => {
@@ -264,52 +320,23 @@ function SessionAdministration({
   return (
     <div className="feedback-admin-review-layout">
       <aside className="feedback-admin-card feedback-admin-session-sidebar">
-        <div className="feedback-admin-sidebar-heading"><h2>レビューセッション</h2><button type="button" onClick={() => document.getElementById("feedback-admin-create")?.scrollIntoView({ behavior: "smooth" })}>新規作成</button></div>
-        <label>セッションを検索<input type="search" placeholder="タイトルを検索" onChange={(event) => { const value = event.target.value.toLowerCase(); document.querySelectorAll<HTMLElement>("[data-session-title]").forEach((item) => { item.hidden = value !== "" && !item.dataset.sessionTitle!.includes(value); }); }} /></label>
+        <div className="feedback-admin-sidebar-heading"><h2>レビューセッション</h2><button type="button" onClick={() => setCreateOpen(true)}>新規作成</button></div>
+        <label>セッションを検索<input type="search" placeholder="タイトルを検索" value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} /></label>
+        {loading ? <p className="feedback-admin-help">読み込んでいます...</p> : null}
         <ul className="feedback-admin-session-list">{visibleSessions.map((session) => <li key={session.id} data-session-title={session.title.toLowerCase()}><button type="button" className={session.id === selectedId ? "selected" : ""} onClick={() => setSelectedId(session.id)}><strong>{session.title}</strong><span>{sessionStatusLabel(session.status)}</span></button></li>)}</ul>
-        {visibleSessions.length === 0 ? <p className="feedback-admin-help">レビューセッションはまだありません。</p> : null}
+        {!loading && visibleSessions.length === 0 ? <p className="feedback-admin-help">{sessionSearch ? "条件に一致するセッションはありません。" : "レビューセッションはまだありません。"}</p> : null}
       </aside>
       <div className="feedback-admin-review-main">
-      <form id="feedback-admin-create" className="feedback-admin-card feedback-admin-create-form" onSubmit={(event) => void create(event)}>
-        <h2>レビューを作成</h2>
-        <label>タイトル<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-        <label>アプリ設定のバージョン<input required value={manifestVersion} onChange={(event) => setManifestVersion(event.target.value)} /></label>
-        <fieldset><legend>レビュー対象の画面</legend>
-          {manifestRoutes.map((route) => <label key={route.pageKey}>
-            <input
-              type="checkbox"
-              checked={selectedScopes.some((scope) => scope.pageKey === route.pageKey)}
-              onChange={(event) => toggleManifestRoute(route, event.target.checked)}
-            />
-            {route.label} ({route.template})
-          </label>)}
-        </fieldset>
-        <p className="feedback-admin-help">レビュー対象の画面を選択してください。選択した画面だけがレビュー対象になります。</p>
-        <div className="feedback-admin-inline-form"><label>観点コード<input value={perspectiveCode} onChange={(event) => setPerspectiveCode(event.target.value)} /></label><label>表示名<input value={perspectiveLabel} onChange={(event) => setPerspectiveLabel(event.target.value)} /></label><button type="button" onClick={() => setPerspectives(JSON.stringify([{ code: perspectiveCode.trim(), label: perspectiveLabel.trim(), status: "active", guidance: null }], null, 2))}>観点を反映</button></div>
-        <details className="feedback-admin-advanced"><summary>詳細設定（JSON）</summary><p className="feedback-admin-help">通常は変更不要です。外部連携や高度な設定を行う場合のみ編集してください。</p><label>対象画面の設定<textarea value={scopes} onChange={(event) => setScopes(event.target.value)} /></label><label>レビュー観点の設定<textarea value={perspectives} onChange={(event) => setPerspectives(event.target.value)} /></label></details>
-        <button type="submit">作成</button>
-      </form>
+      {notice ? <p className="feedback-admin-notice" role="status">{notice}</p> : null}
       <div className="feedback-admin-card feedback-admin-card-wide">
-        <h2>レビューを編集</h2>
-        <label>レビュー<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
-          <option value="">選択</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>)}
-        </select></label>
         {selected ? <>
-          <label>タイトル<input value={selected.title} onChange={(event) => patchSessionState({ title: event.target.value })} /></label>
-          <label>状態<select value={selected.status} onChange={(event) => patchSessionState({ status: event.target.value as Session["status"] })}>
-            <option value="draft">下書き</option><option value="open">公開中</option><option value="closed">終了</option>
-          </select></label>
-          <fieldset><legend>レビュー対象の画面</legend><p className="feedback-admin-help">アプリに登録されている画面から選択してください。</p>{manifestRoutes.map((route) => <label key={route.pageKey}><input type="checkbox" checked={selected.scopes.some((scope) => scope.pageKey === route.pageKey)} onChange={(event) => toggleSelectedRoute(route, event.target.checked)} />{route.label} <code>{route.template}</code></label>)}</fieldset>
-          <details className="feedback-admin-advanced"><summary>観点・対象画面の詳細設定（JSON）</summary><label>対象画面<textarea value={JSON.stringify(selected.scopes, null, 2)} onChange={(event) => {
-            try { patchSessionState({ scopes: JSON.parse(event.target.value) }); } catch { /* 入力途中 */ }
-          }} /></label><label>レビュー観点<textarea value={JSON.stringify(selected.perspectives, null, 2)} onChange={(event) => {
-            try { patchSessionState({ perspectives: JSON.parse(event.target.value) }); } catch { /* 入力途中 */ }
-          }} /></label></details>
-          <button type="button" onClick={() => void saveSelected()}>変更を保存</button>
-        </> : null}
+          <div className="feedback-admin-session-summary"><div><p className="eyebrow">レビュー管理</p><h2>{selected.title}</h2><p>{selected.description || "説明はありません"}</p></div><button type="button" onClick={() => setEditOpen(true)}>編集</button></div>
+          <dl className="feedback-admin-summary"><div><dt>状態</dt><dd>{sessionStatusLabel(selected.status)}</dd></div><div><dt>対象画面</dt><dd>{selected.scopes.length}件</dd></div><div><dt>観点</dt><dd>{selected.perspectives.length}件</dd></div><div><dt>更新日時</dt><dd>{new Date(selected.updatedAt).toLocaleString("ja-JP")}</dd></div></dl>
+        </> : <p className="feedback-admin-help">左の一覧からレビューセッションを選択するか、新規作成してください。</p>}
       </div>
       <div className="feedback-admin-card feedback-admin-card-wide">
         <h2>スレッドと証跡</h2>
+        <dl className="feedback-admin-summary feedback-admin-thread-summary"><div><dt>未解決</dt><dd>{threads.filter((thread) => thread.status === "open").length}件</dd></div><div><dt>解決済み</dt><dd>{threads.filter((thread) => thread.status === "resolved").length}件</dd></div><div><dt>証跡あり</dt><dd>{threads.filter((thread) => thread.evidenceAvailable).length}件</dd></div></dl>
         <form className="feedback-admin-thread-filters" onSubmit={(event) => event.preventDefault()}><label>状態<select value={threadStatus} onChange={(event) => setThreadStatus(event.target.value as typeof threadStatus)}><option value="">すべて</option><option value="open">未解決</option><option value="resolved">解決済み</option></select></label><label>観点<select value={threadPerspective} onChange={(event) => setThreadPerspective(event.target.value)}><option value="">すべて</option>{selected?.perspectives.map((perspective) => <option key={perspective.code} value={perspective.code}>{perspective.label ?? perspective.code}</option>)}</select></label><label>証跡<select value={threadEvidence} onChange={(event) => setThreadEvidence(event.target.value as typeof threadEvidence)}><option value="">すべて</option><option value="with">証跡あり</option><option value="without">証跡なし</option></select></label><label>コメント本文<input type="search" placeholder="コメントを検索" value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} /></label></form>
         {visibleThreads.map((thread) => <article className="feedback-admin-thread" key={thread.id}>
           <h3>#{thread.displayNumber} {thread.perspectiveCode}</h3>
@@ -323,8 +350,51 @@ function SessionAdministration({
         {visibleThreads.length === 0 ? <p className="feedback-admin-help">条件に一致するフィードバックはありません。</p> : null}{evidenceUrl ? <img src={evidenceUrl} alt="証跡" /> : null}
       </div>
       </div>
+      {createOpen ? <div className="feedback-admin-dialog-backdrop"><section className="feedback-admin-dialog" role="dialog" aria-modal="true" aria-label="レビューセッションの作成"><header><div><p className="eyebrow">レビュー管理</p><h2>レビューセッションを作成</h2></div><button type="button" aria-label="閉じる" onClick={() => setCreateOpen(false)}>×</button></header><form className="feedback-admin-session-form" onSubmit={(event) => void create(event)}>
+        <label className="wide">タイトル<input autoFocus required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="wide">説明<textarea rows={3} maxLength={5000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+        <label>状態<select value={createStatus} onChange={(event) => setCreateStatus(event.target.value as Session["status"])}><option value="draft">下書き</option><option value="open">受付中</option><option value="closed">終了</option></select></label><label>対象外画面からの投稿<select value={outOfScopePosting} onChange={(event) => setOutOfScopePosting(event.target.value as Session["outOfScopePosting"])}><option value="warn">警告して許可</option><option value="allow">許可</option><option value="deny">禁止</option></select></label><label>開始日時<input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label><label>終了日時<input type="datetime-local" value={endAt} onChange={(event) => setEndAt(event.target.value)} /></label>
+        <fieldset className="wide"><legend>レビュー観点</legend><p>今回のレビューで各観点をどう扱うか選択してください。</p><PerspectiveEditor values={draftPerspectives} onChange={updateDraftPerspective} /></fieldset>
+        <fieldset className="wide"><legend>対象画面</legend><div className="feedback-admin-selection-actions"><span>{selectedScopes.length} / {manifestRoutes.length} 画面を選択中</span><button type="button" onClick={() => setScopes(JSON.stringify(manifestRoutes.map((route) => ({ pageKey: route.pageKey, routeTemplate: route.template, reviewable: true })), null, 2))}>すべて選択</button><button type="button" onClick={() => setScopes("[]")}>すべて解除</button></div><RouteSelector routes={manifestRoutes} selected={selectedScopes} onToggle={toggleManifestRoute} /></fieldset>
+        <footer className="wide"><button type="button" disabled={busy} onClick={() => setCreateOpen(false)}>キャンセル</button><button type="submit" disabled={busy}>{busy ? "保存中..." : "セッションを作成"}</button></footer>
+      </form></section></div> : null}
+      {editOpen && selected ? <div className="feedback-admin-dialog-backdrop"><section className="feedback-admin-dialog" role="dialog" aria-modal="true" aria-label="レビューセッションの編集"><header><div><p className="eyebrow">レビュー管理</p><h2>レビューセッションを編集</h2></div><button type="button" aria-label="閉じる" onClick={() => { setEditOpen(false); void refresh(); }}>×</button></header><form className="feedback-admin-session-form" onSubmit={(event) => { event.preventDefault(); void saveSelected(); }}>
+        <label className="wide">タイトル<input autoFocus required maxLength={200} value={selected.title} onChange={(event) => patchSessionState({ title: event.target.value })} /></label><label className="wide">説明<textarea rows={3} maxLength={5000} value={selected.description ?? ""} onChange={(event) => patchSessionState({ description: event.target.value || null })} /></label>
+        <label>状態<select value={selected.status} onChange={(event) => patchSessionState({ status: event.target.value as Session["status"] })}><option value="draft">下書き</option><option value="open">受付中</option><option value="closed">終了</option></select></label><label>対象外画面からの投稿<select value={selected.outOfScopePosting} onChange={(event) => patchSessionState({ outOfScopePosting: event.target.value as Session["outOfScopePosting"] })}><option value="warn">警告して許可</option><option value="allow">許可</option><option value="deny">禁止</option></select></label><label>開始日時<input type="datetime-local" value={dateTimeLocal(selected.startAt)} onChange={(event) => patchSessionState({ startAt: dateTimeToISO(event.target.value) })} /></label><label>終了日時<input type="datetime-local" value={dateTimeLocal(selected.endAt)} onChange={(event) => patchSessionState({ endAt: dateTimeToISO(event.target.value) })} /></label>
+        <fieldset className="wide"><legend>レビュー観点</legend><PerspectiveEditor values={selected.perspectives} onChange={updateSelectedPerspective} /></fieldset><fieldset className="wide"><legend>対象画面</legend><div className="feedback-admin-selection-actions"><span>{selected.scopes.length} / {manifestRoutes.length} 画面を選択中</span><button type="button" onClick={() => patchSessionState({ scopes: manifestRoutes.map((route) => ({ pageKey: route.pageKey, routeTemplate: route.template, reviewable: true })) })}>すべて選択</button><button type="button" onClick={() => patchSessionState({ scopes: [] })}>すべて解除</button></div><RouteSelector routes={manifestRoutes} selected={selected.scopes} onToggle={toggleSelectedRoute} /></fieldset>
+        <footer className="wide"><button type="button" disabled={busy} onClick={() => { setEditOpen(false); void refresh(); }}>キャンセル</button><button type="submit" disabled={busy}>{busy ? "保存中..." : "変更を保存"}</button></footer>
+      </form></section></div> : null}
     </div>
   );
+}
+
+function PerspectiveEditor({ values, onChange }: {
+  values: Array<{ code: string; label: string; status: unknown; guidance?: string | null }>;
+  onChange(code: string, label: string, status: string, guidance?: string): void;
+}) {
+  const known = new Set(perspectiveDefinitions.map(([code]) => code));
+  const definitions = [
+    ...perspectiveDefinitions,
+    ...values.filter((value) => !known.has(value.code as typeof perspectiveDefinitions[number][0])).map((value) => [value.code, value.label, "以前の設定から引き継いだ観点"] as const)
+  ];
+  return <div className="feedback-admin-perspective-list">{definitions.map(([code, label, help]) => {
+    const current = values.find((value) => value.code === code);
+    const status = typeof current?.status === "string" ? current.status : "";
+    return <div className="feedback-admin-perspective-row" key={code}><span><strong>{label}</strong><small>{help}</small></span><label>扱い<select value={status} onChange={(event) => onChange(code, label, event.target.value, current?.guidance ?? "")}><option value="">未使用</option><option value="active">今回確認</option><option value="future">今後確認</option><option value="out-of-scope">今回対象外</option></select></label><label>補足<input disabled={!status} placeholder="利用者に見せる補足" value={current?.guidance ?? ""} onChange={(event) => onChange(code, label, status, event.target.value)} /></label></div>;
+  })}</div>;
+}
+
+function RouteSelector({ routes, selected, onToggle }: {
+  routes: ManifestRoute[];
+  selected: Array<{ pageKey: string }>;
+  onToggle(route: ManifestRoute, checked: boolean): void;
+}) {
+  const groups = new Map<string, ManifestRoute[]>();
+  for (const route of routes) {
+    const group = route.group ?? "画面";
+    groups.set(group, [...(groups.get(group) ?? []), route]);
+  }
+  if (routes.length === 0) return <p className="feedback-admin-help">登録済みの画面がありません。先に「アプリ設定」でManifestを登録してください。</p>;
+  return <div className="feedback-admin-route-groups">{[...groups].map(([group, items]) => <section key={group}><h3>{group}</h3>{items.map((route) => <label key={route.pageKey}><input type="checkbox" checked={selected.some((scope) => scope.pageKey === route.pageKey)} onChange={(event) => onToggle(route, event.target.checked)} /><span><strong>{route.label}</strong><code>{route.template}</code></span></label>)}</section>)}</div>;
 }
 
 function ManifestAdministration({ transport, applicationKey, onError }: {
@@ -629,12 +699,6 @@ export class FeedbackAdminErrorBoundary extends Component<{
 function query(values: Record<string, string>): string {
   return Object.entries(values).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
 }
-function parseArray(value: string, name: string): unknown[] {
-  const parsed = JSON.parse(value) as unknown;
-  if (!Array.isArray(parsed)) throw new Error(`${name} JSONは配列で指定してください`);
-  return parsed;
-}
-
 function parseScopeDraft(value: string): Array<{ pageKey: string; routeTemplate?: string; reviewable: boolean }> {
   try {
     const parsed = JSON.parse(value);
@@ -646,9 +710,31 @@ function parseScopeDraft(value: string): Array<{ pageKey: string; routeTemplate?
     return [];
   }
 }
+function parsePerspectiveDraft(value: string): Array<{ code: string; label: string; status: string; guidance: string | null }> {
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is { code: string; label: string; status: string; guidance: string | null } =>
+      item != null && typeof item === "object" && typeof item.code === "string" && typeof item.label === "string" && typeof item.status === "string"
+    );
+  } catch {
+    return [];
+  }
+}
 function permissionList(value: string): string[] { return value.split(",").map((item) => item.trim()).filter(Boolean); }
 function sessionStatusLabel(value: Session["status"]): string {
   return value === "open" ? "受付中" : value === "closed" ? "終了" : "下書き";
+}
+function dateTimeLocal(value?: string | null): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+function dateTimeToISO(value: string): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 function idempotencyKey(): string { return `feedback-admin-${crypto.randomUUID()}`; }
 function versionEtag(version: number): string { return `"v${version}"`; }

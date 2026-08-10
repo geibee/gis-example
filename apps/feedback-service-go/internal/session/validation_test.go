@@ -88,6 +88,21 @@ func TestValidatePatchRejectsEmptyAndInvalidETagVersion(t *testing.T) {
 	}
 }
 
+func TestValidatePatchValidatesReplacementChildren(t *testing.T) {
+	t.Parallel()
+	invalidScopes := []Scope{{PageKey: ""}}
+	patch := Patch{ExpectedVersion: 1, Scopes: &invalidScopes}
+	if err := ValidatePatch(patch, Session{}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("不正scopeを受理しました: %v", err)
+	}
+	validScopes := []Scope{{PageKey: "orders.list", Reviewable: true}}
+	validPerspectives := []Perspective{{Code: "USABILITY", Label: "操作性", Status: PerspectiveActive}}
+	patch = Patch{ExpectedVersion: 1, Scopes: &validScopes, Perspectives: &validPerspectives}
+	if err := ValidatePatch(patch, Session{}); err != nil {
+		t.Fatalf("有効なchildren patchが拒否されました: %v", err)
+	}
+}
+
 func TestCursorRoundTripAndNegativeCases(t *testing.T) {
 	t.Parallel()
 	for _, offset := range []int{0, 1, 200, 99999} {

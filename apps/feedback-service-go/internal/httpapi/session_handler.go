@@ -196,6 +196,7 @@ type sessionCreateWire struct {
 	ManifestVersion      string                    `json:"manifestVersion"`
 	Title                string                    `json:"title"`
 	Description          *string                   `json:"description"`
+	Status               *string                   `json:"status"`
 	OutOfScopePosting    *string                   `json:"outOfScopePosting"`
 	StartAt              *string                   `json:"startAt"`
 	EndAt                *string                   `json:"endAt"`
@@ -240,6 +241,13 @@ func decodeSessionCreate(body []byte) (session.CreateRequest, error) {
 		}
 		posting = *wire.OutOfScopePosting
 	}
+	status := session.StatusDraft
+	if value, exists := raw["status"]; exists {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || wire.Status == nil {
+			return session.CreateRequest{}, invalid("request.invalid", "statusが不正です")
+		}
+		status = *wire.Status
+	}
 	scopes := []session.Scope{}
 	if value, exists := raw["scopes"]; exists {
 		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || wire.Scopes == nil {
@@ -271,7 +279,7 @@ func decodeSessionCreate(body []byte) (session.CreateRequest, error) {
 	return session.CreateRequest{
 		ApplicationKey: wire.ApplicationKey, EnvironmentKey: wire.EnvironmentKey,
 		ExternalWorkspaceKey: wire.ExternalWorkspaceKey, ManifestVersion: wire.ManifestVersion,
-		Title: wire.Title, Description: wire.Description, OutOfScopePosting: posting,
+		Title: wire.Title, Description: wire.Description, Status: status, OutOfScopePosting: posting,
 		StartAt: wire.StartAt, EndAt: wire.EndAt, Scopes: scopes, Perspectives: perspectives,
 	}, nil
 }
@@ -286,6 +294,7 @@ func decodeSessionPatch(body []byte, expectedVersion int) (session.Patch, error)
 	}
 	allowed := map[string]struct{}{
 		"title": {}, "description": {}, "status": {}, "outOfScopePosting": {}, "startAt": {}, "endAt": {},
+		"scopes": {}, "perspectives": {},
 	}
 	for key := range object {
 		if _, ok := allowed[key]; !ok {
@@ -326,6 +335,42 @@ func decodeSessionPatch(body []byte, expectedVersion int) (session.Patch, error)
 		if value, ok := object["endAt"]; ok {
 			patch.EndAt = session.OptionalString{Present: true}
 			patch.EndAt.Value, err = decodeNullablePatchString(value, "endAt")
+		}
+	}
+	if err == nil {
+		if value, ok := object["scopes"]; ok {
+			var wire []sessionScopeWire
+			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || decodeStrict(value, &wire) != nil {
+				err = invalid("request.invalid", "scopesは配列で指定してください")
+			} else {
+				scopes := make([]session.Scope, 0, len(wire))
+				for _, item := range wire {
+					if item.PageKey == nil || item.Reviewable == nil {
+						err = invalid("request.invalid", "scopeの必須fieldがありません")
+						break
+					}
+					scopes = append(scopes, session.Scope{PageKey: *item.PageKey, RouteTemplate: item.RouteTemplate, Reviewable: *item.Reviewable})
+				}
+				patch.Scopes = &scopes
+			}
+		}
+	}
+	if err == nil {
+		if value, ok := object["perspectives"]; ok {
+			var wire []sessionPerspectiveWire
+			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || decodeStrict(value, &wire) != nil {
+				err = invalid("request.invalid", "perspectivesは配列で指定してください")
+			} else {
+				perspectives := make([]session.Perspective, 0, len(wire))
+				for _, item := range wire {
+					if item.Code == nil || item.Label == nil || item.Status == nil {
+						err = invalid("request.invalid", "perspectiveの必須fieldがありません")
+						break
+					}
+					perspectives = append(perspectives, session.Perspective{Code: *item.Code, Label: *item.Label, Status: *item.Status, Guidance: item.Guidance})
+				}
+				patch.Perspectives = &perspectives
+			}
 		}
 	}
 	if err != nil {

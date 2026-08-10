@@ -80,6 +80,7 @@ type CreateRequest struct {
 	ManifestVersion      string        `json:"manifestVersion"`
 	Title                string        `json:"title"`
 	Description          *string       `json:"description"`
+	Status               string        `json:"status"`
 	OutOfScopePosting    string        `json:"outOfScopePosting"`
 	StartAt              *string       `json:"startAt"`
 	EndAt                *string       `json:"endAt"`
@@ -107,9 +108,12 @@ type Patch struct {
 	OutOfScopePosting *string
 	StartAt           OptionalString
 	EndAt             OptionalString
+	Scopes            *[]Scope
+	Perspectives      *[]Perspective
 }
 
 func (patch Patch) Empty() bool {
 	return patch.Title == nil && !patch.Description.Present && patch.Status == nil &&
-		patch.OutOfScopePosting == nil && !patch.StartAt.Present && !patch.EndAt.Present
+		patch.OutOfScopePosting == nil && !patch.StartAt.Present && !patch.EndAt.Present &&
+		patch.Scopes == nil && patch.Perspectives == nil
 }

@@ -1458,6 +1458,9 @@ components:
         manifestVersion: { type: string }
         title: { type: string, minLength: 1, maxLength: 200 }
         description: { type: [string, "null"], maxLength: 5000 }
+        status:
+          allOf: [{ $ref: "#/components/schemas/FeedbackSessionStatus" }]
+          default: draft
         outOfScopePosting: { enum: [allow, warn, deny], default: warn }
         startAt: { type: [string, "null"], format: date-time }
         endAt: { type: [string, "null"], format: date-time }
@@ -1479,6 +1482,12 @@ components:
         outOfScopePosting: { enum: [allow, warn, deny] }
         startAt: { type: [string, "null"], format: date-time }
         endAt: { type: [string, "null"], format: date-time }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackSessionScopeV1" }
+        perspectives:
+          type: array
+          items: { $ref: "#/components/schemas/FeedbackSessionPerspectiveV1" }
 
     FeedbackThreadStatus:
       enum: [open, resolved]

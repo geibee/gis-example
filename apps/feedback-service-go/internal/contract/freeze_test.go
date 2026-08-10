@@ -29,7 +29,7 @@ func TestFrozenContractChecksums(t *testing.T) {
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 		t.Fatalf("freeze manifestが不正です: %v", err)
 	}
-	if manifest.BaselineCommit != "afe6d04" {
+	if manifest.BaselineCommit != "1f30e9a" {
 		t.Fatalf("基準commitが変化しました: %s", manifest.BaselineCommit)
 	}
 	if manifest.OpenAPIOperationCount != frozenOperationCount {

@@ -200,10 +200,10 @@ WHERE tenant_id = $1::uuid AND principal_id = $2 AND endpoint = $3 AND idempoten
 		sessionID := uuid.NewString()
 		_, err = tx.Exec(txCtx, `INSERT INTO feedback.review_sessions (
     id, tenant_id, application_id, environment_id, workspace_id, manifest_version,
-    title, description, out_of_scope_posting, start_at, end_at, created_by
-) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10::timestamptz, $11::timestamptz, $12)`,
+    title, description, status, out_of_scope_posting, start_at, end_at, created_by
+) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $11::timestamptz, $12::timestamptz, $13)`,
 			sessionID, scope.TenantID, scope.ApplicationID, scope.EnvironmentID, scope.WorkspaceID,
-			request.ManifestVersion, request.Title, optionalString(request.Description), request.OutOfScopePosting,
+			request.ManifestVersion, request.Title, optionalString(request.Description), request.Status, request.OutOfScopePosting,
 			optionalString(request.StartAt), optionalString(request.EndAt), principal.Subject,
 		)
 		if err != nil {
@@ -295,6 +295,32 @@ WHERE id = $13::uuid AND version = $14`,
 		}
 		if tag.RowsAffected() != 1 {
 			return versionMismatchError()
+		}
+		if patch.Scopes != nil {
+			if _, err := tx.Exec(txCtx, `DELETE FROM feedback.review_scopes WHERE session_id = $1::uuid`, sessionID); err != nil {
+				return fmt.Errorf("session scopeを更新できません: %w", err)
+			}
+			for _, reviewScope := range *patch.Scopes {
+				if _, err := tx.Exec(txCtx, `INSERT INTO feedback.review_scopes (
+    id, session_id, page_key, route_template, reviewable
+) VALUES ($1::uuid, $2::uuid, $3, $4, $5)`, uuid.NewString(), sessionID,
+					reviewScope.PageKey, optionalString(reviewScope.RouteTemplate), reviewScope.Reviewable); err != nil {
+					return fmt.Errorf("session scopeを更新できません: %w", err)
+				}
+			}
+		}
+		if patch.Perspectives != nil {
+			if _, err := tx.Exec(txCtx, `DELETE FROM feedback.review_session_perspectives WHERE session_id = $1::uuid`, sessionID); err != nil {
+				return fmt.Errorf("session perspectiveを更新できません: %w", err)
+			}
+			for _, perspective := range *patch.Perspectives {
+				if _, err := tx.Exec(txCtx, `INSERT INTO feedback.review_session_perspectives (
+    session_id, code, label, status, guidance
+) VALUES ($1::uuid, $2, $3, $4, $5)`, sessionID, perspective.Code, perspective.Label,
+					perspective.Status, optionalString(perspective.Guidance)); err != nil {
+					return fmt.Errorf("session perspectiveを更新できません: %w", err)
+				}
+			}
 		}
 		saved, err = readSessionByID(txCtx, tx, sessionID)
 		return err
