@@ -579,7 +579,7 @@ function NotificationAdministration({ transport, scopeQuery, onError }: {
       {connector.healthError ? <p>{connector.healthError}</p> : null}
       <div className="feedback-admin-actions"><button type="button" onClick={() => void toggleConnector(connector)}>{connector.enabled ? "無効化" : "有効化"}</button><button type="button" onClick={() => void removeConnector(connector)}>削除</button></div>
     </article>)}</div>
-    <div className="feedback-admin-card"><h2>通知の配送履歴</h2>{deliveries.map((delivery) => <article key={delivery.id}><strong>{delivery.eventType}</strong> {delivery.status === "failed" ? "失敗" : delivery.status === "succeeded" ? "成功" : delivery.status} ({delivery.attemptCount}回)
+    <div className="feedback-admin-card"><h2>通知の配送履歴</h2>{deliveries.map((delivery) => <article key={delivery.id}><strong>{delivery.eventType}</strong> {delivery.status === "failed" ? "失敗" : delivery.status === "delivered" ? "成功" : delivery.status === "processing" ? "処理中" : "待機中"} ({delivery.attemptCount}回)
       {delivery.connectorName ? <span> / {delivery.connectorName}</span> : null}
       {delivery.lastError ? <p>{delivery.lastError}</p> : null}{delivery.status === "failed" ? <button type="button" onClick={() => void retry(delivery.id)}>再送</button> : null}</article>)}</div></div>;
 }
