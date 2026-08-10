@@ -1,0 +1,22 @@
+{
+  "frozenAt": "2026-08-09",
+  "baselineCommit": "afe6d04",
+  "openapiOperationCount": 42,
+  "contracts": {
+    "openapi.yaml": "sha256:6117104ce47080ce584db1d935908e2ee3af2f58a192dd2ad761c12d9777028e",
+    "schemas/connector-protocol.schema.json": "sha256:4467a857dc49d6a8282ac75aa8c40ec391b7793cab805ec9a8bc922243b4ed24",
+    "token-exchange.openapi.yaml": "sha256:2504d874a5049e94bc9e2fa8998c3e6e0bc73e9e6c1e958622d20dac4a39d4e5",
+    "schemas/application-manifest.schema.json": "sha256:a7e92ba7616b7629889db9b10f735dee26befa0d68a5ef3b4bfc2d3ad1121c43",
+    "schemas/location.schema.json": "sha256:9249d46c075186f9a98b1493b3c2a4dd85ac1fb794da8b1589209439fec5dd0a",
+    "schemas/target.schema.json": "sha256:1dd2163101ce56a4a01fc9dd5a5828394e0554681a08750674faa9130d830153",
+    "schemas/token-exchange-jwt.schema.json": "sha256:22033707d1553c8440245e83766c648b783c12f9b81a025e55e47e49f642af9c",
+    "schemas/webhook-event.schema.json": "sha256:dbe606a637769887b47e75c294a2a5a1f73e9797d6f261b0852a466c249d6ea6"
+  },
+  "flywayMigrations": {
+    "V1__feedback_baseline.sql": "sha256:19bcdc24abc472af0eafe6d0234b5fc3003dc76609e1965b62244b46d9d6ae87",
+    "V2__export_delivery_admin.sql": "sha256:7c69225866b02ec4c9aec322bfb685e2240defe391707799d21dcc16d4161961",
+    "V3__legacy_copy_journal.sql": "sha256:77538b716dd5458a5e5151eed2e4ad6eeebe00e8f0a2bc1486a6a71de61947db",
+    "V4__standalone_operational_guards.sql": "sha256:827f25016745b50930de5bd4618bf4c128b591288ccb8e301698dcf0c3d117e9",
+    "V5__backup_and_connector_foundation.sql": "sha256:6fdb8666c9162baf01a0fcb422a1328488485e396556641c805ba2f75aec7f93"
+  }
+}

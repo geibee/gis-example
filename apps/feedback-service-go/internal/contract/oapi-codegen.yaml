@@ -1,0 +1,13 @@
+package: contract
+output: openapi.gen.go
+generate:
+  embedded-spec: true
+  models: true
+  std-http-server: true
+  strict-server: true
+output-options:
+  name-normalizer: ToCamelCaseWithInitialisms
+  nullable-type: true
+  skip-prune: false
+  user-templates:
+    stdhttp/std-http-interface.tmpl: templates/std-http-interface.tmpl

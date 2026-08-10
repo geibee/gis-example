@@ -6,13 +6,14 @@ ROOT=$(git rev-parse --show-toplevel)
 output=""
 
 usage() {
-  echo "usage: scripts/assemble-feedback-repository --output <empty-directory>" >&2
+  echo "usage: scripts/assemble-feedback-repository --output <empty-directory> [--go-only]" >&2
   exit 2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output) [[ $# -ge 2 ]] || usage; output=$2; shift 2 ;;
+    --go-only) shift ;; # Go-onlyが唯一の出力形状。既存automationとの互換option。
     *) usage ;;
   esac
 done
@@ -34,7 +35,7 @@ trap 'rm -f "$manifest"' EXIT
 cd "$ROOT"
 
 roots=(
-  apps/feedback-service
+  apps/feedback-service-go
   apps/feedback-admin
   apps/feedback-token-broker-reference
   apps/feedback-conformance-consumer
@@ -46,7 +47,6 @@ roots=(
   deploy
   tests/fixtures/feedback-sdk-vite
 )
-
 git ls-files --cached --others --exclude-standard -- "${roots[@]}" | sort -u >"$manifest"
 while IFS= read -r source; do
   [[ -n "$source" ]] || continue
@@ -54,10 +54,7 @@ while IFS= read -r source; do
   [[ -f "$source" ]] || continue
   case "$source" in
     */node_modules/* | */dist/* | */build/* | */.gradle/* | */.kotlin/*) continue ;;
-    apps/feedback-service/src/main/kotlin/feedback/service/LegacyMigration*.kt) continue ;;
-    apps/feedback-service/src/test/kotlin/feedback/service/integration/LegacyMigrationIntegrationTest.kt) continue ;;
-    apps/feedback-service/src/main/resources/db/feedback-migration/*) continue ;;
-    apps/feedback-service/src/main/resources/db/migration/V*.sql) continue ;;
+    contracts/feedback/kotlin/*) continue ;;
   esac
   mkdir -p "$output/$(dirname "$source")"
   cp -p "$source" "$output/$source"
@@ -70,41 +67,53 @@ for name in "${root_files[@]}"; do
 done
 cp -p .spectral.yaml "$output/.spectral.yaml"
 
-mkdir -p "$output/docs" "$output/scripts" \
-  "$output/apps/feedback-service/src/main/resources/db/migration"
+mkdir -p "$output/docs" "$output/scripts"
 cp -Rp feedback-repository/docs/. "$output/docs/"
 
 scripts=(
+  build-feedback-go-release.sh
   check-feedback-contracts.sh
   check-feedback-packages.sh
   check-feedback-conformance.sh
-  generate-feedback-kotlin-contracts.mjs
+  measure-feedback-runtime-memory.sh
+  measure-feedback-canary.sh
+  soak-feedback-go.sh
   smoke-feedback-standalone.sh
   verify-feedback.sh
+  verify-feedback-go.sh
 )
 for name in "${scripts[@]}"; do cp -p "scripts/$name" "$output/scripts/$name"; done
 
-# 現repositoryのversioned migrationは変更せず、抽出物だけをV1〜V5収束済みのclean V1にする。
-baseline="$output/apps/feedback-service/src/main/resources/db/migration/V1__feedback_baseline.sql"
-{
-  echo "-- Feedback System独立DBの収束済みbaseline。旧consumer移行台帳は含めない。"
-  sed -n '1,$p' apps/feedback-service/src/main/resources/db/migration/V1__feedback_baseline.sql
-  sed -n '1,$p' apps/feedback-service/src/main/resources/db/migration/V2__export_delivery_admin.sql
-  sed -n '4,13p' apps/feedback-service/src/main/resources/db/migration/V3__legacy_copy_journal.sql
-  sed -n '1,$p' apps/feedback-service/src/main/resources/db/migration/V4__standalone_operational_guards.sql
-  sed -n '1,$p' apps/feedback-service/src/main/resources/db/migration/V5__backup_and_connector_foundation.sql
-} >"$baseline"
+# fresh installの収束済みclean V1をそのまま抽出する。
+fresh_schema_fingerprint=de8ba8a564a39b533e92b37ebffd32bc1a6fbfb66addaad4f56dbd78cb934259
+go_baseline="$output/apps/feedback-service-go/migrations/baseline/V1__feedback_baseline.sql"
+[[ -f "$go_baseline" && "$(grep -c "$fresh_schema_fingerprint" "$go_baseline")" == "1" ]] || {
+  echo "clean V1のschema fingerprint markerを生成できません" >&2
+  exit 1
+}
+node - "$output/contracts/feedback/package.json" <<'NODE'
+const fs = require("node:fs");
+const path = process.argv[2];
+const value = JSON.parse(fs.readFileSync(path, "utf8"));
+value.files = value.files.filter((entry) => entry !== "kotlin");
+value.scripts.generate = "openapi-typescript openapi.yaml -o src/generated.ts";
+fs.writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+NODE
 
-chmod +x "$output/apps/feedback-service/gradlew" "$output/scripts/"*.sh
+chmod +x "$output/scripts/"*.sh
 
 for forbidden in apps/web apps/api packages/feedback-plugin infra/docker-compose.yml; do
   [[ ! -e "$output/$forbidden" ]] || { echo "禁止pathが抽出物へ混入しました: $forbidden" >&2; exit 1; }
 done
-if find "$output/apps/feedback-service" -type f \( -name '*LegacyMigration*' -o -name 'V3__legacy_copy_journal.sql' \) -print -quit | grep -q .; then
-  echo "旧consumer移行実装が独立Serviceへ混入しました" >&2
+if find "$output" -type f \( -name '*.kt' -o -name '*.kts' -o -name 'gradlew' -o -name 'gradlew.bat' \) -print -quit | grep -q .; then
+  echo "Go-only抽出物へKotlin/Gradle sourceが混入しました" >&2
   exit 1
 fi
-if rg -n -i 'postgis|gis_data|app\.(projects|users)|legacy_migration_(runs|entities)' "$baseline"; then
+if rg -n 'apps/feedback-service/Dockerfile' "$output/deploy"; then
+  echo "Go-only抽出物のComposeがKotlin imageを参照しています" >&2
+  exit 1
+fi
+if rg -n -i 'postgis|gis_data|app\.(projects|users)|legacy_migration_(runs|entities)' "$go_baseline"; then
   echo "独立baselineへホストDBまたは旧移行台帳が混入しました" >&2
   exit 1
 fi

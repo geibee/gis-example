@@ -1,0 +1,24 @@
+//lint:file-ignore ST1005 oapi-codegen v2.8.0標準middlewareの固定error文を契約どおり生成する。
+
+// ServerInterface represents all server handlers.
+type ServerInterface interface {
+{{range .}}{{if not .IsAlias}}{{.SummaryAsComment .OperationId }}
+// ({{.Method}} {{.Path}})
+{{with .DeprecationComment}}//
+{{.}}
+{{end}}{{.OperationId}}(w http.ResponseWriter, r *http.Request{{genParamArgs .PathParams}}{{if .RequiresParamObject}}, params {{.OperationId}}Params{{end}})
+{{end}}{{end}}
+}
+
+// Unimplemented is the contract-freeze handler. Every OpenAPI operation is
+// registered, but no business behavior is enabled before its migration phase.
+type Unimplemented struct{}
+
+{{range .}}{{if not .IsAlias}}{{.SummaryAsComment .OperationId }}
+// ({{.Method}} {{.Path}})
+{{with .DeprecationComment}}//
+{{.}}
+{{end}}func (Unimplemented) {{.OperationId}}(w http.ResponseWriter, _ *http.Request{{genParamArgs .PathParams}}{{if .RequiresParamObject}}, _ {{.OperationId}}Params{{end}}) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+{{end}}{{end}}

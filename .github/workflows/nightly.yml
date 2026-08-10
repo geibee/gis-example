@@ -47,8 +47,8 @@ jobs:
 
       - name: Trivy をインストール (脆弱性スキャン / SBOM)
         run: |
-          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/v0.70.0/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v0.70.0
           trivy --version
 
       - name: 脆弱性スキャン (HIGH / CRITICAL で失敗)
@@ -180,9 +180,53 @@ jobs:
           path: /tmp/smoke-compose.log
           if-no-files-found: ignore
 
+  feedback-go-artifacts:
+    name: Feedback Go release artifact (multi-arch / SBOM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.5
+          cache-dependency-path: apps/feedback-service-go/go.sum
+      - uses: docker/setup-qemu-action@v3
+      - id: buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Trivyをインストール
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/v0.70.0/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v0.70.0
+          test "$(trivy version | awk '$1 == "Version:" { print $2; exit }')" = "0.70.0"
+      - name: Go static / vulnerability scan
+        working-directory: apps/feedback-service-go
+        run: |
+          go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: Go fuzz targetを実探索
+        working-directory: apps/feedback-service-go
+        run: |
+          go test -run '^$' -fuzz '^FuzzResolveTarget$' -fuzztime=30s ./internal/backuppull
+          go test -run '^$' -fuzz '^FuzzNotificationText$' -fuzztime=30s ./internal/connector
+          go test -run '^$' -fuzz '^FuzzDecodeBase64$' -fuzztime=30s ./internal/evidence
+          go test -run '^$' -fuzz '^FuzzParseByteRange$' -fuzztime=30s ./internal/evidence
+          go test -run '^$' -fuzz '^FuzzRenderCSV$' -fuzztime=30s ./internal/export
+          go test -run '^$' -fuzz '^FuzzCanonicalJSONSHA256$' -fuzztime=30s ./internal/httpapi
+      - name: release artifactを生成
+        env:
+          FEEDBACK_RELEASE_BUILDER: ${{ steps.buildx.outputs.name }}
+        run: bash scripts/build-feedback-go-release.sh --output ci-results/feedback-go --version nightly-${{ github.run_id }}
+      - name: artifactをアップロード
+        uses: actions/upload-artifact@v7
+        with:
+          name: feedback-go-release
+          path: ci-results/feedback-go/
+          retention-days: 14
+          if-no-files-found: error
+
   escalate:
     name: 失敗時に Issue へエスカレーション
-    needs: [security, smoke-e2e, api-fuzz]
+    needs: [security, smoke-e2e, api-fuzz, feedback-go-artifacts]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -1,0 +1,341 @@
+{
+  "version": "1",
+  "description": "OpenAPIだけでは固定できないHTTP比較fixture。Kotlin/Goを分離DB・Object Storageへ接続して同じ順序で実行する。",
+  "cases": [
+    {
+      "id": "capabilities",
+      "method": "GET",
+      "path": "/feedback/v1/capabilities",
+      "compareHeaders": ["Content-Type"],
+      "ignoreHeaders": ["X-Request-ID"]
+    },
+    {
+      "id": "me-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/me",
+      "headers": {"X-Request-ID": "fixture-request-me"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "review-context-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/review-context?applicationKey=fixture&environmentKey=prod&externalWorkspaceKey=fixture&release=v1&pageKey=home&routeTemplate=%2F&pathParameters=%7B%7D",
+      "headers": {"X-Request-ID": "fixture-request-context"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "sessions-list-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/sessions?applicationKey=fixture&environmentKey=prod&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-session-list"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "session-create-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/sessions",
+      "headers": {"X-Request-ID": "fixture-request-session-create"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "session-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/sessions/00000000-0000-0000-0000-000000000001",
+      "headers": {"X-Request-ID": "fixture-request-session-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "session-patch-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/sessions/00000000-0000-0000-0000-000000000001",
+      "headers": {"X-Request-ID": "fixture-request-session-patch"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "threads-list-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/sessions/00000000-0000-0000-0000-000000000001/threads",
+      "headers": {"X-Request-ID": "fixture-request-thread-list"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "thread-create-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/sessions/00000000-0000-0000-0000-000000000001/threads",
+      "headers": {"X-Request-ID": "fixture-request-thread-create"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "thread-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/threads/00000000-0000-0000-0000-000000000001",
+      "headers": {"X-Request-ID": "fixture-request-thread-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "thread-deep-link-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/threads/00000000-0000-0000-0000-000000000001/deep-link",
+      "headers": {"X-Request-ID": "fixture-request-thread-deep-link"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "thread-status-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/threads/00000000-0000-0000-0000-000000000001/status",
+      "headers": {"X-Request-ID": "fixture-request-thread-status"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "message-create-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/threads/00000000-0000-0000-0000-000000000001/messages",
+      "headers": {"X-Request-ID": "fixture-request-message-create"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "message-patch-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/messages/00000000-0000-0000-0000-000000000001",
+      "headers": {"X-Request-ID": "fixture-request-message-patch"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "message-versions-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/messages/00000000-0000-0000-0000-000000000001/versions",
+      "headers": {"X-Request-ID": "fixture-request-message-versions"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "evidence-download-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/threads/00000000-0000-0000-0000-000000000001/evidence",
+      "headers": {"X-Request-ID": "fixture-request-evidence"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "manifest-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/applications/fixture/manifest",
+      "headers": {"X-Request-ID": "fixture-request-manifest-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "manifest-put-without-bearer",
+      "method": "PUT",
+      "path": "/feedback/v1/applications/fixture/manifest",
+      "headers": {"X-Request-ID": "fixture-request-manifest-put"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "export-create-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/exports",
+      "headers": {"X-Request-ID": "fixture-request-export-create"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "export-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/exports/00000000-0000-0000-0000-000000000001",
+      "headers": {"X-Request-ID": "fixture-request-export-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "export-download-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/exports/00000000-0000-0000-0000-000000000001/download",
+      "headers": {"X-Request-ID": "fixture-request-export-download"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "backup-policy-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/backup-policy?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-backup-policy-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "backup-policy-patch-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/backup-policy?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-backup-policy-patch"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "backups-list-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/backups?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-backups-list"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "backup-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/backups/00000000-0000-0000-0000-000000000001",
+      "headers": {"X-Request-ID": "fixture-request-backup-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "backup-download-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/backups/00000000-0000-0000-0000-000000000001/download",
+      "headers": {"X-Request-ID": "fixture-request-backup-download"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "backup-retry-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/backups/00000000-0000-0000-0000-000000000001/retry?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-backup-retry"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "retention-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/retention-policy?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-retention-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "retention-patch-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/retention-policy?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-retention-patch"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "notification-settings-get-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/notification-settings?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-notification-settings-get"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "notification-settings-patch-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/notification-settings?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-notification-settings-patch"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "connector-types-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/connector-types?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-connector-types"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "connectors-list-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/notification-connectors?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-connectors-list"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "connector-create-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/notification-connectors?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-connector-create"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "connector-patch-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/notification-connectors/00000000-0000-0000-0000-000000000001?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-connector-patch"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "connector-delete-without-bearer",
+      "method": "DELETE",
+      "path": "/feedback/v1/notification-connectors/00000000-0000-0000-0000-000000000001?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-connector-delete"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "deliveries-list-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/notification-deliveries?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-deliveries-list"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "delivery-retry-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/notification-deliveries/00000000-0000-0000-0000-000000000001/retry?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-delivery-retry"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "memberships-list-without-bearer",
+      "method": "GET",
+      "path": "/feedback/v1/memberships?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-memberships-list"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "membership-create-without-bearer",
+      "method": "POST",
+      "path": "/feedback/v1/memberships?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-membership-create"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "membership-patch-without-bearer",
+      "method": "PATCH",
+      "path": "/feedback/v1/memberships/00000000-0000-0000-0000-000000000001?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-membership-patch"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    },
+    {
+      "id": "membership-delete-without-bearer",
+      "method": "DELETE",
+      "path": "/feedback/v1/memberships/00000000-0000-0000-0000-000000000001?applicationKey=fixture&externalWorkspaceKey=fixture",
+      "headers": {"X-Request-ID": "fixture-request-membership-delete"},
+      "compareHeaders": ["Content-Type"],
+      "ignoreJsonPointers": ["/requestId"]
+    }
+  ]
+}

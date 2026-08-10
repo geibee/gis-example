@@ -53,12 +53,28 @@ services:
       timeout: 5s
       retries: 20
 
+  # 空DBへGo clean baselineを適用し、既存DBではV6 handoff/fingerprintだけを検証するone-shot。
+  feedback-migrate:
+    profiles: ["feedback"]
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: apps/feedback-service-go/Dockerfile
+    command: ["/app/bin/feedback-migrate"]
+    environment:
+      FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
+      FEEDBACK_DATABASE_USER: ${FEEDBACK_POSTGRES_USER:-feedback}
+      FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?infra/.env が未作成です (cp infra/.env.example infra/.env)}
+    depends_on:
+      feedback-postgres:
+        condition: service_healthy
+
   feedback-service:
     profiles: ["feedback"]
     restart: unless-stopped
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: apps/feedback-service-go/Dockerfile
     environment:
       FEEDBACK_PORT: "8090"
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -78,8 +94,8 @@ services:
       - feedback-evidence-data:/data/evidence
       - feedback-export-data:/data/exports
     depends_on:
-      feedback-postgres:
-        condition: service_healthy
+      feedback-migrate:
+        condition: service_completed_successfully
       keycloak:
         condition: service_started
 
@@ -90,7 +106,7 @@ services:
     restart: "no"
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: apps/feedback-service-go/Dockerfile
     command: ["/app/bin/feedback-bootstrap"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -111,15 +127,15 @@ services:
       FEEDBACK_BOOTSTRAP_DISPLAY_NAME: GIS Admin
       FEEDBACK_BOOTSTRAP_PERMISSIONS: feedback.read,feedback.comment,feedback.manage,feedback.admin
     depends_on:
-      feedback-postgres:
-        condition: service_healthy
+      feedback-migrate:
+        condition: service_completed_successfully
 
   feedback-notification-worker:
     profiles: ["feedback"]
     restart: unless-stopped
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: apps/feedback-service-go/Dockerfile
     command: ["/app/bin/feedback-notification-worker"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -135,7 +151,7 @@ services:
     restart: unless-stopped
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: apps/feedback-service-go/Dockerfile
     command: ["/app/bin/feedback-export-worker"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}
@@ -157,7 +173,7 @@ services:
     restart: unless-stopped
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: apps/feedback-service-go/Dockerfile
     command: ["/app/bin/feedback-retention-worker"]
     environment:
       FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/${FEEDBACK_POSTGRES_DB:-feedback}

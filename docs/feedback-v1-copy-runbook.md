@@ -20,11 +20,14 @@ provision し、旧ユーザー ID は履歴上の principal ID としてのみ�
 
 ## 実行順序
 
-GIS repositoryで `./gradlew installLegacyMigrationDist` を実行して作る
-`build/install/feedback-legacy-migration/bin/feedback-legacy-migration` を使う。接続先と evidence storage は
-Feedback Service と同じ環境変数を参照する。CLI は専用 `feedback_migration` schema と専用Flyway履歴を
-作成し、Feedback Service schema が固定対象version 5でない場合は実行を拒否する。この配布物は独立
-Feedback Service image/repositoryには含めない。
+Go releaseの`feedback-legacy-migration` entrypointをone-shotで使う。接続先とevidence storageはFeedback Serviceと
+同じ環境変数を参照する。CLIは本体V6 handoffを先に検証し、専用`feedback_migration` schemaと専用Flyway履歴を
+初回だけtransaction作成する。既存V1〜V6 upgradeと独立repositoryの収束済みclean V1を論理V6として区別して受理し、
+履歴/fingerprint不一致、V7以降、専用schemaの部分適用、専用migration checksum差分は拒否する。
+
+このCLIは単一Go image/binaryへ同梱するが、API/workerからは起動しない。本体clean baselineへ旧consumer台帳を含めず、
+copyを実施するDBだけが専用journalを持つ。Kotlin rollback期間に旧配布物を使う場合も、同一SQL/checksumの
+`feedback_migration.flyway_schema_history`を共有する。
 
 ```bash
 feedback-legacy-migration dry-run --input anonymized-snapshot.json

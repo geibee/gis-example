@@ -1,8 +1,9 @@
 # 独立 Feedback Service 運用ガイド
 
-`apps/feedback-service` は Web GIS の `apps/api` から分離した Ktor application である。
-公開契約は `contracts/feedback/openapi.yaml`、DDL は
-`apps/feedback-service/src/main/resources/db/migration`、Flyway history は `feedback` schema 内を正本とする。
+`apps/feedback-service-go` は Web GIS の `apps/api` から分離したGo applicationである。
+公開契約は `contracts/feedback/openapi.yaml`、fresh install DDLは
+`apps/feedback-service-go/migrations/baseline/V1__feedback_baseline.sql`を正本とする。旧V1〜V6のchecksum照合用SQLは
+`apps/feedback-service-go/migrations/flyway-v1-v6`へ読取専用で保存し、Flyway historyは`feedback` schema内で維持する。
 
 ## 境界
 
@@ -29,7 +30,7 @@ docker compose -f infra/docker-compose.yml --profile feedback up --build
 ```
 
 この profile は通常の `postgres` とは別に `feedback-postgres` (`postgres:16-alpine`) を起動し、
-one-shot `feedback-bootstrap` で local tenant/application/environment/workspace と管理 membership を登録する。
+one-shot `feedback-migrate`の完了後、`feedback-bootstrap`でlocal tenant/application/environment/workspaceと管理membershipを登録する。
 Feedback API は `http://localhost:8090/feedback/v1`、health は `/health/live` と `/health/ready` で確認できる。
 `/health/ready` はDB/Evidence storage/Export storageを個別の必須依存、notification backlog/failureを
 degradedな任意依存として区別する。
@@ -74,10 +75,11 @@ notification worker は outbox を `FOR UPDATE SKIP LOCKED` で claim し、deli
 `FEEDBACK_NOTIFICATION_ENCRYPTION_KEY_PREVIOUS` に設定して API/worker を同時に更新する。既存 endpoint は
 次回の notification setting 更新時に新しい鍵で再暗号化される。全 workspace の更新完了を確認してから旧鍵を外す。
 
-retention worker は policy 行と evidence 行を同じ transaction で lock し、policy 延長と purge の競合を防ぐ。
-DB commit 前に worker が停止して object だけが先に消えた場合も delete を冪等に再実行する。さらに object storage を
-走査し、DB metadata がなく grace period を過ぎた object を orphan として削除する。作成 transaction 中の object を
-誤削除しないため、`FEEDBACK_ORPHAN_GRACE_SECONDS` は 300 秒未満にできない。
+retention worker は policy 行と evidence 行を同じ transaction で lockし、policy延長とpurgeの競合を防ぐ。
+期限切れmetadataと監査を先にcommitし、Object Storage削除はtransaction外で行う。削除に失敗したobjectは参照なしの
+orphanとして残し、次cycle以降にevidence/export/backup別prefixをDB参照と照合して再試行する。作成transaction中のobjectを
+誤削除しないため、`FEEDBACK_ORPHAN_GRACE_SECONDS` は300秒未満にできない。exportとbackupは同じstorageを使うため、
+`FEEDBACK_EXPORT_KEY_PREFIX`と`FEEDBACK_BACKUP_KEY_PREFIX`を包含関係にしてはならない。
 
 ## 検証
 

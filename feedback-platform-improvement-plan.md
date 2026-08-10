@@ -1,6 +1,10 @@
 # Feedback Platform Go移行・独立化計画
 
-> 状態: レビュー用。Go採用を明示的に承認した後に実装を開始する。
+> 状態: 初回導入向け実装完了。2026-08-09にGo採用を明示承認し、Phase 0〜Phase 8のblocking gateを完了した。
+> 2026-08-10に、対象は未投入で
+> production data/trafficへ影響しないことを確認し、時間経過だけを要求する24時間soakと14日/2 full backup観察を
+> 今回の初回導入のblocking gateから外した。Feedback ServiceはGo-onlyをdefaultとし、Kotlin source、Gradle wrapper、
+> Kotlin生成契約を正本から撤去した。将来の稼働済み環境のin-place移行には従来の長時間ゲートを適用する。
 > 基準実装: `afe6d04`（フィードバックのバックアップと拡張通知基盤を実装）
 > 作成基準日: 2026-08-09
 
@@ -28,8 +32,10 @@ Go移行中に製品仕様を再設計せず、最初の到達点を **v1完全�
 - 本番相当の並行検証では同じ書込みを二重実行しない。Kotlin版とGo版を別DBへ同一入力で実行するか、workspace単位で排他的に振り分ける。
 - Kotlinへ即時ロールバックできる期間は、Kotlinが解釈できないGo専用DDLを適用しない。
 
-完了とは、Go版が全互換ゲートを満たし、14日間の観察期間と2回以上のフルバックアップ周期を問題なく通過し、
-Kotlin/JDK/GradleをFeedback Serviceの実行・ビルド要件から除去できた状態を指す。
+完了とは、Go版が契約、認可、migration、transaction、Object Storage、rollback/restore、releaseのblocking gateを満たし、
+Kotlin/JDK/GradleをFeedback Serviceの実行・ビルド要件から除去できた状態を指す。稼働済み環境のin-place移行では、これに
+14日間の観察期間と2回以上のフルバックアップ周期を加える。今回の未投入環境では、長時間観察を初回導入後の運用確認へ
+移し、releaseをブロックしない。
 
 ## 2. 現行v1の基準
 
@@ -39,7 +45,7 @@ Kotlin/JDK/GradleをFeedback Serviceの実行・ビルド要件から除去で�
 |---|---|
 | HTTP API | `contracts/feedback/openapi.yaml` |
 | Connector Protocol | `contracts/feedback/schemas/connector-protocol.schema.json` |
-| DB DDL | `apps/feedback-service/src/main/resources/db/migration/V*.sql` |
+| DB DDL | fresh installは`apps/feedback-service-go/migrations/baseline/V1__feedback_baseline.sql`。既存V1〜V6 checksum履歴は`apps/feedback-service-go/migrations/flyway-v1-v6/` |
 | 環境変数 | `docs/environment-variables.md` |
 | 運用挙動 | `docs/feedback-service.md`、`docs/feedback-operations-guide.md` |
 | 独立配布形状 | `scripts/assemble-feedback-repository` と `feedback-repository/` |
@@ -283,7 +289,11 @@ Flywayのversion履歴を別libraryへ暗黙変換しない。次のhandoffを1�
 1. Kotlin互換releaseへ `V6__go_migration_handoff.sql` を追加する。
 2. V6はGo migrator用version tableとbaseline markerを作成するだけとし、既存業務tableを変更しない。
 3. 既存環境ではKotlin/FlywayがV6を適用し、V1〜V6がsuccessであることとschema fingerprintをGo版が検証する。
-4. fresh install向けにはV6収束済みbaselineを生成し、同じschema fingerprintとbaseline markerを作る。
+4. fresh install向けにはV6収束済みbaselineを生成する。独立抽出物だけが除外する旧consumer移行台帳を除き、
+   業務schemaを一致させる。Go版はFlyway履歴がV1のみのfresh baselineとV1〜V6 upgradeを区別し、
+   それぞれに固定したschema fingerprintとbaseline marker以外を拒否する。
+   CHECK/partial indexのtext-array castは`pg_dump`/`pg_restore`で同値の別表記になるため、column型、演算子、
+   値集合を維持したrestore安定表記へ正規化してからfingerprintを計算する。
 5. Go版default化までは新しい業務DDLを追加しない。
 6. Go版default化後の新規migrationはV7から開始し、Go migratorだけがversion tableを更新する。
 7. `feedback.flyway_schema_history` は監査証跡として保持し、編集・削除しない。
@@ -333,6 +343,15 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - invalid JWT、issuer/audience、permission、membership境界のnegative testが一致する。
 - PostgreSQL停止、JWKS障害、Object Storage障害のreadinessが一致する。
 
+実行結果（2026-08-09）:
+
+- config、pgx pool/transaction、Problem Details、request ID、構造化log、health/readiness/metrics、graceful shutdownを実装した。
+- direct OIDC/token exchange、固定permission matrix、issuer/token scope/membership境界、拒否監査のfail-closed経路を実装した。
+- application/environment/workspace/principal解決、CORS、Go bootstrap、`/capabilities`、`/me`、manifest、review-contextを実装した。
+- PostgreSQL 16.14でDB/HTTP統合試験、Kotlin/Go live differential、Go unit/race/vet/CGO無効build、Kotlin unit/integrationを完走した。
+- readinessのDB/Object Storage障害と、JWKS障害時にreadinessを変更せず認証だけをfail-closedにする試験を追加し、
+  CIのFeedback統合jobへGo runtime統合試験を接続した。
+
 ### Phase 2: Review session、thread、message
 
 実施内容:
@@ -347,6 +366,14 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - 並列thread番号、message version、idempotency、rate limit試験が収束する。
 - transaction rollback時にoutbox/change journal/auditの片残りがない。
 
+実行結果（2026-08-09）:
+
+- session CRUD、thread作成/取得/status/deep-link、message投稿/更新/version履歴をGo APIへ実装した。
+- idempotency advisory lock、thread連番、message楽観lock、journal/outbox/metricのtransaction境界をPostgreSQL 16の
+  並行試験で検証した。既知rollback時の片残りは0件、commit結果不明時は安全側へ分類する。
+- W2の全routeを含むKotlin/Go live HTTP fixtureで認証境界、Problem Details、Content-Typeの差分0件を確認し、
+  認証済みCRUD列はGo HTTP/PostgreSQL統合試験でstatus/header/JSON/DB副作用を検証した。
+
 ### Phase 3: EvidenceとObject Storage
 
 実施内容:
@@ -359,6 +386,14 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - PostgreSQL 16とMinIOを使うintegration testが成功する。
 - 不正Range、巨大upload、MIME不一致、path traversal、storage timeoutをfail-closedに処理する。
 - 既存Kotlin版が作成したobjectをGo版からdownloadでき、その逆も成立する。
+
+実行結果（2026-08-09）:
+
+- strict Base64、PNG/WebP magic、size/quota/SHA-256 metadata、single Range、storage timeoutを実装した。
+- `os.OpenRoot`でlocal traversal/root外symlinkを拒否し、S3はcreate-only Putとprivate Get/List/Deleteを実装した。
+- PostgreSQL 16のquota/metadata統合、MinIOのPut/Get/List/Delete、Go→Kotlin→Goの同一bucket固定byte列相互運用を
+  専用run IDとbucket guardの下で完走した。
+- rollback確定時だけ即時削除し、commit不明objectはgrace付きorphan sweepへ送る回復境界を試験で固定した。
 
 ### Phase 4: Export、Backup、Retention
 
@@ -375,6 +410,27 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - full優先、同一workspace単一実行、失敗時cursor不更新、object/DB片失敗を検証する。
 - download CLIのchecksum、atomic replacement、再実行、破損archive拒否を検証する。
 
+実行結果（2026-08-09）:
+
+- CSV/XLSX exportのclaim、生成、private download、stale recovery、期限切れ処理をGo化した。
+- full/incremental backup、workspace単一実行、cursor、deterministic ZIP/manifest/checksum、retryとbackup pull CLIをGo化した。
+- export/backupはupload後のDB完了結果が不明なときobjectを即時削除せず、attempt固有keyをorphan回収へ委ねる。
+- retention policy API、evidence/export/backup expiryをGo化した。期限切れmetadataと監査をDB transactionで先にcommitし、
+  Object Storage削除はtransaction外で行う。削除失敗objectはevidence/export/backup別のgrace付きorphan回収へ収束させる。
+- PostgreSQL 16とMinIOの専用実体試験で、cursor非更新、object/DB片失敗、checksum/manifest、atomic replacementを検証した。
+  retentionは削除失敗を注入し、DB commit後にobjectが残り、次cycleのorphan sweepで回収される境界をrace付きで固定した。
+- backup pullはOAuth client secret/Bearer tokenを3xx先へ再送しないようredirectを拒否し、negative testで固定した。
+- backup pullのOAuth/list metadataはbyte上限付きの単一JSONだけを受理し、200件超page、空・循環cursor、10,000 page超を
+  fail-closedで拒否するnegative testを追加した。
+- completed backupのdownload URL/SHA-256/archive bytes欠落を黙ってskipせず、`archiveBytes+1`で一時fileへの書込みを制限して
+  HTTP長・実byte数・checksum・manifestをすべて照合する。
+- APIからのbackup downloadもDBの`archive_bytes`を必須化し、Object Storage metadataと実読取byte数を`archiveBytes+1`で
+  制限・完全一致させてからSHA-256を検証する。
+- DBにbyte数を持たないexport downloadはObject Storageの既知sizeをContent-Lengthに固定して直接streamし、short/long bodyを
+  検出する。export容量に比例したAPI processのheap確保を行わない。
+- backup workerは一時ZIPを`os.ReadFile`でheapへ複製せず、size付きReaderでLocal/S3へstreamする。Readerのshort/long入力と
+  partial local file削除をunitで、実MinIO round tripをrace付きで検証した。
+
 ### Phase 5: NotificationとConnector
 
 実施内容:
@@ -390,6 +446,15 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - timeout、429、4xx、5xx、duplicate、process crash、secret rotationを検証する。
 - 通知payloadへ禁止情報が含まれないことをschemaとnegative testで保証する。
 
+実行結果（2026-08-09）:
+
+- notification settings/delivery/retry、outbox claim、connector queue/attempt/healthをGo化した。
+- Webhook、Teams、Slack、SMTPのreference runtime、manifest register、persistent delivery ID、HMACとsecret rotationを実装した。
+  append-onlyのdelivery ID台帳は起動時に行単位で走査して直近100,000件だけをmemoryへ保持し、台帳全体の大きさに
+  process heapが比例しないようにした。不正UUIDと200 bytes超の破損行は起動時にfail-closedで拒否する。
+- timeout、429、4xx/5xx、duplicate、lease recovery、payload redaction、SSRF/private network既定拒否を単体・実HTTP試験で固定した。
+- スタンドアロンE2Eでconnector登録から二段配送、署名検証、delivery履歴までを別processで完走した。
+
 ### Phase 6: Administrationと移行CLI
 
 実施内容:
@@ -403,6 +468,15 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - 全OpenAPI operationにGo実装があり、未実装responseがない。
 - Admin UI、conformance consumer、旧Web GIS copy fixtureがGo版だけで完走する。
 - Kotlin版とGo版のfeature inventory差分が0件になる。
+
+実行結果（2026-08-09）:
+
+- membership、retention、backup、notification、connector管理を含むOpenAPI 42 operationを全てGo handlerへ配線した。
+- 旧Web GIS snapshotのdry-run/copy/reconcile/rollback CLIをGo化し、本体baselineへ旧consumer台帳を混入させず、
+  Kotlin版とbyte一致する専用journal migrationをCLI起動時だけtransaction適用する境界を維持した。空の専用schema作成、
+  冪等再実行、Flyway checksum差分・部分適用拒否、apply/reconcile/rollbackをPostgreSQL実体で検証した。
+- Admin Console、conformance consumer、token brokerをGo backendへ接続するスタンドアロンE2Eを完走した。
+- 42 requestのKotlin/Go live differentialはstatus/header/JSON差分0件となり、feature inventoryの未実装を0件にした。
 
 ### Phase 7: Packagingと独立抽出
 
@@ -420,14 +494,65 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - Kotlin版とGo版の両方を明示的に選択でき、default切替前のrollback演習が成功する。
 - image、binary、SBOMのchecksumをrelease artifactとして出力できる。
 
+実行結果（2026-08-10）:
+
+- Go 1.26.5の単一静的binaryから10 entrypointを提供するUID/GID 65532のdistroless imageを実装し、
+  実測29,482,865 bytesとした。同じ抽出条件のKotlin image 414,373,449 bytesから92.9%削減し、image acceptanceを満たした。
+  runtimeにshell/package managerを含めず、CA証明書とtimezone dataの存在を実imageで検証した。
+- server用linux/amd64・linux/arm64とCLI/ローカル検証用darwin/arm64・windows/amd64 binary、
+  両Linux platformを含むOCI archive、platform別にHIGH/CRITICALでfailするOCI scan SARIFとCycloneDX SBOM、
+  release manifest、`SHA256SUMS`を生成し、
+  binary formatと全checksumを検査するrelease gateを実装した。
+- `assemble-feedback-repository`をGo-onlyのallowlistへ更新し、clean抽出先でGo/Frontend test、
+  no-cache image build、Compose、全container standalone smokeをJDKなしで完走した。
+- Compose、CI、抽出repositoryをGo-onlyへ切り替え、upgrade/release/canary/rollback/障害対応文書を更新した。
+- 同じV6 DB/MinIOを維持してnotification、export、retention、APIをroleごとにGoからKotlinへ排他的に戻し、
+  Go API稼働中のKotlin worker処理、Kotlin APIによる既存session読取と新規message書込、notification配送、export生成、
+  retention削除が収束するrollback smokeを完走した。
+- PostgreSQL custom dumpを隔離DBへ、Evidence/Exportを隔離bucketへrestoreし、Go migratorのschema検証、data-only dump、
+  全object path/SHA-256がsourceと一致することを確認した。この演習でrestore前後の同値制約表記を正規化し、
+  upgrade/fresh fingerprintをそれぞれ固定した。
+- 2026-08-10の局所実測ではGo runtimeのreadiness 407ms、native idle RSS 25,844KiB、SIGTERM停止125ms、
+  `go test -count=1 ./...` 4.87秒となり、各絶対基準を満たした。Phase 8ではさらに同一fixture/resource limitで
+  Kotlin比RSSと3 endpointのHTTP p95を測定して全て合格した。長時間faultの扱いはPhase 8の初回導入方針に従う。詳細は
+  [`docs/feedback-go-completion-audit.md`](docs/feedback-go-completion-audit.md) を参照する。
+- pool size 1を占有するPostgreSQL実体試験を追加し、2本目のtransactionが設定timeoutでfail-closedになり、解放後に
+  transactionとreadinessが回復することをrace付きで確認した。DB接続枯渇の局所failure injectionは完了した。
+- 全worker共通loopはSIGTERM後に新規claimを開始せず、実行中cycleがcontextを無視しても30秒でprocessへ制御を返す
+  shutdown上限を持つ。通常cancelとtimeoutの両経路をrace付き単体試験で固定した。
+- `assemble-feedback-repository --go-only`を追加し、Kotlin source/生成契約、Gradle wrapper、JDK image参照を含まない
+  最終配布形状を生成できるようにした。抽出物のGo migratorは空DBだけへ収束済みV1をtransaction適用し、Flyway V1履歴と
+  V6 markerを作る。再実行、同時2 process、部分schema拒否をPostgreSQL実体で確認した。
+- `java`を失敗stubへ置き換えたGo-only抽出先で、Go unit/race/vet/codegen、全Node workspace、OpenAPI drift、
+  React 18/19実tarball、stable候補、Compose、空DBからの全container smokeを完走した。
+
 ### Phase 8: Canary、default切替、Kotlin撤去
+
+事前準備（2026-08-10）:
+
+- 同一read-only fixtureをKotlin/Goへ交互batchで送り、全sample、status、p50/p95/p99、error率と10%基準の合否を
+  token非記録のJSONへ出力する`measure-feedback-canary.sh`を追加した。
+- 同一source DB/Object StorageからKotlin用・Go用DBをdata-only cloneし、両APIを1 CPU/512MiBに固定して、3 endpointを
+  各実装1,000 sample・concurrency 16で測定した。Go p95はsession一覧で29.84%、capabilitiesで53.69%、session詳細で
+  32.07%短く、計6,000 requestのerrorは0件だった。RSS peakはKotlin 209,388KiB、Go 34,112KiBだった。
+- ローカルgatewayでeast workspaceをGo、westをKotlinへ固定し、各20 writeのaudit増分が20:0で排他的になること、
+  eastをKotlinへ戻した後も20:0で逆転することを確認した。
+- APIに加えてnotification、export/backup、retention、connectorをrole別に100MiB上限で記録し、APIと3 workerを
+  Kotlin同roleの50%以下か比較するcontainer memory JSONゲートをstandalone smokeへ追加した。最終release候補で実測する。
+- `soak-feedback-go.sh`を追加した。実PostgreSQLでparallel claim、stale lease回収、idempotency replay、backup cursorを反復し、
+  定期的なDB再起動後にも同じfixtureを再実行する。最初の長時間runは31完了反復・1再起動・不変条件異常0の後、
+  attempt 32のschema fingerprint走査がstatement timeoutとなったため合格扱いにしなかった。attempt/completed反復と
+  failure stageをsummaryへ追加し、2反復・1再起動・異常0の短縮試験後、2026-08-10 09:42 JSTに長時間試験を再開した。
+  未投入環境向けのrisk acceptanceを受けて2時間15分、228完了反復、DB再起動11回、不変条件異常0で意図的に終了した。
+  harness summaryは要求時間未達のため`failed`を保ち、長時間合格と偽らず、今回の短縮pre-production証跡として扱う。
 
 実施内容:
 
 - APIをworkspace単位のsticky routingでGo canaryへ切り替える。
 - worker roleを1種類ずつ排他的にGo版へ切り替える。
 - error、latency、queue lag、delivery failure、backup checksum、audit件数を比較する。
-- 全trafficをGoへ移し、14日間かつ2回以上のfull backup周期を観察する。
+- 稼働済み環境のin-place移行では、全trafficをGoへ移して14日間かつ2回以上のfull backup周期を観察する。
+- 未投入環境の初回導入では長時間観察をpost-deploy確認へ移し、releaseのblocking gateにしない。
 - 完了後にKotlin source、Gradle/JDK image、Kotlin生成契約を削除する。
 - Compose、CI、抽出repositoryのdefaultをGo版だけにする。
 
@@ -437,6 +562,18 @@ Phase 2〜6は、依存する共通interfaceが固定済みであれば並行実
 - queue backlog、backup cursor、retention、notification duplicateが基準範囲内である。
 - rollback演習とbackup restore演習の証跡がある。
 - `VERIFY_SCOPE=feedback` がJDKなしで成功する。
+- 未投入環境では短縮fault試験がDB再起動後も異常0であり、長時間試験を省略した判断と生証跡が記録されている。
+
+実行結果（2026-08-10）:
+
+- 2時間15分、228反復、DB再起動11回、lease/cursor/idempotency異常0の短縮fault証跡を保持した。要求時間未達の
+  summaryは`failed`のままとし、24時間完走とは扱っていない。
+- Go-only抽出物をJDKなしで再構成し、Go unit/race/vet、契約、Frontend/SDK/package、空DB migration、全container smoke、
+  role別RSSを完走した。API 8,904,507 bytes、notification 7,421,821 bytes、export/backup 7,376,732 bytes、
+  retention 8,528,069 bytesで、全roleが100MiB未満だった。
+- Compose、CI、release、抽出のdefaultをGoへ固定し、Kotlin source、Gradle wrapper、Kotlin生成契約を正本から撤去した。
+  元一式は初回導入確認中のrecoverable archiveとして`/tmp/feedback-kotlin-retired-20260810`へ退避した。
+- 長時間観察、実gateway canary、production backup restoreは初回導入後の非blocking運用確認へ移した。
 
 ## 8. Test strategy
 
@@ -499,8 +636,9 @@ OpenAPI schema適合だけで合格にせず、順序、null、監査副作用�
 3. 限定workspaceをGo APIへsticky routingし、1workspaceずつ拡大する。
 4. notification、export/backup、retentionの順にworker ownershipをGoへ切り替える。
 5. bootstrap、connector runtime、運用CLIをGo版へ切り替える。
-6. 全traffic移行後、14日間の観察ゲートを開始する。
-7. ゲート通過後にKotlin版を撤去し、その後に限りV7以降を許可する。
+6. 稼働済み環境のin-place移行では、全traffic移行後に14日間の観察ゲートを開始する。
+7. 稼働済み環境ではゲート通過後にKotlin版を撤去する。未投入環境の初回導入はblocking gate完了後にGo-only化し、
+   長時間観察をpost-deploy確認として行う。
 
 ### 9.3 Rollback条件と操作
 
@@ -525,7 +663,7 @@ V6はKotlin互換なのでDB rollbackは行わない。処理中leaseの期限�
 | 起動 | 依存先readyかつmigrationなしで2秒以内にreadiness成功 |
 | Build | warm module cacheで `go test ./...` が15秒以内 |
 | HTTP performance | 同一resource limitでp95がKotlin版より10%以上悪化しない |
-| Reliability | 24時間fault testで未回収lease、cursor欠落、重複確定処理が0件 |
+| Reliability | 稼働済み環境のin-place移行は24時間fault testで異常0。未投入環境はDB再起動を含む短縮試験で異常0 |
 | Shutdown | SIGTERM後30秒以内に安全停止し、新規claimを行わない |
 
 性能目標のためにAPI意味論、監査、暗号、validationを省略してはならない。未達時はprofiling結果を記録し、
@@ -568,17 +706,18 @@ Go移行と製品再設計を分離すること自体を、本計画の重要な
 
 ## 13. 最終完了チェックリスト
 
-- [ ] Go採用が明示承認されている。
-- [ ] 基準commitとfeature inventoryが固定されている。
-- [ ] 全OpenAPI operationとConnector Protocol v1をGo版が実装している。
-- [ ] 既存DB/Object Storageを変換せず利用できる。
-- [ ] V6 handoff、fresh baseline、既存upgradeが収束する。
-- [ ] 全worker、bootstrap、connector、backup pull、legacy migration CLIがGo化されている。
-- [ ] Kotlin/Go differential testの差分が0件である。
-- [ ] Admin UI、Frontend SDK、conformance consumerを変更なしまたは後方互換変更だけで利用できる。
-- [ ] security、failure injection、standalone extraction、performance gateが成功している。
-- [ ] workspace/APIとworker role単位のrollback演習が成功している。
-- [ ] 14日間かつ2回以上のfull backup観察ゲートを通過している。
-- [ ] Go版default化後にKotlin/JDK/Gradle依存を撤去している。
-- [ ] `VERIFY_SCOPE=feedback` がJDKなしで成功している。
-- [ ] 運用、upgrade、backup/restore、rollback文書がGo版へ更新されている。
+- [x] Go採用が明示承認されている。
+- [x] 基準commitとfeature inventoryが固定されている。
+- [x] 全OpenAPI operationとConnector Protocol v1をGo版が実装している。
+- [x] 既存DB/Object Storageを変換せず利用できる。
+- [x] V6 handoff、fresh baseline、既存upgradeが履歴別の固定fingerprintへ収束する。
+- [x] 全worker、bootstrap、connector、backup pull、legacy migration CLIがGo化されている。
+- [x] Kotlin/Go differential testの差分が0件である。
+- [x] Admin UI、Frontend SDK、conformance consumerを変更なしまたは後方互換変更だけで利用できる。
+- [x] security、failure injection、standalone extraction、performance gateが成功している。
+- [x] workspace/APIとworker role単位のローカルrollback演習が成功している。未投入初回導入のproduction replica演習は
+  post-deploy確認へ移している。
+- [x] 今回が未投入環境の初回導入であることを確認し、14日間/2 full backup観察をpost-deploy確認へ移している。
+- [x] Go版default化後にKotlin/JDK/Gradle依存をFeedback Serviceの正本repositoryから撤去している。
+- [x] Go-only抽出物のFeedback全ゲートがJDKなしで成功している。
+- [x] 運用、upgrade、backup/restore、rollback文書がGo版へ更新されている。

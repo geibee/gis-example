@@ -4,3 +4,20 @@ Feedback API v1とSDK majorを揃え、SDK起動時のcapabilities negotiation�
 編集・削除せず、新しいversionでforward fixする。破壊的DDLはexpand、両対応/backfill、contractの複数releaseへ分ける。
 
 更新前にDBとEvidence/Export bucketをbackupし、stagingでAPI、worker、Admin、直接OIDC、token exchange経路を検証する。
+
+KotlinからGoへ切り替える既存環境は、先にKotlin/FlywayでV6を適用し、V1〜V6がすべてsuccessであることを確認する。
+その後 `feedback-migrate` をone-shotで実行し、V6 baseline markerと実DBのcanonical fingerprintを検証する。
+独立repositoryのfresh installは旧consumer移行台帳を含まない収束済みV1を使い、Flyway履歴V1専用の固定fingerprintで
+同じhandoffを検証する。Go-only形状の`feedback-migrate`は完全な空DBだけへこのclean V1をtransaction適用し、
+Flyway互換V1履歴とV6 markerを作る。部分schemaや履歴片側だけのDBへbaselineを適用しない。履歴形状とfingerprintの
+組合せが違うDBは起動しない。
+
+既存環境へ戻すKotlin imageは、V6を適用した切替元releaseのdigestを保持する。fresh install用の収束済みV1を含む
+clean抽出版Kotlin imageは、元のV1〜V6とはFlyway checksumが異なるため既存DBのrollbackへ使わない。checksum mismatch時に
+`flyway repair`で履歴を書き換えず、正しいrollback imageを選び直す。
+
+稼働済み環境のGo/Kotlin併存期間はV7を追加・適用しない。workspaceとworker roleを排他的に切り替え、14日間かつ
+full backup 2周期の観察とrollback/restore演習が完了してからGoをdefault化する。未投入環境の初回導入はblocking gateを
+満たしたGo-only artifactから開始し、長時間観察をpost-deploy確認へ移せる。Go-only artifactへ切り替えた後はKotlin rollbackを直接起動
+できないため、切替元Kotlin image/repositoryをrollback retention期間中は別artifactとして保持する。詳細は
+`canary-and-rollback.md` を参照する。

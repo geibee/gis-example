@@ -104,7 +104,7 @@ Gatewayのpath routingまたはSDKの `apiBaseUrl` で明示的に送る。JWT�
 しないよう通常API側を `REVIEW_NOTIFICATION_RUNNER_MODE=external` にし、sidecar側だけを
 `in-process` にするか、両方を `external` にして専用通知workerを1つ起動する。
 
-## feedback-service (apps/feedback-service — Ktor)
+## feedback-service (apps/feedback-service-go — Go)
 
 Feedback Service は Web GIS API と別プロセス・別 PostgreSQL・別 Flyway history で動作する。
 `DATABASE_*` や `OIDC_*` は共有せず、すべて `FEEDBACK_*` の独立設定を使う。
@@ -204,8 +204,64 @@ API、notification worker、export worker、retention worker は同じ image か
 `bin/feedback-service`、`bin/feedback-notification-worker`、`bin/feedback-export-worker`、
 `bin/feedback-retention-worker` を command で選ぶ。export file は認可付き download API だけで配信する。
 同じ配布物に`bin/feedback-backup-pull`、`bin/feedback-connector-register`、
-`bin/feedback-connector-runtime`も含む。自動backup ZIPも認可付きdownload APIだけで配信する。
+`bin/feedback-connector-runtime`、`bin/feedback-bootstrap`、`bin/feedback-legacy-migration`、
+`bin/feedback-migrate`も含む。自動backup ZIPも認可付きdownload APIだけで配信する。
 local modeはAPI、export worker、retention workerでprivate volumeを共有し、分散配備は専用S3 bucketを共有する。
+
+standalone Composeは`apps/feedback-service-go/Dockerfile`を既定runtime imageとする。
+`FEEDBACK_SERVICE_DOCKERFILE`は過去のrollback artifactを明示検証するときだけ使うCompose build選択変数で、
+本番runtimeへ注入しない。空DBは`feedback-migrate`が埋め込みclean V1とV6 handoff markerをtransaction適用してから
+Go API/workerを起動する。
+
+`assemble-feedback-repository --go-only`で作る最終候補はKotlin/JDK/Gradleを含まず、Compose既定をGoへ固定する。
+この形状の空DBだけは`feedback-migrate`が埋め込みclean V1をtransaction適用し、Flyway互換V1履歴とV6 markerを作る。
+既存V1〜V6 DBへbaselineを再適用せず、従来のhandoff/fingerprint検証だけを行う。
+
+### Feedback build・release・smoke制御
+
+次はbuild/品質ゲート専用で、本番runtimeへ注入しない。`SKIP`変数は局所切り分け用であり、release/CIの合格証跡では
+未設定のまま全gateを実行する。
+
+| 名称 | 既定 | 説明 |
+|---|---:|---|
+| `FEEDBACK_VERIFY_SKIP_NPM_CI` | `0` | `1`で親が実行済みの`npm ci`を再利用する。clean verifyでは使わない |
+| `FEEDBACK_VERIFY_SKIP_PACKAGE_CONSUMERS` | `0` | `1`でpackage consumer testを省略する。合格証跡では使わない |
+| `FEEDBACK_EXTRACTION_SKIP_DOCKER_BUILD` | `0` | extractionの局所切り分けでimage buildだけを省略する |
+| `FEEDBACK_EXTRACTION_SKIP_STANDALONE_SMOKE` | `0` | extractionの局所切り分けでstandalone smokeだけを省略する |
+| `FEEDBACK_SMOKE_MANAGE_COMPOSE` | `1` | `1`でsmoke自身がComposeを起動・破棄する。`0`は起動済み専用stackの診断用 |
+| `FEEDBACK_SMOKE_PROJECT` | `feedback-system-smoke` | 衝突を避ける専用Compose project名 |
+| `FEEDBACK_SMOKE_RUNTIME` | 抽出形状により`kotlin`または`go` | smoke対象runtime。Go-only抽出物では`go`だけを許可する |
+| `FEEDBACK_SMOKE_ROLLBACK` | Go/Kotlin併存・Compose管理時は`1` | GoからKotlinへのrole別rollback/restore演習を明示制御する |
+| `FEEDBACK_RELEASE_VERSION` | なし | release scriptの`--version`未指定時に使うversion。secretではない |
+| `FEEDBACK_RELEASE_BUILDER` | scriptが一時builderを作成 | CIが作成済みBuildx builder名を渡す。指定時はscriptが削除しない |
+
+### Feedback移行テスト専用
+
+次は本番runtimeへ設定しない。integration/differential testだけが使用する。
+
+| 名称 | 必須 | 説明 |
+|---|---:|---|
+| `FEEDBACK_TEST_RUN_ID` | migration integrationで必須 | 小文字英数字始まり、最大32文字の小文字英数字・hyphen。並行test用の一時DB名を分離する |
+| `FEEDBACK_DIFFERENTIAL_KOTLIN_URL` | live differentialで必須 | Kotlin版の分離DB/Object Storageへ接続したHTTP origin |
+| `FEEDBACK_DIFFERENTIAL_GO_URL` | live differentialで必須 | Go版の別DB/Object Storageへ接続したHTTP origin。同じwriteをKotlin版と共有DBへ二重実行しない |
+| `FEEDBACK_GO_INTEGRATION_DATABASE_URL` | Go integrationで必須 | Kotlin/Flyway V6適用済みの専用PostgreSQL URL。通常unit/raceからは明示的に隔離する |
+| `FEEDBACK_GO_INTEGRATION_DATABASE_USER` | Go integrationで必須 | 上記専用PostgreSQLのuser |
+| `FEEDBACK_GO_INTEGRATION_DATABASE_PASSWORD` | Go integrationで必須 | 上記専用PostgreSQLのpassword。secretとして扱う |
+| `FEEDBACK_GO_INTEGRATION_LEGACY_DATABASE_URL` | Go legacy migration integrationで必須 | 通常DBから複製した専用PostgreSQL。testが`feedback_migration`をDROPして初回作成・冪等性を検証するため、他用途と共有しない |
+| `FEEDBACK_GO_INTEGRATION_S3_ENDPOINT_URL` | Go MinIO integrationで必須 | 専用S3互換endpoint |
+| `FEEDBACK_GO_INTEGRATION_S3_BUCKET` | Go MinIO integrationで必須 | 専用bucket。bucket名とobject prefixはtest側のrun ID guardで制限する |
+| `FEEDBACK_GO_INTEGRATION_S3_CREATE_BUCKET` | CI setupだけ任意 | `1`で専用bucket `feedback-go-w2-evidence` を作成する。他bucketの自動作成は拒否する |
+| `FEEDBACK_GO_INTEGRATION_S3_INTEROP_PHASE` | Kotlin/Go object相互運用で必須 | `write` / `read-cleanup`。`w2-interop` run IDと専用固定key以外では起動を拒否する |
+| `FEEDBACK_S3_INTEROP` | Kotlin/Go object相互運用で必須 | `1`のときだけKotlin側のMinIO相互運用testを実行する |
+| `FEEDBACK_TEST_S3_ENDPOINT` | Kotlin integrationで必須 | 専用MinIO endpoint |
+| `FEEDBACK_TEST_S3_REGION` | Kotlin integrationで必須 | 専用MinIO region |
+| `FEEDBACK_TEST_S3_BUCKET` | Kotlin integrationで必須 | 専用bucket |
+| `FEEDBACK_TEST_S3_ACCESS_KEY` | Kotlin integrationで必須 | 専用MinIO access key |
+| `FEEDBACK_TEST_S3_SECRET_KEY` | Kotlin integrationで必須 | 専用MinIO secret key |
+
+`FEEDBACK_CONNECTOR_CHILD`、`FEEDBACK_CONNECTOR_ADDRESS_FILE`、`FEEDBACK_CONNECTOR_ID_FILE`、
+`FEEDBACK_CONNECTOR_MARKER`はconnectorの別process unit testが子processと一時fileを受け渡す内部protocolである。
+CI/運用者が設定せず、test自身が専用一時directoryだけへ設定する。
 
 exchange token は別 issuer/audience の署名・`iat`/`exp` と最大 lifetime を検証し、
 `actor_issuer` / `actor_sub`、`feedback_tenant/application/environment/workspace`、
@@ -227,6 +283,17 @@ orchestratorのsecret mountを使用する。
 | `FEEDBACK_BROKER_SIGNING_PUBLIC_KEY_FILE` | 任意 | JWKS公開鍵。未指定時は秘密鍵から導出 |
 | `FEEDBACK_BROKER_CLIENT_POLICIES_FILE` | 必須 | mTLS identity別scope上限allowlist |
 | `FEEDBACK_BROKER_MAX_LIFETIME_SECONDS` | 任意 | `300`、最大300秒 |
+| `FEEDBACK_BROKER_PORT` | 任意 | `8443`。mTLS exchange server port |
+| `FEEDBACK_BROKER_JWKS_PORT` | 任意 | `8081`。service network内JWKS HTTP port |
+
+conformance consumerは次の4変数だけを使う。client keyはsecret mountで供給し、Feedback Serviceへ転送しない。
+
+| 名称 | 必須 | 説明 |
+|---|---:|---|
+| `FEEDBACK_BROKER_URL` | 必須 | brokerのmTLS `/v1/exchanges` URL |
+| `FEEDBACK_BROKER_CA_FILE` | 必須 | broker CA certificate path |
+| `FEEDBACK_BROKER_CLIENT_CERT_FILE` | 必須 | conformance consumer client certificate path |
+| `FEEDBACK_BROKER_CLIENT_KEY_FILE` | 必須 | conformance consumer client private key path。secret mount |
 
 Phase 3 の管理 UI/API が完成するまで、初期 tenant/application/environment/workspace/membership は
 one-shot の `bin/feedback-bootstrap` で登録する。次の変数は bootstrap command だけが読む。
@@ -324,6 +391,10 @@ Web GIS と異なる OIDC client を使い、Feedback Service audience だけを
 | `VITE_FEEDBACK_ADMIN_ENVIRONMENT_KEY` | **必須** | `local` | ビルド引数 |
 | `VITE_FEEDBACK_ADMIN_WORKSPACE_KEY` | **必須** | ローカル fixture UUID | ビルド引数 |
 
+Docker build内部では公開bundle用の上記3値を、それぞれ`FEEDBACK_ADMIN_APPLICATION`、
+`FEEDBACK_ADMIN_ENVIRONMENT`、`FEEDBACK_ADMIN_WORKSPACE` build argumentから受け取る。これらはsecretではなく、
+container runtimeへ注入しない。
+
 ## martin (タイルサーバー)
 
 | 名称 | 必須 | dev 既定 | 本番の供給元 |
@@ -356,6 +427,8 @@ Keycloak の本番モード運用 (ECS) か Cognito への移行を別途判断�
 | `POSTGRES_HOST_PORT` / `MARTIN_HOST_PORT` / `WEB_HOST_PORT` / `FEEDBACK_ADMIN_HOST_PORT` | ホスト側ポートの競合回避。`MARTIN_HOST_PORT` を変えてもコンテナ間の `martin:3000` は変わらない | `5432` / `3000` / `5173` / `5174` |
 
 CI / verify 用の変数 (`VERIFY_*`, `SMOKE_*`, `FUZZ_*`) は各スクリプトのヘッダコメントを参照。
+`FEEDBACK_CANARY_BEARER_TOKEN`は`measure-feedback-canary.sh`だけが読む短時間の検証tokenであり、canary実行時に
+承認済みIdPから環境変数へ注入する。本番task定義、shell引数、証跡JSON、repositoryへ保存しない。
 
 ## シークレットローテーションの運用
 

@@ -6,7 +6,6 @@
   "type": "module",
   "files": [
     "dist",
-    "kotlin",
     "openapi.yaml",
     "token-exchange.openapi.yaml",
     "schemas",
@@ -29,7 +28,7 @@
     "access": "restricted"
   },
   "scripts": {
-    "generate": "openapi-typescript openapi.yaml -o src/generated.ts && node ../../scripts/generate-feedback-kotlin-contracts.mjs openapi.yaml kotlin/FeedbackContractTypes.kt",
+    "generate": "openapi-typescript openapi.yaml -o src/generated.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "build": "tsc -p tsconfig.build.json"

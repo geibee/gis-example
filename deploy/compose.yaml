@@ -19,6 +19,15 @@ x-s3-environment: &s3-environment
   FEEDBACK_EXPORT_S3_ENDPOINT_URL: http://minio:9000
   FEEDBACK_EXPORT_KEY_PREFIX: exports/
 
+x-feedback-runtime-security: &feedback-runtime-security
+  cpus: 1.0
+  mem_limit: 512m
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+
 services:
   feedback-postgres:
     image: postgres:16-alpine
@@ -34,6 +43,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  feedback-migrate:
+    <<: *feedback-runtime-security
+    build:
+      context: ..
+      dockerfile: apps/feedback-service-go/Dockerfile
+    command: ["/app/bin/feedback-migrate"]
+    restart: "no"
+    environment:
+      <<: *database-environment
+    depends_on:
+      feedback-postgres:
+        condition: service_healthy
 
   minio:
     image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
@@ -116,9 +138,10 @@ services:
         condition: service_completed_successfully
 
   feedback-service:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     restart: unless-stopped
     environment:
       <<: [*database-environment, *s3-environment]
@@ -136,8 +159,8 @@ services:
     ports:
       - "127.0.0.1:8090:8090"
     depends_on:
-      feedback-postgres:
-        condition: service_healthy
+      feedback-migrate:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
       oidc:
@@ -146,9 +169,10 @@ services:
         condition: service_started
 
   feedback-bootstrap-east:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     command: ["/app/bin/feedback-bootstrap"]
     restart: "no"
     environment:
@@ -168,13 +192,14 @@ services:
       FEEDBACK_BOOTSTRAP_DISPLAY_NAME: Feedback Admin
       FEEDBACK_BOOTSTRAP_PERMISSIONS: feedback.read,feedback.comment,feedback.manage,feedback.admin
     depends_on:
-      feedback-postgres:
-        condition: service_healthy
+      feedback-migrate:
+        condition: service_completed_successfully
 
   feedback-bootstrap-west:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     command: ["/app/bin/feedback-bootstrap"]
     restart: "no"
     environment:
@@ -198,9 +223,10 @@ services:
         condition: service_completed_successfully
 
   feedback-notification-worker:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     command: ["/app/bin/feedback-notification-worker"]
     restart: unless-stopped
     environment:
@@ -212,9 +238,10 @@ services:
         condition: service_completed_successfully
 
   feedback-webhook-connector:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     command: ["/app/bin/feedback-connector-runtime"]
     restart: unless-stopped
     environment:
@@ -233,9 +260,10 @@ services:
         condition: service_started
 
   feedback-connector-register:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     command: ["/app/bin/feedback-connector-register"]
     restart: on-failure
     environment:
@@ -255,9 +283,10 @@ services:
         condition: service_started
 
   feedback-export-worker:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     command: ["/app/bin/feedback-export-worker"]
     restart: unless-stopped
     environment:
@@ -269,9 +298,10 @@ services:
         condition: service_completed_successfully
 
   feedback-retention-worker:
+    <<: *feedback-runtime-security
     build:
       context: ..
-      dockerfile: apps/feedback-service/Dockerfile
+      dockerfile: ${FEEDBACK_SERVICE_DOCKERFILE:-apps/feedback-service-go/Dockerfile}
     command: ["/app/bin/feedback-retention-worker"]
     restart: unless-stopped
     environment:

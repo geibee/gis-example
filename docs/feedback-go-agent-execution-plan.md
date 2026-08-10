@@ -4,6 +4,8 @@
 > 実行モデル: 統合担当の親エージェント1 + 実装サブエージェント最大3
 > 前提文書: [`../feedback-platform-improvement-plan.md`](../feedback-platform-improvement-plan.md)、
 > [`feedback-platform-post-go-roadmap.md`](feedback-platform-post-go-roadmap.md)
+> 実行時更新: 2026-08-10に対象が未投入であることを確認し、24時間/14日/2 full backupの時間経過gateは今回の
+> release blockingから除外した。本書の元のgate定義は稼働済み環境のin-place移行向けとして残す。
 
 ## 1. 目的
 
@@ -180,6 +182,12 @@ W1完了後、親はinterface freeze commitを作り、W2 taskへそのcommit ha
 - rollback時にaudit/outbox/journalの片残りがない。
 
 Agent BとCはDB tableを共有するため、query fileをtable単位で分け、親がtransaction boundaryだけを統合する。
+
+実行結果（2026-08-09）:
+
+- 3 laneを `session`、`discussion`、`evidence/objectstore` に分離し、親がroute、成功監査、rate limit、main wiringを統合した。
+- unit/race/vet/build、PostgreSQL並行試験、MinIO lifecycle、Kotlin/Go live HTTP fixture、双方向object相互運用が成功した。
+- 共有interface手戻りはsession listのpresent/empty表現とevidence cleanup分類をbarrier前に解消し、V6 schemaを変更していない。
 
 ### W3: Async、Administration、CLI
 
@@ -386,13 +394,137 @@ R9の実装はGo GA後30日以上の本番相当metricsを入力条件とする�
 
 ## 11. 完了チェックリスト
 
-- [ ] 各Wave開始時に親1 + 子最大3の配置が記録されている。
-- [ ] 各子に編集可能/禁止pathと局所testが指定されている。
-- [ ] 共有contract/migration/generated codeを親だけが変更している。
-- [ ] 並行integration資源がrun IDで分離されている。
-- [ ] 各barrierでunit/race/contract/integrationが依存DAG順に成功している。
+- [x] 各Wave開始時に親1 + 子最大3の配置が記録されている。
+- [x] 各子に編集可能/禁止pathと局所testが指定されている。
+- [x] 共有contract/migration/generated codeを親だけが変更している。
+- [x] 並行integration資源がrun IDで分離されている。
+- [x] 各barrierでunit/race/contract/integrationが依存DAG順に成功している。
 - [ ] Wave単位のcommitが常にbuild可能である。
 - [ ] Canary以降の外部状態変更を親だけが実施している。
 - [ ] Kotlin撤去前に14日/2 full backupの直列観察ゲートを通過している。
 - [ ] 移行後RoadmapでもR1/R2、R3/R4/R6等の独立laneを実際に並行実行している。
-- [ ] 並行化による手戻り、conflict、barrier時間を振り返り、次Waveのownershipへ反映している。
+- [x] 並行化による手戻り、conflict、barrier時間を振り返り、次Waveのownershipへ反映している。
+
+## 12. 実行記録
+
+### W0: Contractとscaffold（2026-08-09）
+
+固定入力はcommit `7026ac58ce91e9c6f3291c94fac4fe69bd528def`、基準実装は`afe6d04`。
+親がcontract、Go module/generated code、V6、CI/scriptを所有し、次の排他的pathで3レーンを実行した。
+
+| lane | agent | 編集可能path / run ID | 結果 |
+|---|---|---|---|
+| 親 | `/root` | 親専有path、`FEEDBACK_TEST_RUN_ID=w0-migration` | 42 operation codegen、V6、Go/Kotlin gate、integration barrierを統合 |
+| inventory | `/root/w0_inventory` | `docs/feedback-go-v1-inventory.md`のみ | API/process/env/metric/artifactを全分類。未分類0、証拠不足を別記 |
+| OpenAPI | `/root/w0_openapi` | repository read-only、`/tmp`のみ | oapi-codegen v2.8.0、Go 1.26.5、nullable生成、42 routeを隔離検証 |
+| migration | `/root/w0_migration_tests` | handoff test新規2ファイルのみ、`w0-migration` | V1〜V5 checksum、fresh/V5→V6収束、marker/CHECK testを追加 |
+
+integration資源はloopbackの専用PostgreSQL 16 container `feedback-w0-fingerprint`を親だけが使用した。
+schema fingerprint算出とmigration testはrun ID付き一時DBへ分離し、共有DB/Object Storageを子へ渡していない。
+子による所有path違反、git操作、merge conflictは0件だった。
+
+W0 barrierはGoの生成drift・vet・unit・race・CGO無効build、Kotlinのunit/integration、contract/package/conformance、
+クリーン抽出、3 image build、standalone smokeまで成功した。クリーン抽出で検出した `.git` なし環境のGo VCS stampingと、
+段階V1〜V6をclean V1へ畳み込む抽出物の静的test不整合は、それぞれ再現可能build optionと二形態対応testで解消した。
+
+### W1: Runtime foundation（2026-08-09）
+
+W0で固定したcontractとV6境界を入力に、親がGo module、共通interface、runtime wiring、PostgreSQL/HTTP統合を所有し、
+次の排他的pathで3レーンを実行した。ユーザーからcommit作成の依頼は受けていないためinterface freeze commitは作成せず、
+検証済み共有worktreeをW2の固定入力とする。
+
+| lane | agent | 編集可能path / run ID | 結果 |
+|---|---|---|---|
+| 親 | `/root` | `cmd/feedback`、横断wiring、usecase、DB adapter、Object Storage、CI、`w1-runtime`/`w1-http`/`w1-diff` | 4 endpoint、DI、V6起動検証、PostgreSQL/HTTP/live differentialを統合 |
+| auth/config | `/root/w1_auth_config` | `internal/auth`、`internal/config` | direct/exchange JWT、JWKS refresh、permission交差、拒否監査、環境変数契約を実装 |
+| database/bootstrap | `/root/w1_database_bootstrap` | `internal/postgres`基盤、`internal/bootstrap` | pgx pool/transaction/claim、冪等bootstrapを実装 |
+| HTTP/observability | `/root/w1_http_foundation` | `internal/httpapi`基盤、`internal/observability` | Problem Details、middleware、CORS、health/metrics/trace、shutdownを実装 |
+
+親の統合時に、PostgreSQL 16.14のcanonical schema fingerprintが旧goldenと異なることを実体DBで検出した。
+さらにrestore演習でCHECK/partial indexのtext-array castが`pg_dump`/`pg_restore`後に同値の別表記になることを検出し、
+restore安定化したV1〜V6 fingerprint `01d03abc057749179777853ca970bc220f1ee79d8b6fa98d0e0801ba5788e36d`へ
+V6 marker、Go定数、Kotlin統合test、inventoryを同期した。
+またlive differentialでGoだけがJSONへ`charset=utf-8`を付ける差分とGET manifestだけに余分なETagを返す差分を検出し、
+Kotlin/OpenAPIへ一致させた。共通interface手戻りはreadiness probeのDB/storage分離1件、merge conflictと所有path違反は0件だった。
+
+W1 barrierはGoの生成drift・tidy・unit・race・vet・CGO無効build、PostgreSQL実体のbootstrap/manifest/review-context、
+実JWTを通すHTTP統合、Kotlin/Go live differential、Kotlin unitとMinIOを含む14件のintegrationを成功させた。
+CIはPostgreSQL 16.14へ固定し、Kotlin/FlywayでV6 handoff DBを構築後にGo runtime統合testを実行する。
+
+### W2: Core business parity（2026-08-09）
+
+W1のauth/DB/HTTP interfaceを固定入力とし、session、discussion、evidenceを排他的な3レーンで実装した。
+
+| lane | agent | 主なownership / run ID | 結果 |
+|---|---|---|---|
+| 親 | `/root` | 42 route handler、共通認可・監査・rate limit wiring、`w2-http`/`w2-diff` | handler統合、42 fixture differential、HTTP/PostgreSQL barrierを完了 |
+| session | `/root/w1_auth_config` | `internal/session`、PostgreSQL session、`w2-session` | CRUD、idempotency、楽観lock、cursor/validation順序を実装 |
+| discussion | `/root/w1_database_bootstrap` | `internal/discussion`、PostgreSQL discussion、`w2-discussion` | thread/message/version/journal/outbox/rate limitを単一transactionへ統合 |
+| evidence | `/root/w1_http_foundation` | `internal/evidence`、`internal/objectstore`、PostgreSQL evidence、`w2-evidence` | strict upload、quota、Range、local/S3、orphan回収を実装 |
+
+専用PostgreSQL 16とMinIOをrun ID/bucket prefixで分離し、unit/race/vet、並行transaction、
+Kotlin/Go object相互読込、42 route live differentialをbarrierで成功させた。共有interface手戻りはlist queryの
+present/empty識別、evidence scope observer、commit不明cleanup分類の3件で、所有path違反とmerge conflictは0件だった。
+
+### W3: Workers、administration、CLI（2026-08-09）
+
+W2のmutation/storage境界を固定し、export/backup、notification/connector、administration/legacy migrationを並行実装した。
+
+| lane | agent | 主なownership / run ID | 結果 |
+|---|---|---|---|
+| 親 | `/root` | command/HTTP wiring、retention残差、全route inventory | 10 process entrypointと42 operationを統合 |
+| export/backup | `/root/w1_auth_config` | export、backup、backup pull、`w3-export-backup` | CSV/XLSX、full/incremental ZIP、cursor、pull atomic replaceを実装 |
+| notification/connector | `/root/w1_database_bootstrap` | cryptoutil、connector、notification | administration、worker、HTTP/SMTP runtime、registerを実装 |
+| admin/legacy | `/root/w1_http_foundation` | membership、legacy migration、`w3-admin-legacy` | membership CRUDと旧snapshot dry-run/copy/reconcile/rollbackを実装 |
+
+PostgreSQL/MinIO実体のrace付きintegration、Connector別process試験、Admin/conformance wiringを完了した。
+型名・constructorの共有は各レーンから親へfreeze通知して直列統合し、重複symbol2件とimport2件をbarrier前に解消した。
+外部状態変更、migration追加、commit作成は行っていない。
+
+### W4: Differential、packaging、canary準備（2026-08-09〜10）
+
+親がretention、full-system differential、security/fuzz、release artifact、独立抽出を直列統合した。
+OpenAPI 42 requestのKotlin/Go差分は0件、Go standalone smokeはV6 handoff、全worker、connector二段配送、
+evidence Range、export、retention、token exchange、frontend継続まで成功した。
+
+Go unit/race/vet/CGO無効build、PostgreSQL/MinIO全integration、6 fuzz target、staticcheck、govulncheck、
+non-root 100MB制約Docker imageを検証した。linux/amd64・linux/arm64 binary、multi-arch OCI、CycloneDX SBOM、
+release manifest、SHA256SUMSを実生成し、platformとchecksumを照合した。
+
+clean抽出では、旧consumer移行台帳を除外するfresh V1と通常V1〜V6 upgradeのfingerprintが異なることを検出した。
+Flyway履歴形状ごとに別の固定fingerprintだけを受理し、baseline marker生成も対応させた。
+当初はPhase 8を外部deploymentと14日/2 full backup観察後に完了する前提とした。その後、対象が未投入であるとの
+risk acceptanceにより、長時間待機は初回導入後の非blocking確認へ変更した。
+
+### W5: ローカルrollback準備（2026-08-10）
+
+同一V6 DB/MinIOに対し、notification、export、retention、APIの順にGoの対象roleだけを停止してKotlinの同roleを起動する
+rollback smokeを追加した。Go API稼働中のKotlin worker処理、Go作成sessionのKotlin API読取、Kotlinのmessage書込、
+notification配送、export生成/download、retention削除とDB件数照合が成功した。さらにPostgreSQL custom dumpと
+Evidence/Export bucketを隔離先へrestoreし、
+Go schema fingerprint、DB data-only dump、全object path/SHA-256を照合した。実gatewayのworkspace sticky routing、
+production replica/lease観察、対象環境backupのrestoreは外部環境のW5で引き続き実施する。
+
+### W6: ローカルdefault候補と非機能実測（2026-08-10）
+
+同じsourceからdata-only cloneしたKotlin/Go DB、同じObject Storage/OIDC、1 CPU/512MiBで3 endpointを各実装
+1,000 sample測定し、計6,000 request error 0、Go p95 29.84〜53.69%短縮、peak RSS 83.7%削減を確認した。
+ローカルgatewayではeast→Go、west→Kotlinの各20 writeとeast→Kotlin rollbackがaudit増分20:0で排他的になることを確認した。
+
+`assemble-feedback-repository --go-only`、空DBを初期化する埋め込みclean V1、JDKなしverify/smokeの独立CI job、
+PostgreSQL再起動後の次反復までlease/cursor/idempotencyを検査する24時間soak harnessを追加した。最初の長時間runで
+31完了反復後のstatement timeoutをfail-closedに記録し、attempt/completed反復とfailure stageをsummaryへ追加した。
+短縮soakは2反復・1再起動・異常0で、補強後runも2時間15分・228反復・11再起動・異常0まで確認した。未投入環境向けの
+risk acceptanceにより24時間完走は省略した。production routing/replica、対象環境restore、14日/2 full backup観察は
+初回導入後の非blocking確認として残す。
+
+完了監査でruntimeをdigest固定distrolessへ収束し、read-only/capability制約、darwin/windows CLI artifact、
+OCI vulnerability scan、role別container memory gateを追加した。これらを含む一括extraction/release/rollback smokeは
+短縮soak終了後に実行し、全て合格した。さらに`kin-openapi v0.142.0`のCriticalを最初のrelease scanで検出し、
+v0.144.0へ更新してplatform別scan 0件を確認した。
+
+### W7: Go-only完了（2026-08-10）
+
+fresh baselineと既存V1〜V6 checksum archiveをGo moduleへ固定し、Compose、CI、抽出repositoryのdefaultをGoへ切り替えた。
+Kotlin source、Gradle wrapper、Kotlin生成契約を正本から撤去した。撤去後の再抽出・Go全testと、baselineを内包する
+multi-platform binary、multi-arch OCI、platform別CycloneDX/SARIF、全checksumを再生成して初回導入のblocking gateを完了した。

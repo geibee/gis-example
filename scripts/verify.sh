@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # verify.sh — リポジトリ統合 verify ゲート (fail-closed)
 #
-# api (Kotlin) / feedback (独立 Kotlin) / worker (Python) / web (TypeScript) の変更スコープを判定し、
+# api (Kotlin) / feedback (独立 Go) / worker (Python) / web (TypeScript) の変更スコープを判定し、
 # 該当スコープの build / lint / typecheck / test を実行する。手動でも CI でも同じ入口を使う:
 #
 #   bash scripts/verify.sh                     # 変更スコープを自動判定 (基準: origin/main)
@@ -48,7 +48,7 @@ classify_paths() {
         NEED_API=1; NEED_WEB=1 ;;
       apps/api/*)
         NEED_API=1 ;;
-      apps/feedback-service/* | apps/feedback-admin/* | apps/feedback-conformance-consumer/* | apps/feedback-token-broker-reference/*)
+      apps/feedback-service/* | apps/feedback-service-go/* | apps/feedback-admin/* | apps/feedback-conformance-consumer/* | apps/feedback-token-broker-reference/*)
         NEED_FEEDBACK=1 ;;
       apps/worker-gis/*)
         NEED_WORKER=1 ;;
@@ -140,19 +140,11 @@ verify_api() {
   popd >/dev/null
 }
 
-# ---------------------------------------------------- feedback-service (Kotlin)
+# ---------------------------------------------------- feedback-service (Go)
 verify_feedback() {
-  log "=== feedback (apps/feedback-service) ==="
+  log "=== feedback (apps/feedback-service-go) ==="
   if [[ "$INTEGRATION" == "1" ]]; then
-    [[ -n "${FEEDBACK_DATABASE_URL:-}" ]] \
-      || fail "FEEDBACK_DATABASE_URL が未設定です (通常 PostgreSQL の独立統合テストに必要)"
-    [[ -n "${FEEDBACK_DATABASE_USER:-}" && -n "${FEEDBACK_DATABASE_PASSWORD:-}" ]] \
-      || fail "FEEDBACK_DATABASE_USER / FEEDBACK_DATABASE_PASSWORD が未設定です"
-    [[ -n "${FEEDBACK_TEST_S3_ENDPOINT:-}" && -n "${FEEDBACK_TEST_S3_BUCKET:-}" ]] \
-      || fail "FEEDBACK_TEST_S3_ENDPOINT / FEEDBACK_TEST_S3_BUCKET が未設定です (S3互換統合テストに必要)"
-    [[ -n "${FEEDBACK_TEST_S3_ACCESS_KEY:-}" && -n "${FEEDBACK_TEST_S3_SECRET_KEY:-}" ]] \
-      || fail "FEEDBACK_TEST_S3_ACCESS_KEY / FEEDBACK_TEST_S3_SECRET_KEY が未設定です"
-    (cd apps/feedback-service && ./gradlew integrationTest --no-daemon)
+    VERIFY_INTEGRATION=1 bash scripts/verify-feedback-go.sh
     log "feedback integration PASS"
   else
     bash scripts/verify-feedback.sh
