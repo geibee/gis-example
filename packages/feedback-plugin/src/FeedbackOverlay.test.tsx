@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeedbackThread, Me, ReviewSession } from "./contracts";
-import { FeedbackOverlay } from "./FeedbackOverlay";
+import { FeedbackOverlay, type FeedbackOverlayProps } from "./FeedbackOverlay";
 import { FeedbackPluginProvider } from "./plugin-context";
 import { useFeedbackPlugin } from "./state";
 
@@ -64,7 +64,7 @@ function response(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function renderHost(fetchMock: typeof fetch, children?: ReactNode) {
+function renderHost(fetchMock: typeof fetch, children?: ReactNode, overlayProps: FeedbackOverlayProps = {}) {
   vi.stubGlobal("fetch", fetchMock);
   const notifications = vi.fn();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -80,7 +80,7 @@ function renderHost(fetchMock: typeof fetch, children?: ReactNode) {
       queryClient={queryClient}
     >
       {children ?? <button type="button" data-feedback-id="host.save">保存</button>}
-      <FeedbackOverlay />
+      <FeedbackOverlay {...overlayProps} />
     </FeedbackPluginProvider>
   );
   return { ...result, notifications, queryClient, user: userEvent.setup() };
@@ -131,7 +131,7 @@ describe("FeedbackOverlay", () => {
     expect(within(guide).getByText("テスト画面")).toBeInTheDocument();
     await user.click(within(guide).getByRole("button", { name: "確認してレビューを始める" }));
 
-    const reopen = screen.getByRole("button", { name: "今回のレビューを確認（この画面は対象）" });
+    const reopen = screen.getByRole("button", { name: /レビュー通知：受入レビュー/ });
     expect(reopen).toBeInTheDocument();
     await user.click(reopen);
     expect(screen.getByRole("dialog", { name: "受入レビュー" })).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("FeedbackOverlay", () => {
 
     unmount();
     const secondView = renderHost(fetchMock);
-    await screen.findByRole("button", { name: "今回のレビューを確認（この画面は対象）" });
+    await screen.findByRole("button", { name: /レビュー通知：受入レビュー/ });
     expect(screen.queryByRole("dialog", { name: "受入レビュー" })).not.toBeInTheDocument();
 
     secondView.unmount();
@@ -172,7 +172,7 @@ describe("FeedbackOverlay", () => {
     const guide = await screen.findByRole("dialog", { name: "受入レビュー" });
     await user.click(within(guide).getByRole("button", { name: "確認してレビューを始める" }));
     expect(screen.queryByRole("dialog", { name: "受入レビュー" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /今回のレビューを確認/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /レビュー通知：受入レビュー/ })).toBeInTheDocument();
   });
 
   it.each([
@@ -187,8 +187,49 @@ describe("FeedbackOverlay", () => {
     renderHost(fetchMock);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(screen.queryByRole("button", { name: /今回のレビューを確認/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /レビュー通知：/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^フィードバック$/ })).not.toBeInTheDocument();
+  });
+
+  it("受付中レビューがなければ管理者向けの開始導線をz軸オーバーレイへ表示する", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/review-sessions?")) return response([]);
+      throw new Error(`未定義の要求: ${input}`);
+    }) as typeof fetch;
+    renderHost(fetchMock, undefined, {
+      reviewManagementUrl: "https://admin.example.test/?action=create-review"
+    });
+
+    const start = await screen.findByRole("link", { name: "レビューを開始" });
+    expect(start).toHaveAttribute("href", "https://admin.example.test/?action=create-review");
+    expect(screen.getByText("レビューは開始されていません")).toBeInTheDocument();
+  });
+
+  it("通知バッジに対象画面数を表示し、リンク集から対象画面へ移動できる", async () => {
+    const scopedSession: ReviewSession = {
+      ...session,
+      scopes: Array.from({ length: 5 }, (_, index) => ({
+        id: `scope-${index}`,
+        pageId: `screen.${index}`,
+        route: index === 1 ? "/orders/{id}" : `/screen-${index}`,
+        description: `対象画面${index + 1}`,
+        reviewable: true,
+        displayOrder: index
+      }))
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/review-sessions?")) return response([scopedSession]);
+      if (url.endsWith(`/api/review-sessions/${session.id}/threads`)) return response([]);
+      throw new Error(`未定義の要求: ${url}`);
+    }) as typeof fetch;
+    const { user } = renderHost(fetchMock);
+
+    const notification = await screen.findByRole("button", { name: /対象5画面/ });
+    expect(within(notification).getByText("5")).toBeInTheDocument();
+    await user.click(notification);
+    expect(screen.getByRole("link", { name: /対象画面1/ })).toHaveAttribute("href", "/screen-0");
+    expect(screen.getByRole("link", { name: /対象画面2/ })).toHaveAttribute("href", "/orders");
   });
 
   it("対象選択、Portal描画、証跡付き投稿をホストから独立して提供する", async () => {

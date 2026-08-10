@@ -647,7 +647,7 @@ export interface components {
             participantPolicy: components["schemas"]["FeedbackParticipantPolicy"];
             evidencePolicy: components["schemas"]["FeedbackEvidencePolicy"];
         };
-        /** @enum {unknown} */
+        /** @enum {string} */
         FeedbackSessionStatus: "draft" | "open" | "closed";
         FeedbackSessionV1: {
             /** Format: uuid */
@@ -724,7 +724,7 @@ export interface components {
             scopes?: components["schemas"]["FeedbackSessionScopeV1"][];
             perspectives?: components["schemas"]["FeedbackSessionPerspectiveV1"][];
         };
-        /** @enum {unknown} */
+        /** @enum {string} */
         FeedbackThreadStatus: "open" | "resolved";
         FeedbackMessageV1: {
             /** Format: uuid */

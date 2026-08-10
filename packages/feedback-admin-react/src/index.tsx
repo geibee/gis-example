@@ -44,6 +44,7 @@ export type FeedbackAdminConsoleProps = {
   timezone?: string;
   className?: string;
   openExternal?: (url: string) => void;
+  initialAction?: "create-review";
 };
 
 type Tab = "sessions" | "manifest" | "retention" | "memberships" | "notifications";
@@ -57,6 +58,7 @@ export function FeedbackAdminConsole({
   locale = "ja-JP",
   timezone = "Asia/Tokyo",
   className,
+  initialAction,
   openExternal = (url) => window.open(url, "_blank", "noopener,noreferrer")
 }: FeedbackAdminConsoleProps) {
   const [tab, setTab] = useState<Tab>("sessions");
@@ -89,6 +91,7 @@ export function FeedbackAdminConsole({
           environmentKey={environmentKey}
           externalWorkspaceKey={externalWorkspaceKey}
           openExternal={openExternal}
+          startCreate={initialAction === "create-review"}
           onError={setError}
         />
       ) : null}
@@ -124,6 +127,7 @@ function SessionAdministration({
   environmentKey,
   externalWorkspaceKey,
   openExternal,
+  startCreate,
   onError
 }: {
   transport: FeedbackTransport;
@@ -132,6 +136,7 @@ function SessionAdministration({
   environmentKey: string;
   externalWorkspaceKey: string;
   openExternal(url: string): void;
+  startCreate: boolean;
   onError(error: string | null): void;
 }) {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -145,11 +150,13 @@ function SessionAdministration({
   const [title, setTitle] = useState("");
   const [manifestVersion, setManifestVersion] = useState("1");
   const [scopes, setScopes] = useState("[]");
-  const [perspectives, setPerspectives] = useState("[]");
-  const [createOpen, setCreateOpen] = useState(false);
+  const [perspectives, setPerspectives] = useState(() => startCreate
+    ? JSON.stringify([{ code: "BUSINESS_FLOW", label: "業務フロー", status: "active", guidance: null }], null, 2)
+    : "[]");
+  const [createOpen, setCreateOpen] = useState(startCreate);
   const [editOpen, setEditOpen] = useState(false);
   const [description, setDescription] = useState("");
-  const [createStatus, setCreateStatus] = useState<Session["status"]>("draft");
+  const [createStatus, setCreateStatus] = useState<Session["status"]>(startCreate ? "open" : "draft");
   const [outOfScopePosting, setOutOfScopePosting] = useState<Session["outOfScopePosting"]>("warn");
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");

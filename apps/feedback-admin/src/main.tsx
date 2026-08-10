@@ -44,6 +44,7 @@ function AdminApplication() {
       applicationKey={scope.applicationKey}
       environmentKey={scope.environmentKey}
       externalWorkspaceKey={scope.workspaceKey}
+      initialAction={scope.action}
     />
   </main>;
 }
@@ -53,7 +54,7 @@ const pendingScopeStorageKey = "feedback-admin.pending-scope";
 function rememberPendingScope() {
   const source = new URLSearchParams(window.location.search);
   const safe = new URLSearchParams();
-  ["applicationKey", "environmentKey", "workspaceKey"].forEach((key) => {
+  ["applicationKey", "environmentKey", "workspaceKey", "action"].forEach((key) => {
     const value = normalized(source.get(key));
     if (value) safe.set(key, value);
   });
@@ -81,7 +82,8 @@ function adminScope(search: URLSearchParams) {
     environmentKey: normalized(search.get("environmentKey")) ??
       required("VITE_FEEDBACK_ADMIN_ENVIRONMENT_KEY", import.meta.env.VITE_FEEDBACK_ADMIN_ENVIRONMENT_KEY),
     workspaceKey: normalized(search.get("workspaceKey")) ??
-      required("VITE_FEEDBACK_ADMIN_WORKSPACE_KEY", import.meta.env.VITE_FEEDBACK_ADMIN_WORKSPACE_KEY)
+      required("VITE_FEEDBACK_ADMIN_WORKSPACE_KEY", import.meta.env.VITE_FEEDBACK_ADMIN_WORKSPACE_KEY),
+    action: search.get("action") === "create-review" ? "create-review" as const : undefined
   };
 }
 

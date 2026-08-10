@@ -1387,6 +1387,7 @@ components:
         evidencePolicy: { $ref: "#/components/schemas/FeedbackEvidencePolicy" }
 
     FeedbackSessionStatus:
+      type: string
       enum: [draft, open, closed]
 
     FeedbackSessionV1:
@@ -1490,6 +1491,7 @@ components:
           items: { $ref: "#/components/schemas/FeedbackSessionPerspectiveV1" }
 
     FeedbackThreadStatus:
+      type: string
       enum: [open, resolved]
 
     FeedbackMessageV1:

@@ -38,11 +38,7 @@ func (handler *APIHandler) ListFeedbackThreads(
 		WriteError(writer, request, mapPhase2Error(err))
 		return
 	}
-	status, err := optionalEnum(params.Status, "status")
-	if err != nil {
-		WriteError(writer, request, err)
-		return
-	}
+	status := optionalEnum(params.Status)
 	var limitValue *int
 	if params.Limit != nil {
 		value := int(*params.Limit)

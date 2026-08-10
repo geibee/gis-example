@@ -58,6 +58,41 @@ func TestGeneratedHandlerRegistersEveryFrozenOperation(t *testing.T) {
 	}
 }
 
+func TestGeneratedHandlerBindsSessionStatusAsString(t *testing.T) {
+	t.Parallel()
+	server := &sessionStatusServer{}
+	handler := HandlerFromMuxWithBaseURL(server, http.NewServeMux(), "/feedback/v1")
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/feedback/v1/sessions?applicationKey=web-gis&environmentKey=local&externalWorkspaceKey=workspace-1&status=open",
+		nil,
+	)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status query response = %d, body=%s", response.Code, response.Body.String())
+	}
+	if server.status != "open" {
+		t.Fatalf("bound status = %q, want open", server.status)
+	}
+}
+
+type sessionStatusServer struct {
+	Unimplemented
+	status string
+}
+
+func (server *sessionStatusServer) ListFeedbackSessions(
+	writer http.ResponseWriter,
+	_ *http.Request,
+	params ListFeedbackSessionsParams,
+) {
+	if params.Status != nil {
+		server.status = string(*params.Status)
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
 type recordingServeMux struct {
 	patterns []string
 	delegate *http.ServeMux

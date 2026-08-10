@@ -38,6 +38,7 @@ export function ReviewSessionIntroduction({
     () => resolveReviewPageScope(session, currentPageId, currentPath),
     [currentPageId, currentPath, session]
   );
+  const reviewableScopes = session.scopes.filter((scope) => scope.reviewable);
 
   useEffect(() => {
     setOpen(!isDismissed(dismissedKey));
@@ -68,11 +69,12 @@ export function ReviewSessionIntroduction({
       <button
         type="button"
         className={`wfg-feedback-review-guide-button is-${scopeState}`}
-        aria-label={`今回のレビューを確認（${scopeStateLabels[scopeState]}）`}
+        aria-label={`レビュー通知：${session.title}（${scopeStateLabels[scopeState]}、対象${reviewableScopes.length}画面）`}
         onClick={() => setOpen(true)}
       >
-        <span>今回のレビュー</span>
-        <small>{scopeStateLabels[scopeState]}</small>
+        <svg className="wfg-feedback-review-bell" aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg>
+        <span className="wfg-feedback-review-guide-copy"><strong>レビュー受付中</strong><small>{session.title}・{scopeStateLabels[scopeState]}</small></span>
+        <span className="wfg-feedback-review-count" aria-hidden="true">{reviewableScopes.length}</span>
       </button>
       {open ? (
         <div
@@ -127,10 +129,13 @@ export function ReviewSessionIntroduction({
               <section className="wfg-feedback-review-section">
                 <h3>今回の対象画面</h3>
                 <ul className="wfg-feedback-review-scope-list">
-                  {session.scopes.filter((scope) => scope.reviewable).map((scope) => (
+                  {reviewableScopes.map((scope) => (
                     <li key={scope.id}>
-                      <strong>{scope.description ?? scope.pageId}</strong>
-                      <code>{scope.route ?? `${scope.pageId}（すべて）`}</code>
+                      <ReviewScopeLink
+                        label={scope.description ?? scope.pageId}
+                        routeLabel={scope.route ?? `${scope.pageId}（すべて）`}
+                        href={reviewScopeHref(scope.pageId, scope.route, currentPageId, currentPath)}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -160,6 +165,24 @@ export function ReviewSessionIntroduction({
       ) : null}
     </>
   );
+}
+
+function ReviewScopeLink({ label, routeLabel, href }: { label: string; routeLabel: string; href: string | null }) {
+  const content = <><strong>{label}</strong><code>{routeLabel}</code></>;
+  return href ? <a href={href}>{content}</a> : content;
+}
+
+function reviewScopeHref(
+  pageId: string,
+  route: string | null | undefined,
+  currentPageId: string | undefined,
+  currentPath: string
+): string | null {
+  if (pageId === currentPageId) return currentPath;
+  if (!route) return null;
+  if (!route.includes("{")) return route;
+  const listRoute = route.replace(/\/\{[^/{}]+\}/g, "").replace(/\/$/, "");
+  return listRoute || "/";
 }
 
 function formatReviewPeriod(startAt?: string | null, endAt?: string | null): string | null {

@@ -87,7 +87,9 @@ describe("レビュー参加者向け案内", () => {
     expect(guide).toHaveTextContent("今回確認してほしいこと");
     expect(guide).toHaveTextContent("今回の対象画面");
     expect(screen.queryByRole("button", { name: "レビュー" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "今回のレビューを確認（この画面は対象）" })).toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "レビュー通知：第1回 業務フローレビュー（この画面は対象、対象1画面）"
+    })).toBeInTheDocument();
   });
 
   it("system adminはプロジェクトメンバーでなくてもレビュー管理画面へ入れる", async () => {

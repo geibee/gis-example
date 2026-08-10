@@ -31,6 +31,7 @@ import { hasProjectPermission, reviewManagePermission } from "./permissions";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
 import { feedbackApplicationManifest, feedbackRoutes } from "./appRoutes";
+import { buildFeedbackAdminUrl } from "./feedbackAdminLink";
 import { resolveWebGisFeedbackThread } from "./feedbackHostAdapter";
 import { syncFeedbackApplicationManifest } from "./feedbackManifestSync";
 
@@ -134,6 +135,13 @@ function AppLayout() {
   const { me, projects, selectedProject, setSelectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
   const { openThread } = useFeedbackPlugin();
   const canManageReview = hasProjectPermission(me, selectedProject, reviewManagePermission);
+  const reviewManagementUrl = selectedProject && (canManageReview || me?.systemRole === "admin")
+    ? buildFeedbackAdminUrl(import.meta.env.VITE_FEEDBACK_ADMIN_URL ?? "http://localhost:5174/", {
+        applicationKey: import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis",
+        environmentKey: import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local",
+        externalWorkspaceKey: selectedProject
+      }, "create-review")
+    : undefined;
 
   // URL (マッチ中ルートの staticData) を唯一の正としてタブ強調・タイトルを導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
@@ -236,9 +244,8 @@ function AppLayout() {
         <MapPaneHost />
       </main>
 
-      {/* レビュー機能はどの画面からでも使えるよう、画面ではなくシェルに置く
-          (受付中のレビューセッションが無ければ何も描画しない) */}
-      <FeedbackOverlay />
+      {/* レビュー機能はどの画面からでも状態が分かるよう、画面ではなく最前面のシェルに置く。 */}
+      <FeedbackOverlay reviewManagementUrl={reviewManagementUrl} />
       <Toaster />
       <ConfirmDialogHost />
     </div>

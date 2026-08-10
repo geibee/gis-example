@@ -29,11 +29,7 @@ func (handler *APIHandler) ListFeedbackSessions(
 		WriteError(writer, request, err)
 		return
 	}
-	status, err := optionalEnum(params.Status, "status")
-	if err != nil {
-		WriteError(writer, request, err)
-		return
-	}
+	status := optionalEnum(params.Status)
 	var limit *int
 	if params.Limit != nil {
 		value := int(*params.Limit)
@@ -401,15 +397,12 @@ func decodeNullablePatchString(raw json.RawMessage, name string) (*string, error
 	return &value, nil
 }
 
-func optionalEnum(value *interface{}, name string) (*string, error) {
+func optionalEnum[T ~string](value *T) *string {
 	if value == nil {
-		return nil, nil
+		return nil
 	}
-	text, ok := (*value).(string)
-	if !ok {
-		return nil, invalid("request.invalid", "%sが不正です", name)
-	}
-	return &text, nil
+	text := string(*value)
+	return &text
 }
 
 func mapPhase2Error(err error) error {

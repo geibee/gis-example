@@ -23,12 +23,15 @@ export type FeedbackOverlayProps = {
   launcherLabel?: string;
   /** レビュー開始案内の既読状態を保存するlocalStorageキー。 */
   reviewIntroductionStorageKey?: string;
+  /** 受付中レビューがない場合に管理者へ表示する、新規レビュー作成画面のURL。 */
+  reviewManagementUrl?: string;
 };
 
 /** 投稿、DOMピン、スレッド閲覧をdocument.body上のPortalとして提供する。 */
 export function FeedbackOverlay({
   launcherLabel = "フィードバック",
-  reviewIntroductionStorageKey
+  reviewIntroductionStorageKey,
+  reviewManagementUrl
 }: FeedbackOverlayProps) {
   const sessionQuery = useOpenReviewSessionQuery();
   const session = sessionQuery.data ?? null;
@@ -106,7 +109,16 @@ export function FeedbackOverlay({
 
   if (typeof document === "undefined") return null;
   const content = !session ? (
-    activeThreadId ? <FeedbackThreadDrawer threadId={activeThreadId} onClose={closeThread} /> : null
+    activeThreadId
+      ? <FeedbackThreadDrawer threadId={activeThreadId} onClose={closeThread} />
+      : reviewManagementUrl
+        ? <ReviewInactiveStatus
+            managementUrl={reviewManagementUrl}
+            loading={sessionQuery.isPending}
+            error={sessionQuery.isError}
+            onRetry={() => void sessionQuery.refetch()}
+          />
+        : null
   ) : (
     <>
       <ReviewSessionIntroduction
@@ -162,6 +174,26 @@ export function FeedbackOverlay({
     </div>,
     document.body
   );
+}
+
+function ReviewInactiveStatus({
+  managementUrl,
+  loading,
+  error,
+  onRetry
+}: {
+  managementUrl: string;
+  loading: boolean;
+  error: boolean;
+  onRetry(): void;
+}) {
+  if (loading) {
+    return <div className="wfg-feedback-review-status is-loading" role="status"><span className="wfg-feedback-review-status-dot" /><span><strong>レビュー状態を確認中</strong><small>受付中のレビューを探しています</small></span></div>;
+  }
+  if (error) {
+    return <div className="wfg-feedback-review-status is-error" role="status"><span className="wfg-feedback-review-status-dot" /><span><strong>レビュー状態を取得できません</strong><small>Feedback Serviceへの接続を確認してください</small></span><button type="button" onClick={onRetry}>再試行</button></div>;
+  }
+  return <div className="wfg-feedback-review-status is-inactive" role="status"><span className="wfg-feedback-review-status-dot" /><span><strong>レビューは開始されていません</strong><small>対象画面と観点を設定して受付を開始できます</small></span><a href={managementUrl} target="_blank" rel="noreferrer">レビューを開始</a></div>;
 }
 
 function FeedbackContextMenu({

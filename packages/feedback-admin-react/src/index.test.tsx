@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FeedbackTransport } from "@feedback/core";
 import { FeedbackAdminConsole } from "./index";
@@ -79,6 +79,14 @@ describe("FeedbackAdminConsole", () => {
       ],
       perspectives: [{ code: "BUSINESS_FLOW", label: "業務フロー", status: "active", guidance: null }]
     });
+  });
+
+  it("メイン画面の開始導線から新規作成ダイアログを直接開く", async () => {
+    render(<FeedbackAdminConsole {...scope} initialAction="create-review" transport={createTransport()} />);
+    const dialog = await screen.findByRole("dialog", { name: "レビューセッションの作成" });
+    expect((within(dialog).getByRole("combobox", { name: "状態" }) as HTMLSelectElement).value).toBe("open");
+    expect((within(dialog).getAllByRole("combobox", { name: "扱い" })[0] as HTMLSelectElement).value).toBe("active");
+    expect(dialog).toBeTruthy();
   });
 
   it("manifest・retention/export・membership・deliveryを独立tabで取得する", async () => {
