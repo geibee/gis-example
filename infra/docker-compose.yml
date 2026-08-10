@@ -234,7 +234,7 @@ services:
       postgres:
         condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy
 
   martin:
     restart: unless-stopped
