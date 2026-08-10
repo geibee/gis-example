@@ -322,6 +322,7 @@ services:
         VITE_FEEDBACK_ADMIN_OIDC_AUTHORITY: http://localhost:8180/realms/feedback
         VITE_FEEDBACK_ADMIN_OIDC_CLIENT_ID: feedback-admin
         VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI: http://localhost:5174/
+        VITE_FEEDBACK_ADMIN_OIDC_SCOPE: ${VITE_FEEDBACK_ADMIN_OIDC_SCOPE:-openid profile email}
         FEEDBACK_ADMIN_APPLICATION: inventory
         FEEDBACK_ADMIN_ENVIRONMENT: local
         FEEDBACK_ADMIN_WORKSPACE: east

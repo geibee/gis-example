@@ -12,7 +12,7 @@ export function getUserManager(): UserManager {
     redirect_uri: import.meta.env.VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI || `${window.location.origin}/`,
     post_logout_redirect_uri: window.location.origin,
     response_type: "code",
-    scope: import.meta.env.VITE_FEEDBACK_ADMIN_OIDC_SCOPE || "openid profile email feedback",
+    scope: import.meta.env.VITE_FEEDBACK_ADMIN_OIDC_SCOPE || "openid profile email",
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
     automaticSilentRenew: false
   });

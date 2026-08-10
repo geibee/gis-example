@@ -386,7 +386,7 @@ Web GIS と異なる OIDC client を使い、Feedback Service audience だけを
 | `VITE_FEEDBACK_ADMIN_OIDC_AUTHORITY` | **必須** | `http://localhost:8081/realms/gis` | ビルド引数 |
 | `VITE_FEEDBACK_ADMIN_OIDC_CLIENT_ID` | **必須** | `feedback-admin` | ビルド引数 |
 | `VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI` | 任意 | `window.location.origin + /` | ビルド引数 |
-| `VITE_FEEDBACK_ADMIN_OIDC_SCOPE` | 任意 | `openid profile email feedback` | ビルド引数 |
+| `VITE_FEEDBACK_ADMIN_OIDC_SCOPE` | 任意 | `openid profile email` | ビルド引数。Keycloakに追加scopeを定義した場合だけ拡張する |
 | `VITE_FEEDBACK_ADMIN_APPLICATION_KEY` | **必須** | `web-gis` | ビルド引数 |
 | `VITE_FEEDBACK_ADMIN_ENVIRONMENT_KEY` | **必須** | `local` | ビルド引数 |
 | `VITE_FEEDBACK_ADMIN_WORKSPACE_KEY` | **必須** | ローカル fixture UUID | ビルド引数 |
