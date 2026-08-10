@@ -47,7 +47,6 @@ export const tabBasePath = {
   lands: "/lands",
   buildings: "/buildings",
   parties: "/parties",
-  review: "/review",
   admin: "/admin"
 } as const;
 
@@ -63,6 +62,5 @@ export const screenPageIds = {
   lands: { list: "lands.list", detail: "lands.detail" },
   buildings: { list: "buildings.list", detail: "buildings.detail" },
   parties: { list: "parties.list", detail: "parties.detail" },
-  review: { list: "review.sessions" },
   admin: { list: "admin.users" }
 } as const;

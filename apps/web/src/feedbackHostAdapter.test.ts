@@ -50,10 +50,10 @@ describe("Web GIS FeedbackHostAdapter", () => {
     );
   });
 
-  it("新旧permalinkのthread parameterを同じresolverで受ける", () => {
+  it("Feedback Serviceのpermalinkからthread parameterを受ける", () => {
     expect(resolveWebGisFeedbackThread({ feedbackThread: "new-thread", threadId: "old-thread" }))
       .toBe("new-thread");
-    expect(resolveWebGisFeedbackThread({ threadId: "old-thread" })).toBe("old-thread");
+    expect(resolveWebGisFeedbackThread({ threadId: "old-thread" })).toBeNull();
     expect(resolveWebGisFeedbackThread({ feedbackThread: " ".repeat(201) })).toBeNull();
   });
 });

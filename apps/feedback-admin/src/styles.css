@@ -1,0 +1,34 @@
+:root {
+  color: #172033;
+  font-family: Inter, "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  font-synthesis: none;
+  background: #f3f6fb;
+}
+
+body { min-width: 320px; min-height: 100vh; margin: 0; background: radial-gradient(circle at 15% 0%, #e0f2fe 0, transparent 28rem), #f3f6fb; }
+button, input, select, textarea { font: inherit; }
+
+.feedback-admin-page { width: min(96rem, calc(100% - 2rem)); margin: 0 auto; padding: 0 0 3rem; }
+.feedback-admin-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 4rem; }
+.feedback-admin-toolbar > span { display: flex; align-items: center; gap: .65rem; color: #334155; font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.feedback-admin-toolbar > button { border: 1px solid #cbd5e1; border-radius: .55rem; padding: .5rem .8rem; background: rgb(255 255 255 / .8); color: #475569; cursor: pointer; }
+
+.feedback-admin-brand-mark,
+.feedback-admin-loading-mark { display: grid; width: 3.25rem; height: 3.25rem; place-items: center; border-radius: 1rem; background: linear-gradient(145deg, #2563eb, #0f766e); box-shadow: 0 12px 28px rgb(37 99 235 / .25); color: #fff; font-size: 1.5rem; font-weight: 900; }
+.feedback-admin-brand-mark.is-small { width: 2rem; height: 2rem; border-radius: .55rem; font-size: .9rem; }
+
+.feedback-admin-login,
+.feedback-admin-loading { display: grid; min-height: 100vh; place-items: center; padding: 1.5rem; box-sizing: border-box; }
+.feedback-admin-login > section { width: min(30rem, 100%); border: 1px solid rgb(203 213 225 / .85); border-radius: 1.25rem; padding: 2.5rem; background: rgb(255 255 255 / .92); box-shadow: 0 28px 80px rgb(15 23 42 / .14); backdrop-filter: blur(12px); }
+.feedback-admin-login h1 { margin: .3rem 0 .65rem; font-size: clamp(1.8rem, 5vw, 2.4rem); letter-spacing: -.04em; }
+.feedback-admin-login p { color: #526175; line-height: 1.7; }
+.feedback-admin-kicker { margin: 1.4rem 0 0 !important; color: #2563eb !important; font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.feedback-admin-login-button { width: 100%; margin-top: 1.25rem; border: 0; border-radius: .7rem; padding: .85rem 1rem; background: linear-gradient(135deg, #2563eb, #0f766e); box-shadow: 0 9px 22px rgb(37 99 235 / .22); color: #fff; font-weight: 800; cursor: pointer; }
+.feedback-admin-login small { display: block; margin-top: .8rem; color: #64748b; text-align: center; }
+.feedback-admin-login-error { border: 1px solid #fecaca; border-radius: .5rem; padding: .65rem; background: #fef2f2; color: #b91c1c !important; }
+.feedback-admin-loading { align-content: center; gap: .75rem; color: #475569; }
+
+@media (max-width: 640px) {
+  .feedback-admin-page { width: min(100% - 1rem, 96rem); }
+  .feedback-admin-login > section { padding: 1.5rem; }
+}

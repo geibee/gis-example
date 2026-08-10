@@ -127,7 +127,8 @@ describe("FeedbackOverlay", () => {
 
     const guide = await screen.findByRole("dialog", { name: "受入レビュー" });
     expect(within(guide).getByText("登録から承認までの流れを確認してください。")).toBeInTheDocument();
-    expect(within(guide).getByRole("heading", { name: "今回確認してほしいこと" })).toBeInTheDocument();
+    expect(within(guide).getByRole("heading", { name: "今回、確認してほしいこと" })).toBeInTheDocument();
+    expect(within(guide).getByRole("heading", { name: "今回は、確認しなくてよいこと" })).toBeInTheDocument();
     expect(within(guide).getByText("テスト画面")).toBeInTheDocument();
     await user.click(within(guide).getByRole("button", { name: "確認してレビューを始める" }));
 
@@ -228,8 +229,9 @@ describe("FeedbackOverlay", () => {
     const notification = await screen.findByRole("button", { name: /対象5画面/ });
     expect(within(notification).getByText("5")).toBeInTheDocument();
     await user.click(notification);
-    expect(screen.getByRole("link", { name: /対象画面1/ })).toHaveAttribute("href", "/screen-0");
-    expect(screen.getByRole("link", { name: /対象画面2/ })).toHaveAttribute("href", "/orders");
+    const targetLinks = screen.getAllByRole("link", { name: "画面を開く" });
+    expect(targetLinks[0]).toHaveAttribute("href", "/screen-0");
+    expect(targetLinks[1]).toHaveAttribute("href", "/orders");
   });
 
   it("対象選択、Portal描画、証跡付き投稿をホストから独立して提供する", async () => {

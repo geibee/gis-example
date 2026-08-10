@@ -46,17 +46,6 @@ export const screenDefinitions: readonly ScreenDefinition[] = [
     loadComponent: () => import("./screens/PartiesScreen")
   },
   {
-    basePath: tabBasePath.review,
-    listLabel: "レビュー管理",
-    meta: {
-      pageId: screenPageIds.review.list,
-      tab: "review",
-      title: "レビュー",
-      requiredProjectPermission: "review.manage"
-    },
-    loadComponent: () => import("./screens/ReviewScreen")
-  },
-  {
     basePath: tabBasePath.admin,
     listLabel: "システム管理",
     meta: { pageId: screenPageIds.admin.list, tab: "admin", title: "管理", requiredSystemRole: "admin" },
@@ -69,7 +58,7 @@ export const feedbackApplicationManifest = defineFeedbackManifest({
   schemaVersion: "1",
   applicationKey: "web-gis",
   displayName: "Web GIS MVP",
-  manifestVersion: "2",
+  manifestVersion: "3",
   routes: screenDefinitions.flatMap((screen) => [
     {
       pageKey: screen.meta.pageId,
@@ -89,7 +78,7 @@ export const feedbackApplicationManifest = defineFeedbackManifest({
   ])
 });
 
-/** Phase 4まで維持する旧SDK互換route。正本はfeedbackApplicationManifestとする。 */
+/** SDK overlay向けroute。正本であるapplication manifestから導出する。 */
 export const feedbackRoutes = feedbackApplicationManifest.routes.map((route) => ({
   pageId: route.pageKey,
   path: route.template,

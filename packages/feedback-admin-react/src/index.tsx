@@ -59,7 +59,7 @@ export function FeedbackAdminConsole({
   timezone = "Asia/Tokyo",
   className,
   initialAction,
-  openExternal = (url) => window.open(url, "_blank", "noopener,noreferrer")
+  openExternal
 }: FeedbackAdminConsoleProps) {
   const [tab, setTab] = useState<Tab>("sessions");
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export function FeedbackAdminConsole({
   ]);
   return (
     <section className={`feedback-admin${className ? ` ${className}` : ""}`}>
-      <header><h1>フィードバック管理</h1><p className="feedback-admin-scope">対象: {applicationKey} / {environmentKey} / {externalWorkspaceKey}</p><p className="feedback-admin-help">レビュー、メンバー、通知、保存設定を管理します。</p></header>
+      <header className="feedback-admin-hero"><p className="eyebrow">Feedback workspace</p><h1>フィードバック管理</h1><p>レビューの受付から対応状況、通知、保存設定までをまとめて管理します。</p><p className="feedback-admin-scope">{applicationKey} / {environmentKey} / {externalWorkspaceKey}</p></header>
       <nav aria-label="管理対象">
         {([
           ["sessions", "レビュー"],
@@ -135,7 +135,7 @@ function SessionAdministration({
   applicationKey: string;
   environmentKey: string;
   externalWorkspaceKey: string;
-  openExternal(url: string): void;
+  openExternal?: (url: string) => void;
   startCreate: boolean;
   onError(error: string | null): void;
 }) {
@@ -318,10 +318,17 @@ function SessionAdministration({
     } catch (caught) { onError(messageOf(caught)); }
   };
   const openThread = async (threadId: string) => {
+    const pendingWindow = openExternal ? null : openPendingWindow();
     try {
       const resource = await transport.request<Schemas["FeedbackDeepLink"]>(`/threads/${threadId}/deep-link`);
-      openExternal(resource.value.url);
-    } catch (caught) { onError(messageOf(caught)); }
+      const target = directThreadLink(resource.value.url, threadId, externalWorkspaceKey);
+      if (openExternal) openExternal(target);
+      else if (pendingWindow) pendingWindow.location.replace(target);
+      else window.location.assign(target);
+    } catch (caught) {
+      pendingWindow?.close();
+      onError(messageOf(caught));
+    }
   };
 
   return (
@@ -349,7 +356,7 @@ function SessionAdministration({
           <h3>#{thread.displayNumber} {thread.perspectiveCode}</h3>
           <p>{thread.messages[thread.messages.length - 1]?.body}</p>
           <div className="feedback-admin-actions">
-            <button type="button" onClick={() => void openThread(thread.id)}>対象アプリを開く</button>
+            <button type="button" onClick={() => void openThread(thread.id)}>対象アプリでスレッドを開く</button>
             <button type="button" onClick={() => void toggleThread(thread)}>{thread.status === "open" ? "対応済みにする" : "再オープン"}</button>
             {thread.evidenceAvailable ? <button type="button" onClick={() => void showEvidence(thread.id)}>証跡</button> : null}
           </div>
@@ -621,8 +628,7 @@ function MemberRow({ member, onSave, onDelete }: { member: Member; onSave(member
 function NotificationAdministration({ transport, scopeQuery, onError }: {
   transport: FeedbackTransport; scopeQuery: string; onError(error: string | null): void;
 }) {
-  const [settings, setSettings] = useState<Schemas["FeedbackNotificationSettings"] | null>(null);
-  const [etag, setEtag] = useState<string | null>(null); const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [connectorTypes, setConnectorTypes] = useState<ConnectorType[]>([]);
   const [connectors, setConnectors] = useState<NotificationConnector[]>([]);
   const [connectorType, setConnectorType] = useState("");
@@ -630,23 +636,17 @@ function NotificationAdministration({ transport, scopeQuery, onError }: {
   const [destinationRef, setDestinationRef] = useState("");
   const load = useCallback(async () => {
     try {
-      const [settingResource, deliveryResource, typeResource, connectorResource] = await Promise.all([
-        transport.request<Schemas["FeedbackNotificationSettings"]>(`/notification-settings?${scopeQuery}`),
+      const [deliveryResource, typeResource, connectorResource] = await Promise.all([
         transport.request<Delivery[]>(`/notification-deliveries?${scopeQuery}`),
         transport.request<ConnectorType[]>(`/connector-types?${scopeQuery}`),
         transport.request<NotificationConnector[]>(`/notification-connectors?${scopeQuery}`)
       ]);
-      setSettings(settingResource.value); setEtag(settingResource.etag); setDeliveries(deliveryResource.value);
+      setDeliveries(deliveryResource.value);
       setConnectorTypes(typeResource.value); setConnectors(connectorResource.value);
       setConnectorType((current) => current || typeResource.value.find((type) => type.enabled)?.key || "");
     } catch (caught) { onError(messageOf(caught)); }
   }, [onError, scopeQuery, transport]);
   useEffect(() => { void load(); }, [load]);
-  const save = async () => {
-    if (!settings || !etag) return;
-    try { await transport.request(`/notification-settings?${scopeQuery}`, { method: "PATCH", ifMatch: etag, body: settings }); await load(); }
-    catch (caught) { onError(messageOf(caught)); }
-  };
   const retry = async (id: string) => {
     try { await transport.request(`/notification-deliveries/${id}/retry?${scopeQuery}`, { method: "POST" }); await load(); }
     catch (caught) { onError(messageOf(caught)); }
@@ -678,14 +678,7 @@ function NotificationAdministration({ transport, scopeQuery, onError }: {
       await load();
     } catch (caught) { onError(messageOf(caught)); }
   };
-  return <div className="feedback-admin-grid"><div className="feedback-admin-card"><h2>通知設定</h2>{settings ? <>
-    <p>互換用の旧Webhook設定です。新規連携は通知コネクタを使用してください。</p>
-    <label><input type="checkbox" checked={settings.webhookEnabled} onChange={(event) => setSettings({ ...settings, webhookEnabled: event.target.checked })} />有効</label>
-    <label>Webhook URL<input type="url" placeholder="https://example.invalid/webhook" value={settings.webhookEndpoint ?? ""} onChange={(event) => setSettings({ ...settings, webhookEndpoint: event.target.value || null })} /></label>
-    <label><input type="checkbox" checked={settings.includeBody} onChange={(event) => setSettings({ ...settings, includeBody: event.target.checked })} />本文を含める</label>
-    <label><input type="checkbox" checked={settings.includeEvidence} onChange={(event) => setSettings({ ...settings, includeEvidence: event.target.checked })} />旧互換フラグ（コネクタ配送では証跡を送信しません）</label>
-    <button type="button" onClick={() => void save()}>保存</button></> : null}</div>
-    <form className="feedback-admin-card" onSubmit={(event) => void createConnector(event)}><h2>通知コネクタを追加</h2>
+  return <div className="feedback-admin-grid"><form className="feedback-admin-card" onSubmit={(event) => void createConnector(event)}><h2>通知先を追加</h2><p className="feedback-admin-help">管理者が登録済みの接続先を選び、レビュー通知の配送先として追加します。</p>
       <label>種別<select required value={connectorType} onChange={(event) => setConnectorType(event.target.value)}>
         <option value="">選択</option>{connectorTypes.filter((type) => type.enabled).map((type) => <option key={type.key} value={type.key}>{type.displayName}</option>)}
       </select></label>
@@ -756,6 +749,27 @@ function dateTimeToISO(value: string): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 function idempotencyKey(): string { return `feedback-admin-${crypto.randomUUID()}`; }
+
+function directThreadLink(rawUrl: string, threadId: string, workspaceKey: string): string {
+  const url = new URL(rawUrl, window.location.origin);
+  url.searchParams.set("projectId", workspaceKey);
+  url.searchParams.set("feedbackThread", threadId);
+  return url.toString();
+}
+
+function openPendingWindow(): Window | null {
+  try {
+    const pending = window.open("", "_blank");
+    if (pending) {
+      pending.opener = null;
+      pending.document.title = "対象アプリを開いています…";
+      pending.document.body.textContent = "対象のフィードバックスレッドを開いています…";
+    }
+    return pending;
+  } catch {
+    return null;
+  }
+}
 function versionEtag(version: number): string { return `"v${version}"`; }
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 

@@ -443,7 +443,6 @@ services:
       context: ..
       dockerfile: apps/web/Dockerfile
       args:
-        VITE_FEEDBACK_API_MODE: ${VITE_FEEDBACK_API_MODE:-feedback-v1}
         VITE_FEEDBACK_API_BASE: ${VITE_FEEDBACK_API_BASE:-/feedback/v1}
         VITE_FEEDBACK_ADMIN_URL: ${VITE_FEEDBACK_ADMIN_URL:-http://localhost:5174/}
         FEEDBACK_APPLICATION: ${VITE_FEEDBACK_APPLICATION_KEY:-web-gis}

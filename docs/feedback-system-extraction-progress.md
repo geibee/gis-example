@@ -65,13 +65,12 @@
 - 同一clone・同一resource limitのKotlin/Go性能比較、ローカルworkspace sticky routing/rollback、PostgreSQL再起動を含む
   24時間lease/cursor/idempotency soak harness
 
-## 互換期間として意図的に残しているもの
+## consumer移行後の状態
 
-- `@web-gis/feedback-plugin` と `/api/review-*`・`/api/threads/*` は consumer 1 の旧 API 互換層
-- Web GIS はビルド時 flag で `legacy` / read fallback 付き v1 / v1 の順に切り替えられ、既定は `legacy`
-- consumer 1 はまだ `apps/api` の review table (`projects/users` と同じ DB・Flyway history) を読み書きする
-- legacy mode の管理 UI、browser CSV export、通知 adapter は rollback 用に `apps/web` / `apps/api` に残る
-- `API_ROUTE_MODE=review-sidecar` は独立 Service ではなく route profile のまま
+- Web GISは独立Feedback Service v1へ固定し、consumer側の切替フラグと旧管理画面を除去した
+- レビュー管理、Export、通知設定は`localhost:5174`のFeedback Admin Consoleへ一本化した
+- 適用済みの旧Flyway migrationは履歴・checksum保護のため削除しない
+- 新Feedback Serviceのlegacy migration CLIは、既存データを移行する場合の一方向copy手段としてAPI本体から分離している
 
 これらを新 package へ見せないため、`scripts/check-feedback-contracts.sh` が
 `@web-gis`、`apps/api/openapi.yaml`、`projectId` の混入と React/MapLibre の逆依存を fail-closed で検査する。

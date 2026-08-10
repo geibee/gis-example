@@ -11,12 +11,6 @@ type ReviewSessionIntroductionProps = {
   visible?: boolean;
 };
 
-const perspectiveGroups = [
-  { status: "ACTIVE", heading: "今回確認してほしいこと" },
-  { status: "FUTURE", heading: "今後確認予定" },
-  { status: "OUT_OF_SCOPE", heading: "今回対象外" }
-] as const;
-
 const scopeStateLabels: Record<ReviewPageScopeState, string> = {
   reviewable: "この画面は対象",
   excluded: "この画面は対象外",
@@ -39,6 +33,9 @@ export function ReviewSessionIntroduction({
     [currentPageId, currentPath, session]
   );
   const reviewableScopes = session.scopes.filter((scope) => scope.reviewable);
+  const excludedScopes = session.scopes.filter((scope) => !scope.reviewable);
+  const activePerspectives = session.perspectives.filter((item) => item.status === "ACTIVE");
+  const inactivePerspectives = session.perspectives.filter((item) => item.status !== "ACTIVE");
 
   useEffect(() => {
     setOpen(!isDismissed(dismissedKey));
@@ -107,43 +104,48 @@ export function ReviewSessionIntroduction({
               {scopeStateLabels[scopeState]}
             </p>
 
-            {perspectiveGroups.map((group) => {
-              const perspectives = session.perspectives.filter((item) => item.status === group.status);
-              if (perspectives.length === 0) return null;
-              return (
-                <section className={`wfg-feedback-review-section is-${group.status.toLowerCase()}`} key={group.status}>
-                  <h3>{group.heading}</h3>
-                  <ul>
-                    {perspectives.map((perspective) => (
-                      <li key={perspective.code}>
-                        <strong>{perspective.label}</strong>
-                        {perspective.guidance ? <span>{perspective.guidance}</span> : null}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              );
-            })}
+            <div className="wfg-feedback-review-focus-grid">
+              <section className="wfg-feedback-review-focus is-active">
+                <header><span aria-hidden="true">✓</span><div><h3>今回、確認してほしいこと</h3><small>{activePerspectives.length}項目</small></div></header>
+                {activePerspectives.length > 0 ? <ul>{activePerspectives.map((perspective) => (
+                  <li key={perspective.code}>
+                    <strong>{perspective.label}</strong>
+                    {perspective.guidance ? <span>{perspective.guidance}</span> : null}
+                  </li>
+                ))}</ul> : <p>具体的な確認観点は設定されていません。</p>}
+              </section>
+              <section className="wfg-feedback-review-focus is-inactive">
+                <header><span aria-hidden="true">−</span><div><h3>今回は、確認しなくてよいこと</h3><small>{inactivePerspectives.length}項目</small></div></header>
+                {inactivePerspectives.length > 0 ? <ul>{inactivePerspectives.map((perspective) => (
+                  <li key={perspective.code}>
+                    <span className="wfg-feedback-review-status-label">{perspective.status === "FUTURE" ? "今後確認" : "今回対象外"}</span>
+                    <strong>{perspective.label}</strong>
+                    {perspective.guidance ? <span>{perspective.guidance}</span> : null}
+                  </li>
+                ))}</ul> : <p>確認不要として指定された観点はありません。</p>}
+              </section>
+            </div>
 
             {session.scopes.length > 0 ? (
               <section className="wfg-feedback-review-section">
-                <h3>今回の対象画面</h3>
+                <div className="wfg-feedback-review-section-heading"><div><h3>今回の対象画面</h3><p>確認する画面へ移動する場合は、各カードのボタンを押してください。</p></div><strong>{reviewableScopes.length}画面</strong></div>
                 <ul className="wfg-feedback-review-scope-list">
                   {reviewableScopes.map((scope) => (
                     <li key={scope.id}>
-                      <ReviewScopeLink
+                      <ReviewScopeCard
                         label={scope.description ?? scope.pageId}
                         routeLabel={scope.route ?? `${scope.pageId}（すべて）`}
                         href={reviewScopeHref(scope.pageId, scope.route, currentPageId, currentPath)}
+                        current={scope.pageId === currentPageId}
                       />
                     </li>
                   ))}
                 </ul>
-                {session.scopes.some((scope) => !scope.reviewable) ? (
+                {excludedScopes.length > 0 ? (
                   <>
                     <h3 className="wfg-feedback-review-excluded-heading">対象外の画面</h3>
                     <ul className="wfg-feedback-review-scope-list is-excluded">
-                      {session.scopes.filter((scope) => !scope.reviewable).map((scope) => (
+                      {excludedScopes.map((scope) => (
                         <li key={scope.id}>
                           <strong>{scope.description ?? scope.pageId}</strong>
                           <code>{scope.route ?? `${scope.pageId}（すべて）`}</code>
@@ -167,9 +169,22 @@ export function ReviewSessionIntroduction({
   );
 }
 
-function ReviewScopeLink({ label, routeLabel, href }: { label: string; routeLabel: string; href: string | null }) {
-  const content = <><strong>{label}</strong><code>{routeLabel}</code></>;
-  return href ? <a href={href}>{content}</a> : content;
+function ReviewScopeCard({
+  label,
+  routeLabel,
+  href,
+  current
+}: {
+  label: string;
+  routeLabel: string;
+  href: string | null;
+  current: boolean;
+}) {
+  return <div className={`wfg-feedback-review-scope-card${current ? " is-current" : ""}`}>
+    <span className="wfg-feedback-review-scope-icon" aria-hidden="true">▣</span>
+    <span className="wfg-feedback-review-scope-copy"><strong>{label}</strong><small>{current ? "現在表示中の画面" : routeLabel}</small></span>
+    {href ? <a className="wfg-feedback-review-scope-action" href={href}>{current ? "この画面で確認" : "画面を開く"}<span aria-hidden="true">→</span></a> : <span className="wfg-feedback-review-scope-unavailable">直接移動できません</span>}
+  </div>;
 }
 
 function reviewScopeHref(

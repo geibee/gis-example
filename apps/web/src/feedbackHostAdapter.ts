@@ -55,9 +55,9 @@ export function buildWebGisFeedbackPath(
   return `${pathname}?${search}`;
 }
 
-/** 新 permalink と Phase 4 より前の threadId permalink を同じ入口で解決する。 */
+/** Feedback Serviceが発行するpermalinkから対象threadを解決する。 */
 export function resolveWebGisFeedbackThread(search: Record<string, unknown>): string | null {
-  const value = search.feedbackThread ?? search.threadId;
+  const value = search.feedbackThread;
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   return normalized && normalized.length <= 200 ? normalized : null;

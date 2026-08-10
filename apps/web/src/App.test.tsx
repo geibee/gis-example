@@ -84,7 +84,8 @@ describe("レビュー参加者向け案内", () => {
 
     const guide = await screen.findByRole("dialog", { name: "第1回 業務フローレビュー" });
     expect(guide).toHaveTextContent("案件検索から詳細確認までの流れを確認してください");
-    expect(guide).toHaveTextContent("今回確認してほしいこと");
+    expect(guide).toHaveTextContent("今回、確認してほしいこと");
+    expect(guide).toHaveTextContent("今回は、確認しなくてよいこと");
     expect(guide).toHaveTextContent("今回の対象画面");
     expect(screen.queryByRole("button", { name: "レビュー" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", {
@@ -92,16 +93,16 @@ describe("レビュー参加者向け案内", () => {
     })).toBeInTheDocument();
   });
 
-  it("system adminはプロジェクトメンバーでなくてもレビュー管理画面へ入れる", async () => {
-    server.use(http.get("*/api/me", () => HttpResponse.json<Me>(makeMe({
-      systemRole: "admin",
-      memberships: []
-    }))));
-    const { router } = renderWithProviders({ path: "/review" });
+});
 
-    expect(await screen.findByRole("heading", { name: "第1回 業務フローレビュー" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/review");
-    expect(screen.getByRole("button", { name: "レビュー" })).toBeInTheDocument();
+describe("フィードバックスレッドのディープリンク", () => {
+  it("feedbackThread付きURLで対象画面とスレッドDrawerを同時に開く", async () => {
+    const threadId = "20000000-0000-4000-8000-000000000001";
+    const { router } = renderWithProviders({ path: `/lands?projectId=p1&feedbackThread=${threadId}` });
+
+    expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
+    expect(await screen.findByText("ディープリンクから直接開いたコメントです")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/lands");
   });
 });
 

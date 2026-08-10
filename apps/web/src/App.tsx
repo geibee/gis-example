@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Building2,
-  ClipboardCheck,
   EyeOff,
   FileText,
   LogOut,
@@ -54,16 +53,9 @@ function FeedbackSdkHost({ children }: { children: ReactNode }) {
   const { selectedProject } = useAppShell();
   const queryClient = useQueryClient();
   const currentPath = useRouterState({ select: (state) => state.location.pathname });
-  const configuredMode = import.meta.env.VITE_FEEDBACK_API_MODE;
-  const feedbackApiMode = configuredMode === "feedback-v1" || configuredMode === "feedback-v1-dual-read"
-    ? configuredMode
-    : "legacy";
-  const feedbackApiBaseUrl = (feedbackApiMode !== "legacy"
-    ? import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1"
-    : import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+  const feedbackApiBaseUrl = (import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1").replace(/\/$/, "");
   const [manifestRevision, setManifestRevision] = useState(0);
   useEffect(() => {
-    if (feedbackApiMode === "legacy") return;
     const configuredApplicationKey = import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis";
     if (configuredApplicationKey !== feedbackApplicationManifest.applicationKey) {
       console.warn("Feedback画面定義を同期できません: applicationKeyがホストのmanifestと一致しません");
@@ -95,13 +87,12 @@ function FeedbackSdkHost({ children }: { children: ReactNode }) {
       active = false;
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [feedbackApiBaseUrl, feedbackApiMode]);
+  }, [feedbackApiBaseUrl]);
   return (
     <FeedbackPluginProvider
       key={manifestRevision}
-      apiMode={feedbackApiMode}
+      apiMode="feedback-v1"
       apiBaseUrl={feedbackApiBaseUrl}
-      legacyApiBaseUrl={(import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")}
       applicationKey={import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis"}
       environmentKey={import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local"}
       projectId={selectedProject}
@@ -207,12 +198,6 @@ function AppLayout() {
             <Users size={17} />
             関係者
           </button>
-          {canManageReview ? (
-            <button data-feedback-id="navigation.review" className={activeTab === "review" ? "active" : ""} type="button" onClick={() => navigateTab("review")}>
-              <ClipboardCheck size={17} />
-              レビュー
-            </button>
-          ) : null}
           {me?.systemRole === "admin" ? (
             <button data-feedback-id="navigation.admin" className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
               <ShieldCheck size={17} />

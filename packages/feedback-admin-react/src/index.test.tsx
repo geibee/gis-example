@@ -49,8 +49,12 @@ describe("FeedbackAdminConsole", () => {
     const detailRoute = await screen.findByRole("checkbox", { name: /注文詳細.*\/orders\/\{id\}/ });
     fireEvent.click(detailRoute);
     expect((detailRoute as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "対象アプリを開く" }));
-    await waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://consumer.example/?feedbackThread=thread-1"));
+    fireEvent.click(screen.getByRole("button", { name: "対象アプリでスレッドを開く" }));
+    await waitFor(() => expect(openExternal).toHaveBeenCalledOnce());
+    const deepLink = new URL(String(openExternal.mock.calls[0][0]));
+    expect(deepLink.origin).toBe("https://consumer.example");
+    expect(deepLink.searchParams.get("projectId")).toBe("workspace-1");
+    expect(deepLink.searchParams.get("feedbackThread")).toBe(thread.id);
   });
 
   it("新規レビューをJSON入力なしで設定できる", async () => {
@@ -118,7 +122,7 @@ const scope = {
 };
 
 function expectedPath(tab: string): string {
-  return ({ "アプリ設定": "/manifest", "保存・エクスポート": "/retention-policy", メンバー: "/memberships", 通知: "/notification-settings" })[tab] ?? "";
+  return ({ "アプリ設定": "/manifest", "保存・エクスポート": "/retention-policy", メンバー: "/memberships", 通知: "/connector-types" })[tab] ?? "";
 }
 
 function createTransport(request = vi.fn(createRequest())): FeedbackTransport {
