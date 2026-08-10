@@ -54,9 +54,24 @@ WHERE version = $1`, migration.HandoffVersion).Scan(
 	if err != nil {
 		return fmt.Errorf("V6 Go migration handoff markerを取得できません: %w", err)
 	}
-	fingerprint, err := d.businessSchemaFingerprint(ctx)
-	if err != nil {
-		return err
+	// V6 fingerprintはGo migrationを一度も適用していないhandoff境界だけで照合する。
+	// V7以降は意図どおりschemaを変えるため、以後の完全性はversion/checksum/state台帳で検証する。
+	var hasGoMigrations bool
+	if err := d.QueryRow(ctx, `SELECT EXISTS (
+    SELECT 1 FROM feedback.go_schema_migrations WHERE version >= 7
+)`).Scan(&hasGoMigrations); err != nil {
+		return fmt.Errorf("Go migration履歴を確認できません: %w", err)
+	}
+	fingerprint := ""
+	if hasGoMigrations {
+		if marker.SchemaFingerprintSHA256 != nil {
+			fingerprint = *marker.SchemaFingerprintSHA256
+		}
+	} else {
+		fingerprint, err = d.businessSchemaFingerprint(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	return migration.ValidateHandoff(history, marker, fingerprint)
 }

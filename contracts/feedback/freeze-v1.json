@@ -3,7 +3,7 @@
   "baselineCommit": "1f30e9a",
   "openapiOperationCount": 42,
   "contracts": {
-    "openapi.yaml": "sha256:55080b70c768109e45d822bda1bc71603817cf21abbad4a223436bb1c60b7f35",
+    "openapi.yaml": "sha256:350fbc853644f45eb490d1d6393051920246138db8bd6c03de43d5de167c84bd",
     "schemas/connector-protocol.schema.json": "sha256:4467a857dc49d6a8282ac75aa8c40ec391b7793cab805ec9a8bc922243b4ed24",
     "token-exchange.openapi.yaml": "sha256:2504d874a5049e94bc9e2fa8998c3e6e0bc73e9e6c1e958622d20dac4a39d4e5",
     "schemas/application-manifest.schema.json": "sha256:a7e92ba7616b7629889db9b10f735dee26befa0d68a5ef3b4bfc2d3ad1121c43",

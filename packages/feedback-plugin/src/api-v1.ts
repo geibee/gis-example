@@ -46,6 +46,7 @@ export function createFeedbackV1ApiClient(options: FeedbackV1ApiClientOptions): 
   const perspectiveLabels = new Map<string, string>();
   const routeLabels = new Map(options.routes.map((route) => [route.pageId, route.label]));
   const sessionWorkspaces = new Map<string, string>();
+  const sessionLoads = new Map<string, Promise<void>>();
   let activeWorkspace = "";
   let compatibilityCheck: Promise<void> | null = null;
 
@@ -79,7 +80,24 @@ export function createFeedbackV1ApiClient(options: FeedbackV1ApiClientOptions): 
     messageEtags.set(message.id, etag ?? versionEtag(message.version));
     return toLegacyMessage(message);
   };
-  const rememberThread = (thread: ThreadV1, etag?: string | null) => {
+  const rememberSession = (session: SessionV1) => {
+    session.perspectives.forEach((item) => {
+      perspectiveLabels.set(`${session.id}:${item.code}`, item.label);
+    });
+    sessionWorkspaces.set(session.id, session.externalWorkspaceKey);
+  };
+  const ensurePerspectiveLabel = async (thread: ThreadV1) => {
+    if (perspectiveLabels.has(`${thread.sessionId}:${thread.perspectiveCode}`)) return;
+    let load = sessionLoads.get(thread.sessionId);
+    if (!load) {
+      load = transport.request<SessionV1>(`/sessions/${encodeURIComponent(thread.sessionId)}`)
+        .then(({ value }) => { rememberSession(value); });
+      sessionLoads.set(thread.sessionId, load);
+    }
+    await load;
+  };
+  const rememberThread = async (thread: ThreadV1, etag?: string | null) => {
+    await ensurePerspectiveLabel(thread);
     threadEtags.set(thread.id, etag ?? versionEtag(thread.version));
     thread.messages.forEach((message) => messageEtags.set(message.id, versionEtag(message.version)));
     return toLegacyThread(thread, perspectiveLabels, sessionWorkspaces.get(thread.sessionId) ?? activeWorkspace);
@@ -96,21 +114,18 @@ export function createFeedbackV1ApiClient(options: FeedbackV1ApiClientOptions): 
         status
       });
       const page = (await transport.request<Schemas["FeedbackSessionPage"]>(`/sessions?${query}`)).value;
-      page.items.forEach((session) => session.perspectives.forEach((item) => {
-        perspectiveLabels.set(`${session.id}:${item.code}`, item.label);
-      }));
-      page.items.forEach((session) => sessionWorkspaces.set(session.id, session.externalWorkspaceKey));
+      page.items.forEach(rememberSession);
       return page.items.map((session) => toLegacySession(session, routeLabels));
     }),
     getFeedbackThreads: (reviewSessionId) => run(async () => {
       const page = (await transport.request<Schemas["FeedbackThreadPage"]>(
         `/sessions/${encodeURIComponent(reviewSessionId)}/threads`
       )).value;
-      return page.items.map((thread) => rememberThread(thread));
+      return await Promise.all(page.items.map((thread) => rememberThread(thread)));
     }),
     getFeedbackThread: (threadId) => run(async () => {
       const resource = await transport.request<ThreadV1>(`/threads/${encodeURIComponent(threadId)}`);
-      return rememberThread(resource.value, resource.etag);
+      return await rememberThread(resource.value, resource.etag);
     }),
     createFeedbackThread: (reviewSessionId, metadata, screenshot) => run(async () => {
       const request = await toThreadCreateRequest(metadata, screenshot, options.routes);
@@ -118,7 +133,7 @@ export function createFeedbackV1ApiClient(options: FeedbackV1ApiClientOptions): 
         `/sessions/${encodeURIComponent(reviewSessionId)}/threads`,
         { method: "POST", body: request, idempotencyKey: newIdempotencyKey() }
       );
-      return rememberThread(resource.value, resource.etag);
+      return await rememberThread(resource.value, resource.etag);
     }),
     createFeedbackMessage: (threadId, body) => run(async () => {
       const resource = await transport.request<MessageV1>(
@@ -151,7 +166,7 @@ export function createFeedbackV1ApiClient(options: FeedbackV1ApiClientOptions): 
         body: { status: body.status === "OPEN" ? "open" : "resolved" },
         ifMatch
       });
-      return rememberThread(resource.value, resource.etag);
+      return await rememberThread(resource.value, resource.etag);
     })
   };
 }
@@ -204,7 +219,8 @@ function toLegacySession(value: SessionV1, routeLabels: ReadonlyMap<string, stri
       route: scope.routeTemplate ?? null,
       description: routeLabels.get(scope.pageKey) ?? null,
       reviewable: scope.reviewable,
-      displayOrder: index
+      displayOrder: index,
+      perspectiveCodes: scope.perspectiveCodes ?? []
     }))
   };
 }
@@ -219,7 +235,7 @@ function toLegacyThread(value: ThreadV1, labels: Map<string, string>, projectId:
     reviewScopeId: null,
     pageRoute: concreteRoute(value.location),
     perspectiveCode: value.perspectiveCode,
-    perspectiveLabel: labels.get(`${value.sessionId}:${value.perspectiveCode}`) ?? value.perspectiveCode,
+    perspectiveLabel: labels.get(`${value.sessionId}:${value.perspectiveCode}`) ?? "その他の観点",
     targetType: target.type,
     targetMetadata: target,
     evidence: null,
@@ -269,13 +285,16 @@ async function toThreadCreateRequest(
   if (!pageKey || !route) throw new Error("現在画面が application manifest に登録されていません");
   const concrete = new URL(metadata.route ?? route.path, "https://feedback-location.invalid");
   const pathParameters = extractPathParameters(route.path, concrete.pathname);
+  const queryParameters = Object.fromEntries(
+    [...concrete.searchParams.entries()].filter(([name]) => route.queryParameters?.[name]?.persistence === "store")
+  );
   return {
     location: {
       schemaVersion: "1",
       pageKey,
       routeTemplate: route.path,
       pathParameters,
-      queryParameters: {}
+      queryParameters
     },
     target: toV1Target(metadata.targetType, metadata.target),
     perspectiveCode: metadata.perspectiveCode,

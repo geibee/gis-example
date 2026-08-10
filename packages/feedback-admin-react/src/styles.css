@@ -61,11 +61,19 @@
 .feedback-admin-route-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; }
 .feedback-admin-route-groups section { border: 1px solid #e2e8f0; border-radius: .65rem; padding: .75rem; background: #fff; }
 .feedback-admin-route-groups h3 { margin-block: 0 .4rem; }
-.feedback-admin-route-groups label { display: flex; align-items: center; gap: .7rem; margin: 0; padding: .6rem; border-radius: .45rem; }
-.feedback-admin-route-groups label:hover { background: #eff6ff; }
-.feedback-admin-route-groups label input { width: auto; margin: 0; }
-.feedback-admin-route-groups label span { display: grid; }
+.feedback-admin-route-row { border-radius: .55rem; border: 1px solid transparent; margin-block: .35rem; }
+.feedback-admin-route-row.is-selected { border-color: #bfdbfe; background: #f8fbff; }
+.feedback-admin-route-choice { display: flex; align-items: center; gap: .7rem; margin: 0; padding: .65rem; border-radius: .45rem; }
+.feedback-admin-route-choice:hover { background: #eff6ff; }
+.feedback-admin-route-choice input { width: auto; margin: 0; }
+.feedback-admin-route-choice span { display: grid; }
 .feedback-admin-route-groups code { margin: 0; color: #64748b; font-size: .78rem; }
+.feedback-admin-route-perspectives { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 .65rem .7rem 2.1rem; padding: .55rem .65rem .65rem; border: 0; border-top: 1px solid #dbeafe; }
+.feedback-admin-route-perspectives legend { padding: .55rem .2rem 0; color: #475569; font-size: .76rem; font-weight: 700; }
+.feedback-admin-route-perspectives label { display: inline-flex; align-items: center; gap: .35rem; margin: 0; padding: .35rem .55rem; border: 1px solid #bfdbfe; border-radius: 999px; background: #fff; font-size: .82rem; }
+.feedback-admin-route-perspectives label:hover { background: #eff6ff; }
+.feedback-admin-route-perspectives input { width: auto; margin: 0; }
+.feedback-admin-route-perspectives p { margin: 0; color: #64748b; font-size: .82rem; }
 .feedback-admin .eyebrow { color: #2563eb; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .feedback-admin-card { border: 1px solid var(--feedback-admin-border, #cbd5e1); border-radius: .5rem; padding: 1rem; background: var(--feedback-admin-surface, #fff); }
 .feedback-admin-card-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }

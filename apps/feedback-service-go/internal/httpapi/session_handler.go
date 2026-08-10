@@ -201,9 +201,10 @@ type sessionCreateWire struct {
 }
 
 type sessionScopeWire struct {
-	PageKey       *string `json:"pageKey"`
-	RouteTemplate *string `json:"routeTemplate"`
-	Reviewable    *bool   `json:"reviewable"`
+	PageKey          *string   `json:"pageKey"`
+	RouteTemplate    *string   `json:"routeTemplate"`
+	Reviewable       *bool     `json:"reviewable"`
+	PerspectiveCodes *[]string `json:"perspectiveCodes"`
 }
 
 type sessionPerspectiveWire struct {
@@ -255,6 +256,7 @@ func decodeSessionCreate(body []byte) (session.CreateRequest, error) {
 			}
 			scopes = append(scopes, session.Scope{
 				PageKey: *item.PageKey, RouteTemplate: item.RouteTemplate, Reviewable: *item.Reviewable,
+				PerspectiveCodes: optionalStringSlice(item.PerspectiveCodes),
 			})
 		}
 	}
@@ -345,7 +347,10 @@ func decodeSessionPatch(body []byte, expectedVersion int) (session.Patch, error)
 						err = invalid("request.invalid", "scopeの必須fieldがありません")
 						break
 					}
-					scopes = append(scopes, session.Scope{PageKey: *item.PageKey, RouteTemplate: item.RouteTemplate, Reviewable: *item.Reviewable})
+					scopes = append(scopes, session.Scope{
+						PageKey: *item.PageKey, RouteTemplate: item.RouteTemplate, Reviewable: *item.Reviewable,
+						PerspectiveCodes: optionalStringSlice(item.PerspectiveCodes),
+					})
 				}
 				patch.Scopes = &scopes
 			}
@@ -373,6 +378,13 @@ func decodeSessionPatch(body []byte, expectedVersion int) (session.Patch, error)
 		return session.Patch{}, err
 	}
 	return patch, nil
+}
+
+func optionalStringSlice(value *[]string) []string {
+	if value == nil {
+		return []string{}
+	}
+	return *value
 }
 
 func decodeRequiredPatchString(raw json.RawMessage, name string) (*string, error) {

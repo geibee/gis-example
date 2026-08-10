@@ -9,6 +9,7 @@ export type FeedbackRouteDefinition = {
   path: string;
   label: string;
   group?: string;
+  queryParameters?: Record<string, { persistence: "store" | "hash" | "omit" }>;
 };
 
 const parameterSegment = /^\{[A-Za-z_][A-Za-z0-9_]*\}$/;

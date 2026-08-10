@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ReviewSession } from "./contracts";
+import type { FeedbackThread, ReviewSession } from "./contracts";
 import { useDismissiblePanel } from "./dismiss";
 import { FeedbackPins } from "./FeedbackPins";
 import { FeedbackThreadDrawer } from "./FeedbackThreadDrawer";
@@ -12,7 +12,10 @@ import {
   useOpenReviewSessionQuery
 } from "./queries";
 import { useFeedbackState } from "./state";
+import { resolveCurrentReviewScope } from "./review-scope";
+import { matchFeedbackRoute, type FeedbackRouteDefinition } from "./routes";
 import { resolveScreenTarget } from "./target";
+import { feedbackThreadDeepLink } from "./thread-route";
 import {
   captureExcludeAttribute,
   feedbackMapAttribute,
@@ -33,6 +36,7 @@ export function FeedbackOverlay({
   reviewIntroductionStorageKey,
   reviewManagementUrl
 }: FeedbackOverlayProps) {
+  const { projectId, routes } = useFeedbackPluginContext();
   const sessionQuery = useOpenReviewSessionQuery();
   const session = sessionQuery.data ?? null;
   const threadsQuery = useFeedbackThreadsQuery(session?.id ?? null);
@@ -45,9 +49,11 @@ export function FeedbackOverlay({
     selectTarget,
     showContextMenu,
     closeContextMenu,
+    openThread,
     closeThread,
     reset
   } = useFeedbackState();
+  const [threadListOpen, setThreadListOpen] = useState(false);
 
   useEffect(() => {
     if (sessionQuery.isSuccess && !session && mode !== "idle") reset();
@@ -124,14 +130,17 @@ export function FeedbackOverlay({
       <ReviewSessionIntroduction
         session={session}
         storageKey={reviewIntroductionStorageKey}
-        visible={mode === "idle" && !activeThreadId && !contextMenu}
+        visible={mode === "idle" && !activeThreadId && !contextMenu && !threadListOpen}
       />
-      {mode === "idle" ? (
+      {mode === "idle" && !threadListOpen ? (
         <>
           <FeedbackPins threads={threadsQuery.data ?? []} />
           <button type="button" className="wfg-feedback-launcher" onClick={startPicking}>
             <span aria-hidden="true">＋</span>
             {launcherLabel}
+          </button>
+          <button type="button" className="wfg-feedback-thread-list-launcher" onClick={() => setThreadListOpen(true)}>
+            他の人の投稿を見る <span>{threadsQuery.data?.length ?? 0}</span>
           </button>
         </>
       ) : null}
@@ -148,10 +157,19 @@ export function FeedbackOverlay({
         </div>
       ) : null}
       {mode === "composing" && picked ? (
-        <FeedbackComposer session={session} picked={picked} onClose={reset} />
+        <FeedbackComposer session={session} picked={picked} onClose={reset} onBrowse={() => { reset(); setThreadListOpen(true); }} />
       ) : null}
       {mode === "idle" && activeThreadId ? (
         <FeedbackThreadDrawer threadId={activeThreadId} onClose={closeThread} />
+      ) : null}
+      {mode === "idle" && threadListOpen && !activeThreadId ? (
+        <FeedbackThreadList
+          threads={threadsQuery.data ?? []}
+          projectId={projectId}
+          routes={routes}
+          onClose={() => setThreadListOpen(false)}
+          onOpen={(threadId) => { setThreadListOpen(false); openThread(threadId); }}
+        />
       ) : null}
       {mode === "idle" && contextMenu ? (
         <FeedbackContextMenu
@@ -174,6 +192,57 @@ export function FeedbackOverlay({
     </div>,
     document.body
   );
+}
+
+function FeedbackThreadList({ threads, projectId, routes, onClose, onOpen }: {
+  threads: FeedbackThread[];
+  projectId: string;
+  routes: readonly FeedbackRouteDefinition[];
+  onClose(): void;
+  onOpen(threadId: string): void;
+}) {
+  const panelRef = useDismissiblePanel<HTMLElement>(onClose);
+  const groups = useMemo(() => groupThreadsByScreen(threads, routes), [routes, threads]);
+  return <aside ref={panelRef} className="wfg-feedback-panel wfg-feedback-thread-list" role="dialog" aria-label="他の人の投稿">
+    <PanelHeader title="他の人の投稿" onClose={onClose} closeLabel="一覧を閉じる" />
+    <p className="wfg-feedback-note">投稿を選ぶと対象画面へ移動し、そのフィードバックを開きます。</p>
+    {groups.length > 0 ? <div className="wfg-feedback-thread-groups">{groups.map((group) => (
+      <section key={group.key} className="wfg-feedback-thread-group" aria-labelledby={`wfg-feedback-screen-${group.key}`}>
+        <header><h3 id={`wfg-feedback-screen-${group.key}`}>{group.label}</h3><span>{group.threads.length}件</span></header>
+        <ol>{group.threads.map((thread) => {
+          const deepLink = feedbackThreadDeepLink(thread, projectId);
+          const content = <><span><strong>#{thread.displayNumber} {thread.perspectiveLabel}</strong><small>{thread.status === "RESOLVED" ? "解決済み" : "未解決"}</small></span><p>{thread.messages[thread.messages.length - 1]?.body ?? "コメントはありません"}</p></>;
+          return <li key={thread.id}>{deepLink
+            ? <a href={deepLink}>{content}</a>
+            : <button type="button" onClick={() => onOpen(thread.id)}>{content}</button>}
+          </li>;
+        })}</ol>
+      </section>
+    ))}</div> : <p className="wfg-feedback-note">まだフィードバックはありません。</p>}
+  </aside>;
+}
+
+type ThreadScreenGroup = {
+  key: string;
+  label: string;
+  threads: FeedbackThread[];
+};
+
+function groupThreadsByScreen(
+  threads: FeedbackThread[],
+  routes: readonly FeedbackRouteDefinition[]
+): ThreadScreenGroup[] {
+  const groups = new Map<string, ThreadScreenGroup>();
+  for (const thread of threads) {
+    const storedRoute = thread.pageRoute ?? thread.evidence?.route ?? null;
+    const matchedRoute = storedRoute ? matchFeedbackRoute(routes, storedRoute) : null;
+    const key = matchedRoute?.pageId ?? "unknown-screen";
+    const label = matchedRoute?.label ?? "画面情報なし";
+    const group = groups.get(key) ?? { key, label, threads: [] };
+    group.threads.push(thread);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
 }
 
 function ReviewInactiveStatus({
@@ -231,23 +300,29 @@ function FeedbackContextMenu({
 function FeedbackComposer({
   session,
   picked,
-  onClose
+  onClose,
+  onBrowse
 }: {
   session: ReviewSession;
   picked: ReturnType<typeof useFeedbackState>["picked"] & {};
   onClose: () => void;
+  onBrowse: () => void;
 }) {
   const panelRef = useDismissiblePanel<HTMLElement>(onClose);
   const {
     notify,
     currentPageId,
+    currentPath,
     participantName,
     saveParticipantName
   } = useFeedbackPluginContext();
-  const activePerspectives = useMemo(
-    () => session.perspectives.filter((perspective) => perspective.status === "ACTIVE"),
-    [session.perspectives]
-  );
+  const activePerspectives = useMemo(() => {
+    const globallyActive = session.perspectives.filter((perspective) => perspective.status === "ACTIVE");
+    const scope = resolveCurrentReviewScope(session, currentPageId, currentPath);
+    if (!scope?.perspectiveCodes?.length) return globallyActive;
+    const assigned = new Set(scope.perspectiveCodes);
+    return globallyActive.filter((perspective) => assigned.has(perspective.code));
+  }, [currentPageId, currentPath, session]);
   const [perspectiveCode, setPerspectiveCode] = useState(activePerspectives[0]?.code ?? "");
   const [participantNameDraft, setParticipantNameDraft] = useState(participantName ?? "");
   const [body, setBody] = useState("");
@@ -309,6 +384,7 @@ function FeedbackComposer({
       <p className="wfg-feedback-target-summary">
         対象: <code>{describeTarget(picked.target)}</code>
       </p>
+      <button type="button" className="wfg-feedback-text-button wfg-feedback-browse-threads" onClick={onBrowse}>他の人のフィードバックを見る</button>
       {picked.evidence ? (
         <div className="wfg-feedback-evidence">
           <p>

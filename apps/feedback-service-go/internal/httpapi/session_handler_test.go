@@ -15,7 +15,7 @@ func TestDecodeSessionCreateDefaultsAndNullableValues(t *testing.T) {
       "manifestVersion":"v1",
       "title":"レビュー",
       "description":null,
-      "scopes":[{"pageKey":"home","routeTemplate":null,"reviewable":false}],
+      "scopes":[{"pageKey":"home","routeTemplate":null,"reviewable":false,"perspectiveCodes":["ux"]}],
       "perspectives":[{"code":"ux","label":"UX","status":"active","guidance":null}]
     }`))
 	if err != nil {
@@ -24,7 +24,8 @@ func TestDecodeSessionCreateDefaultsAndNullableValues(t *testing.T) {
 	if request.Status != session.StatusDraft || request.OutOfScopePosting != session.OutOfScopeWarn || request.Description != nil {
 		t.Fatalf("default/nullが不正です: %+v", request)
 	}
-	if len(request.Scopes) != 1 || request.Scopes[0].Reviewable || request.Scopes[0].RouteTemplate != nil {
+	if len(request.Scopes) != 1 || request.Scopes[0].Reviewable || request.Scopes[0].RouteTemplate != nil ||
+		len(request.Scopes[0].PerspectiveCodes) != 1 || request.Scopes[0].PerspectiveCodes[0] != "ux" {
 		t.Fatalf("scopeが不正です: %+v", request.Scopes)
 	}
 	if len(request.Perspectives) != 1 || request.Perspectives[0].Guidance != nil {
@@ -71,13 +72,14 @@ func TestDecodeSessionPatchDistinguishesAbsentAndNull(t *testing.T) {
 func TestDecodeSessionPatchAcceptsScopeAndPerspectiveForms(t *testing.T) {
 	t.Parallel()
 	patch, err := decodeSessionPatch([]byte(`{
-      "scopes":[{"pageKey":"orders.list","routeTemplate":"/orders","reviewable":true}],
+      "scopes":[{"pageKey":"orders.list","routeTemplate":"/orders","reviewable":true,"perspectiveCodes":["USABILITY"]}],
       "perspectives":[{"code":"USABILITY","label":"操作性","status":"active","guidance":"手数を確認"}]
     }`), 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if patch.Scopes == nil || len(*patch.Scopes) != 1 || (*patch.Scopes)[0].PageKey != "orders.list" {
+	if patch.Scopes == nil || len(*patch.Scopes) != 1 || (*patch.Scopes)[0].PageKey != "orders.list" ||
+		len((*patch.Scopes)[0].PerspectiveCodes) != 1 || (*patch.Scopes)[0].PerspectiveCodes[0] != "USABILITY" {
 		t.Fatalf("scopeが不正です: %+v", patch.Scopes)
 	}
 	if patch.Perspectives == nil || len(*patch.Perspectives) != 1 || (*patch.Perspectives)[0].Code != "USABILITY" {

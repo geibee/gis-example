@@ -107,6 +107,52 @@ describe("Feedback API v1 互換adapter", () => {
     expect(fetch.mock.calls.filter(([url]) => String(url).endsWith("/capabilities"))).toHaveLength(1);
   });
 
+  it("直接リンクではレビュー設定の日本語名を取得してからthreadを返す", async () => {
+    const requests: string[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/capabilities")) return Response.json(capabilities);
+      if (url.endsWith(`/threads/${thread().id}`)) return Response.json(thread());
+      if (url.endsWith(`/sessions/${session.id}`)) return Response.json(session);
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const client = createFeedbackV1ApiClient({
+      apiBaseUrl: "/feedback/v1",
+      applicationKey: "web-gis",
+      environmentKey: "local",
+      routes: [{ pageId: "lands.detail", path: "/lands/{id}", label: "土地詳細" }],
+      getAccessToken: () => "token",
+      fetch
+    });
+
+    const result = await client.getFeedbackThread(thread().id);
+
+    expect(result.perspectiveLabel).toBe("使いやすさ");
+    expect(requests.some((url) => url.endsWith(`/sessions/${session.id}`))).toBe(true);
+  });
+
+  it("設定に存在しない内部コードを画面へ露出しない", async () => {
+    const inconsistentSession = { ...session, perspectives: [] };
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/capabilities")) return Response.json(capabilities);
+      if (url.endsWith(`/threads/${thread().id}`)) return Response.json(thread());
+      if (url.endsWith(`/sessions/${session.id}`)) return Response.json(inconsistentSession);
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const client = createFeedbackV1ApiClient({
+      apiBaseUrl: "/feedback/v1",
+      applicationKey: "web-gis",
+      environmentKey: "local",
+      routes: [{ pageId: "lands.detail", path: "/lands/{id}", label: "土地詳細" }],
+      getAccessToken: () => "token",
+      fetch
+    });
+
+    expect((await client.getFeedbackThread(thread().id)).perspectiveLabel).toBe("その他の観点");
+  });
+
   it("投稿をv1 location target evidenceへ変換しETagでstatusを更新する", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

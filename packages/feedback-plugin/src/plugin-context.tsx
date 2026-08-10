@@ -49,6 +49,7 @@ type FeedbackPluginContextValue = {
   api: FeedbackApiClient;
   projectId: string;
   appVersion: string;
+  routes: readonly FeedbackRouteDefinition[];
   currentPageId?: string;
   currentPath: string;
   participantName: string | null;
@@ -146,13 +147,14 @@ export function FeedbackPluginProvider({
       api,
       projectId,
       appVersion,
+      routes,
       currentPageId: activeRoute?.pageId,
       currentPath: resolvedCurrentPath,
       participantName,
       saveParticipantName,
       notify
     }),
-    [activeRoute, api, appVersion, notify, participantName, projectId, resolvedCurrentPath, saveParticipantName]
+    [activeRoute, api, appVersion, notify, participantName, projectId, resolvedCurrentPath, routes, saveParticipantName]
   );
 
   return (

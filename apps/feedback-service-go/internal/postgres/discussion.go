@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -194,12 +195,13 @@ WHERE application_id = $1::uuid AND manifest_version = $2`, input.Scope.Applicat
 			return fmt.Errorf("sanitized locationを読み取れません: %w", err)
 		}
 		var reviewable bool
-		err = tx.QueryRow(txCtx, `SELECT reviewable
+		var scopePerspectiveCodes []string
+		err = tx.QueryRow(txCtx, `SELECT reviewable, perspective_codes
 FROM feedback.review_scopes
 WHERE session_id = $1::uuid AND page_key = $2
   AND (route_template IS NULL OR route_template = $3)
 ORDER BY route_template NULLS FIRST
-LIMIT 1`, input.SessionID, locationIdentity.PageKey, locationIdentity.RouteTemplate).Scan(&reviewable)
+LIMIT 1`, input.SessionID, locationIdentity.PageKey, locationIdentity.RouteTemplate).Scan(&reviewable, &scopePerspectiveCodes)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("session scopeを確認できません: %w", err)
 		}
@@ -218,6 +220,9 @@ LIMIT 1`, input.SessionID, locationIdentity.PageKey, locationIdentity.RouteTempl
 		}
 		if !perspectiveActive {
 			return discussionInvalid("request.invalid", "activeなperspectiveCodeを指定してください")
+		}
+		if err == nil && reviewable && len(scopePerspectiveCodes) > 0 && !slices.Contains(scopePerspectiveCodes, input.Request.PerspectiveCode) {
+			return discussionInvalid("request.invalid", "この画面で確認する観点を指定してください")
 		}
 		if input.Evidence != nil {
 			if input.EvidenceMaximum <= 0 {

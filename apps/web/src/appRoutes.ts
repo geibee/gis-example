@@ -58,13 +58,14 @@ export const feedbackApplicationManifest = defineFeedbackManifest({
   schemaVersion: "1",
   applicationKey: "web-gis",
   displayName: "Web GIS MVP",
-  manifestVersion: "3",
+  manifestVersion: "4",
   routes: screenDefinitions.flatMap((screen) => [
     {
       pageKey: screen.meta.pageId,
       template: screen.basePath,
       label: screen.listLabel,
-      group: "一覧・管理画面"
+      group: "一覧・管理画面",
+      queryParameters: { projectId: { persistence: "store" as const } }
     },
     ...(screen.detailMeta
       ? [{
@@ -72,7 +73,8 @@ export const feedbackApplicationManifest = defineFeedbackManifest({
           template: `${screen.basePath}/{id}`,
           label: screen.detailMeta.title,
           group: "詳細画面",
-          parameters: { id: { persistence: "store" as const } }
+          parameters: { id: { persistence: "store" as const } },
+          queryParameters: { projectId: { persistence: "store" as const } }
         }]
       : [])
   ])
@@ -83,5 +85,6 @@ export const feedbackRoutes = feedbackApplicationManifest.routes.map((route) => 
   pageId: route.pageKey,
   path: route.template,
   label: route.label,
-  ...(route.group ? { group: route.group } : {})
+  ...(route.group ? { group: route.group } : {}),
+  ...(route.queryParameters ? { queryParameters: route.queryParameters } : {})
 }));

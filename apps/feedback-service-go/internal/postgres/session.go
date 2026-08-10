@@ -211,9 +211,10 @@ WHERE tenant_id = $1::uuid AND principal_id = $2 AND endpoint = $3 AND idempoten
 		}
 		for _, reviewScope := range request.Scopes {
 			if _, err := tx.Exec(txCtx, `INSERT INTO feedback.review_scopes (
-    id, session_id, page_key, route_template, reviewable
-) VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
+    id, session_id, page_key, route_template, reviewable, perspective_codes
+) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
 				uuid.NewString(), sessionID, reviewScope.PageKey, optionalString(reviewScope.RouteTemplate), reviewScope.Reviewable,
+				reviewScope.PerspectiveCodes,
 			); err != nil {
 				return fmt.Errorf("session scopeを登録できません: %w", err)
 			}
@@ -302,9 +303,10 @@ WHERE id = $13::uuid AND version = $14`,
 			}
 			for _, reviewScope := range *patch.Scopes {
 				if _, err := tx.Exec(txCtx, `INSERT INTO feedback.review_scopes (
-    id, session_id, page_key, route_template, reviewable
-) VALUES ($1::uuid, $2::uuid, $3, $4, $5)`, uuid.NewString(), sessionID,
-					reviewScope.PageKey, optionalString(reviewScope.RouteTemplate), reviewScope.Reviewable); err != nil {
+    id, session_id, page_key, route_template, reviewable, perspective_codes
+) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`, uuid.NewString(), sessionID,
+					reviewScope.PageKey, optionalString(reviewScope.RouteTemplate), reviewScope.Reviewable,
+					reviewScope.PerspectiveCodes); err != nil {
 					return fmt.Errorf("session scopeを更新できません: %w", err)
 				}
 			}
@@ -383,7 +385,7 @@ func scanSession(row sessionScanner) (sessiondomain.Session, error) {
 }
 
 func loadSessionChildren(ctx context.Context, queryer sessionQueryer, result *sessiondomain.Session) error {
-	scopeRows, err := queryer.Query(ctx, `SELECT page_key, route_template, reviewable
+	scopeRows, err := queryer.Query(ctx, `SELECT page_key, route_template, reviewable, perspective_codes
 FROM feedback.review_scopes WHERE session_id = $1::uuid
 ORDER BY page_key, route_template NULLS FIRST`, result.ID)
 	if err != nil {
@@ -391,7 +393,7 @@ ORDER BY page_key, route_template NULLS FIRST`, result.ID)
 	}
 	for scopeRows.Next() {
 		var value sessiondomain.Scope
-		if err := scopeRows.Scan(&value.PageKey, &value.RouteTemplate, &value.Reviewable); err != nil {
+		if err := scopeRows.Scan(&value.PageKey, &value.RouteTemplate, &value.Reviewable, &value.PerspectiveCodes); err != nil {
 			scopeRows.Close()
 			return fmt.Errorf("session scopeを読み取れません: %w", err)
 		}

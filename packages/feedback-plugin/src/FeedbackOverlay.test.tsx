@@ -73,7 +73,10 @@ function renderHost(fetchMock: typeof fetch, children?: ReactNode, overlayProps:
       apiBaseUrl="https://feedback.example.test"
       projectId="p1"
       appVersion="test-version"
-      routes={[{ pageId: "host.screen.detail", path: "/", label: "テスト画面" }]}
+      routes={[
+        { pageId: "host.screen.detail", path: "/", label: "テスト画面" },
+        { pageId: "lands.detail", path: "/lands/{id}", label: "土地詳細" }
+      ]}
       currentPath="/"
       getAccessToken={() => "token"}
       onNotification={notifications}
@@ -106,6 +109,10 @@ describe("FeedbackOverlay", () => {
     const guidedSession: ReviewSession = {
       ...session,
       description: "登録から承認までの流れを確認してください。",
+      perspectives: [
+        ...session.perspectives,
+        { code: "MAP", label: "地図操作", displayOrder: 3, status: "ACTIVE" }
+      ],
       scopes: [
         {
           id: "scope-1",
@@ -113,7 +120,8 @@ describe("FeedbackOverlay", () => {
           route: "/",
           description: "テスト画面",
           reviewable: true,
-          displayOrder: 1
+          displayOrder: 1,
+          perspectiveCodes: ["FLOW"]
         }
       ]
     };
@@ -127,8 +135,10 @@ describe("FeedbackOverlay", () => {
 
     const guide = await screen.findByRole("dialog", { name: "受入レビュー" });
     expect(within(guide).getByText("登録から承認までの流れを確認してください。")).toBeInTheDocument();
-    expect(within(guide).getByRole("heading", { name: "今回、確認してほしいこと" })).toBeInTheDocument();
-    expect(within(guide).getByRole("heading", { name: "今回は、確認しなくてよいこと" })).toBeInTheDocument();
+    const requestedHeading = within(guide).getByRole("heading", { name: "今回確認してほしいこと" });
+    expect(requestedHeading).toBeInTheDocument();
+    expect(within(requestedHeading.closest("section")!).queryByText("地図操作")).not.toBeInTheDocument();
+    expect(within(guide).getByRole("heading", { name: "今回は確認しなくてよいこと" })).toBeInTheDocument();
     expect(within(guide).getByText("テスト画面")).toBeInTheDocument();
     await user.click(within(guide).getByRole("button", { name: "確認してレビューを始める" }));
 
@@ -332,6 +342,27 @@ describe("FeedbackOverlay", () => {
     expect(submittedReply).toMatchObject({ body: "対応します", participantName: "端末利用者" });
     await user.click(await within(drawer).findByRole("button", { name: "解決済みにする" }));
     expect(await within(drawer).findByText("解決済み")).toBeInTheDocument();
+  });
+
+  it("他の人の投稿を画面ごとに表示し、対象画面のスレッドへ移動できる", async () => {
+    const linkedThread = { ...baseThread, pageRoute: "/lands/L-1?tab=owner" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/review-sessions?")) return response([session]);
+      if (url.endsWith(`/api/review-sessions/${session.id}/threads`)) return response([linkedThread]);
+      throw new Error(`未定義の要求: ${url}`);
+    }) as typeof fetch;
+    const { user } = renderHost(fetchMock);
+
+    await user.click(await screen.findByRole("button", { name: "他の人の投稿を見る 1" }));
+    const list = await screen.findByRole("dialog", { name: "他の人の投稿" });
+    expect(within(list).getByRole("heading", { name: "土地詳細" })).toBeInTheDocument();
+    expect(within(list).getByText("1件")).toBeInTheDocument();
+    expect(within(list).getByText("保存ボタンを確認してください")).toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: /#1 業務フロー/ })).toHaveAttribute(
+      "href",
+      "/lands/L-1?tab=owner&projectId=p1&feedbackThread=thread-1"
+    );
   });
 
   it("APIの降順一覧でも永続化された表示番号を変えない", async () => {

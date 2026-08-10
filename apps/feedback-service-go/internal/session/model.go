@@ -36,9 +36,10 @@ func (err *ValidationError) Error() string { return err.Detail }
 func (err *ValidationError) Unwrap() error { return ErrInvalid }
 
 type Scope struct {
-	PageKey       string  `json:"pageKey"`
-	RouteTemplate *string `json:"routeTemplate"`
-	Reviewable    bool    `json:"reviewable"`
+	PageKey          string   `json:"pageKey"`
+	RouteTemplate    *string  `json:"routeTemplate"`
+	Reviewable       bool     `json:"reviewable"`
+	PerspectiveCodes []string `json:"perspectiveCodes"`
 }
 
 type Perspective struct {

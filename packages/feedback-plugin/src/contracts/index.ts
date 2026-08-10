@@ -6,7 +6,8 @@ export type { components, operations, paths } from "./generated";
 type Schemas = components["schemas"];
 
 export type Me = Schemas["Me"];
-export type ReviewSession = Schemas["ReviewSession"];
+export type ReviewScope = Schemas["ReviewScope"] & { perspectiveCodes?: string[] };
+export type ReviewSession = Omit<Schemas["ReviewSession"], "scopes"> & { scopes: ReviewScope[] };
 export type FeedbackThread = Schemas["FeedbackThread"];
 export type FeedbackMessage = Schemas["FeedbackMessage"];
 export type FeedbackMessageCreateRequest = Schemas["FeedbackMessageCreateRequest"];

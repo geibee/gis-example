@@ -163,13 +163,26 @@ func ValidateChildren(scopes []Scope, perspectives []Perspective) error {
 		if scope.RouteTemplate != nil && utf16Length(*scope.RouteTemplate) > 500 {
 			return invalid("request.invalid", "scope.routeTemplate が長すぎます")
 		}
+		if len(scope.PerspectiveCodes) > 100 {
+			return invalid("request.invalid", "scope.perspectiveCodes は100件以下で指定してください")
+		}
+		assigned := make(map[string]struct{}, len(scope.PerspectiveCodes))
+		for _, code := range scope.PerspectiveCodes {
+			if _, err := ValidateKey(code, "scope.perspectiveCodes", 100); err != nil {
+				return err
+			}
+			if _, exists := assigned[code]; exists {
+				return invalid("request.invalid", "scope.perspectiveCodes が重複しています")
+			}
+			assigned[code] = struct{}{}
+		}
 	}
-	perspectiveCodes := make(map[string]struct{}, len(perspectives))
+	perspectiveCodes := make(map[string]string, len(perspectives))
 	for _, perspective := range perspectives {
 		if _, exists := perspectiveCodes[perspective.Code]; exists {
 			return invalid("request.invalid", "perspective code が重複しています")
 		}
-		perspectiveCodes[perspective.Code] = struct{}{}
+		perspectiveCodes[perspective.Code] = perspective.Status
 		if _, err := ValidateKey(perspective.Code, "perspective.code", 100); err != nil {
 			return err
 		}
@@ -182,6 +195,17 @@ func ValidateChildren(scopes []Scope, perspectives []Perspective) error {
 		}
 		if perspective.Guidance != nil && utf16Length(*perspective.Guidance) > 5000 {
 			return invalid("request.invalid", "perspective.guidance が長すぎます")
+		}
+	}
+	for _, scope := range scopes {
+		for _, code := range scope.PerspectiveCodes {
+			status, exists := perspectiveCodes[code]
+			if !exists {
+				return invalid("request.invalid", "scope.perspectiveCodes に未定義の観点があります")
+			}
+			if status != PerspectiveActive {
+				return invalid("request.invalid", "scope.perspectiveCodes には今回確認する観点だけを指定してください")
+			}
 		}
 	}
 	return nil

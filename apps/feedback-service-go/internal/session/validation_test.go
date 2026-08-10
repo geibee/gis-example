@@ -31,6 +31,16 @@ func TestValidateCreateRejectsInvalidRequests(t *testing.T) {
 		"perspective duplicate": func(value *CreateRequest) {
 			value.Perspectives = append(value.Perspectives, value.Perspectives[0])
 		},
+		"scope perspective unknown": func(value *CreateRequest) {
+			value.Scopes[0].PerspectiveCodes = []string{"unknown"}
+		},
+		"scope perspective inactive": func(value *CreateRequest) {
+			value.Perspectives[0].Status = PerspectiveFuture
+			value.Scopes[0].PerspectiveCodes = []string{"ux"}
+		},
+		"scope perspective duplicate": func(value *CreateRequest) {
+			value.Scopes[0].PerspectiveCodes = []string{"ux", "ux"}
+		},
 	}
 	for name, mutate := range tests {
 		name, mutate := name, mutate
@@ -95,7 +105,7 @@ func TestValidatePatchValidatesReplacementChildren(t *testing.T) {
 	if err := ValidatePatch(patch, Session{}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("不正scopeを受理しました: %v", err)
 	}
-	validScopes := []Scope{{PageKey: "orders.list", Reviewable: true}}
+	validScopes := []Scope{{PageKey: "orders.list", Reviewable: true, PerspectiveCodes: []string{"USABILITY"}}}
 	validPerspectives := []Perspective{{Code: "USABILITY", Label: "操作性", Status: PerspectiveActive}}
 	patch = Patch{ExpectedVersion: 1, Scopes: &validScopes, Perspectives: &validPerspectives}
 	if err := ValidatePatch(patch, Session{}); err != nil {

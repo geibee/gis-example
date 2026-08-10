@@ -14,13 +14,13 @@ describe("Web GIS FeedbackHostAdapter", () => {
     ]));
   });
 
-  it("現在URLから生queryを捨て、manifest登録済みlocationを返す", () => {
+  it("現在URLからmanifest許可済みqueryだけをlocationへ保存する", () => {
     const adapter = createWebGisFeedbackHostAdapter({
       environmentKey: "test",
       release: "test-release",
       getWorkspaceKey: () => "project-1",
       getPathname: () => "/lands/L-1",
-      getSearch: () => "?token=secret&email=user@example.com",
+      getSearch: () => "?projectId=project-1&token=secret&email=user@example.com",
       getAccessToken: () => "token",
       navigate: vi.fn()
     });
@@ -34,7 +34,8 @@ describe("Web GIS FeedbackHostAdapter", () => {
       schemaVersion: "1",
       pageKey: "lands.detail",
       routeTemplate: "/lands/{id}",
-      pathParameters: { id: "L-1" }
+      pathParameters: { id: "L-1" },
+      queryParameters: { projectId: "project-1" }
     });
   });
 

@@ -677,6 +677,8 @@ export interface components {
             pageKey: string;
             routeTemplate?: string | null;
             reviewable: boolean;
+            /** @description この画面で確認する観点コード。空配列または省略時は有効な観点すべて。 */
+            perspectiveCodes?: string[];
         };
         FeedbackSessionPerspectiveV1: {
             code: string;

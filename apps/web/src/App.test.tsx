@@ -84,8 +84,8 @@ describe("レビュー参加者向け案内", () => {
 
     const guide = await screen.findByRole("dialog", { name: "第1回 業務フローレビュー" });
     expect(guide).toHaveTextContent("案件検索から詳細確認までの流れを確認してください");
-    expect(guide).toHaveTextContent("今回、確認してほしいこと");
-    expect(guide).toHaveTextContent("今回は、確認しなくてよいこと");
+    expect(guide).toHaveTextContent("今回確認してほしいこと");
+    expect(guide).toHaveTextContent("今回は確認しなくてよいこと");
     expect(guide).toHaveTextContent("今回の対象画面");
     expect(screen.queryByRole("button", { name: "レビュー" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", {

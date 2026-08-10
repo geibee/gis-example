@@ -1426,6 +1426,12 @@ components:
         pageKey: { type: string, minLength: 1, maxLength: 100 }
         routeTemplate: { type: [string, "null"], maxLength: 500 }
         reviewable: { type: boolean }
+        perspectiveCodes:
+          type: array
+          uniqueItems: true
+          maxItems: 100
+          description: この画面で確認する観点コード。空配列または省略時は有効な観点すべて。
+          items: { type: string, minLength: 1, maxLength: 100 }
 
     FeedbackSessionPerspectiveV1:
       type: object
