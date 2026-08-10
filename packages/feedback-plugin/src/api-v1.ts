@@ -44,6 +44,7 @@ export function createFeedbackV1ApiClient(options: FeedbackV1ApiClientOptions): 
   const threadEtags = new Map<string, string>();
   const messageEtags = new Map<string, string>();
   const perspectiveLabels = new Map<string, string>();
+  const routeLabels = new Map(options.routes.map((route) => [route.pageId, route.label]));
   const sessionWorkspaces = new Map<string, string>();
   let activeWorkspace = "";
   let compatibilityCheck: Promise<void> | null = null;
@@ -99,7 +100,7 @@ export function createFeedbackV1ApiClient(options: FeedbackV1ApiClientOptions): 
         perspectiveLabels.set(`${session.id}:${item.code}`, item.label);
       }));
       page.items.forEach((session) => sessionWorkspaces.set(session.id, session.externalWorkspaceKey));
-      return page.items.map(toLegacySession);
+      return page.items.map((session) => toLegacySession(session, routeLabels));
     }),
     getFeedbackThreads: (reviewSessionId) => run(async () => {
       const page = (await transport.request<Schemas["FeedbackThreadPage"]>(
@@ -173,7 +174,7 @@ function toLegacyMe(value: MeV1): Me {
   };
 }
 
-function toLegacySession(value: SessionV1): ReviewSession {
+function toLegacySession(value: SessionV1, routeLabels: ReadonlyMap<string, string>): ReviewSession {
   return {
     id: value.id,
     projectId: value.externalWorkspaceKey,
@@ -201,7 +202,7 @@ function toLegacySession(value: SessionV1): ReviewSession {
       id: `${value.id}:${scope.pageKey}`,
       pageId: scope.pageKey,
       route: scope.routeTemplate ?? null,
-      description: null,
+      description: routeLabels.get(scope.pageKey) ?? null,
       reviewable: scope.reviewable,
       displayOrder: index
     }))

@@ -28,26 +28,31 @@
 .feedback-admin-summary div { border-radius: .4rem; background: #f8fafc; padding: .65rem; }
 .feedback-admin-summary dt { color: #64748b; font-size: .78rem; }
 .feedback-admin-summary dd { margin: .2rem 0 0; font-weight: 600; }
-.feedback-admin-dialog-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 1.5rem; background: rgb(15 23 42 / .55); }
-.feedback-admin-dialog { width: min(68rem, 100%); max-height: calc(100vh - 3rem); overflow: auto; border-radius: .75rem; background: #fff; box-shadow: 0 24px 70px rgb(15 23 42 / .3); }
-.feedback-admin-dialog > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin: 0; padding: 1rem 1.25rem; border-bottom: 1px solid #e2e8f0; background: #fff; }
+.feedback-admin-dialog-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 1rem; background: rgb(15 23 42 / .62); backdrop-filter: blur(2px); }
+.feedback-admin-dialog { width: min(92rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; border: 1px solid #cbd5e1; border-radius: 1rem; background: #fff; box-shadow: 0 28px 80px rgb(15 23 42 / .38); }
+.feedback-admin-dialog > header { position: sticky; top: 0; z-index: 2; display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin: 0; padding: 1.25rem 2rem; border-bottom: 1px solid #e2e8f0; background: rgb(255 255 255 / .97); }
 .feedback-admin-dialog > header h2, .feedback-admin-dialog > header p { margin-block: 0; }
-.feedback-admin-session-form { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem 1rem; padding: 1.25rem; }
+.feedback-admin-dialog > header h2 { font-size: 1.45rem; }
+.feedback-admin-dialog > header > button { min-width: 2.5rem; min-height: 2.5rem; border-radius: 999px; font-size: 1.35rem; }
+.feedback-admin-session-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem 1.25rem; padding: 1.5rem 2rem 2rem; }
 .feedback-admin-session-form .wide { grid-column: 1 / -1; }
-.feedback-admin-session-form fieldset { border: 1px solid #cbd5e1; border-radius: .5rem; padding: 1rem; }
-.feedback-admin-session-form footer { display: flex; justify-content: flex-end; gap: .5rem; border-top: 1px solid #e2e8f0; padding-top: 1rem; }
+.feedback-admin-session-form fieldset { min-width: 0; border: 1px solid #cbd5e1; border-radius: .75rem; padding: 1.25rem; background: #fbfdff; }
+.feedback-admin-session-form legend { padding-inline: .4rem; font-size: 1.05rem; font-weight: 700; }
+.feedback-admin-session-form footer { position: sticky; bottom: -2rem; z-index: 1; display: flex; justify-content: flex-end; gap: .75rem; margin: .5rem -2rem -2rem; border-top: 1px solid #e2e8f0; padding: 1rem 2rem; background: rgb(255 255 255 / .97); }
+.feedback-admin-session-form footer button { min-width: 9rem; min-height: 2.75rem; }
 .feedback-admin-perspective-list { display: grid; gap: .5rem; }
-.feedback-admin-perspective-row { display: grid; grid-template-columns: minmax(12rem, 1.2fr) minmax(9rem, .7fr) minmax(14rem, 1fr); gap: .75rem; align-items: end; border-top: 1px solid #e2e8f0; padding-top: .5rem; }
+.feedback-admin-perspective-row { display: grid; grid-template-columns: minmax(13rem, 1.1fr) minmax(10rem, .65fr) minmax(18rem, 1.4fr); gap: 1rem; align-items: end; border-top: 1px solid #e2e8f0; padding: .75rem; }
+.feedback-admin-perspective-row:hover { border-radius: .5rem; background: #f8fafc; }
 .feedback-admin-perspective-row > span { align-self: center; }
 .feedback-admin-perspective-row small { display: block; color: #64748b; font-size: .78rem; }
 .feedback-admin-perspective-row label { margin: 0; }
 .feedback-admin-selection-actions { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; }
 .feedback-admin-selection-actions span { margin-right: auto; color: #526175; }
-.feedback-admin-route-groups { display: grid; gap: .75rem; }
-.feedback-admin-route-groups section { border-top: 1px solid #e2e8f0; }
-.feedback-admin-route-groups h3 { margin-block: .6rem .25rem; }
-.feedback-admin-route-groups label { display: flex; align-items: center; gap: .6rem; margin: 0; padding: .45rem; border-radius: .35rem; }
-.feedback-admin-route-groups label:hover { background: #f8fafc; }
+.feedback-admin-route-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; }
+.feedback-admin-route-groups section { border: 1px solid #e2e8f0; border-radius: .65rem; padding: .75rem; background: #fff; }
+.feedback-admin-route-groups h3 { margin-block: 0 .4rem; }
+.feedback-admin-route-groups label { display: flex; align-items: center; gap: .7rem; margin: 0; padding: .6rem; border-radius: .45rem; }
+.feedback-admin-route-groups label:hover { background: #eff6ff; }
 .feedback-admin-route-groups label input { width: auto; margin: 0; }
 .feedback-admin-route-groups label span { display: grid; }
 .feedback-admin-route-groups code { margin: 0; color: #64748b; font-size: .78rem; }
@@ -73,6 +78,8 @@
 .feedback-admin textarea { min-height: 8rem; }
 .feedback-admin label { margin-block: .65rem; font-weight: 600; }
 .feedback-admin label input, .feedback-admin label select, .feedback-admin label textarea { margin-block: .25rem 0; font-weight: 400; }
+.feedback-admin input, .feedback-admin select, .feedback-admin textarea { border: 1px solid #94a3b8; border-radius: .45rem; padding: .65rem .75rem; color: #172033; background: #fff; font: inherit; }
+.feedback-admin input:focus, .feedback-admin select:focus, .feedback-admin textarea:focus { border-color: #2563eb; outline: 3px solid rgb(37 99 235 / .16); }
 .feedback-admin label small { display: block; color: #64748b; font-size: .8rem; font-weight: 400; margin-top: .2rem; }
 .feedback-admin-inline-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: .65rem; align-items: end; }
 .feedback-admin-inline-form label { margin: 0; }
@@ -84,4 +91,5 @@
 .feedback-admin code { display: block; overflow-wrap: anywhere; margin-block: .35rem; }
 .feedback-admin table { width: 100%; border-collapse: collapse; }
 .feedback-admin th, .feedback-admin td { border: 1px solid var(--feedback-admin-border, #cbd5e1); padding: .35rem; text-align: start; }
-@media (max-width: 760px) { .feedback-admin-review-layout { grid-template-columns: 1fr; } .feedback-admin-session-sidebar { position: static; } .feedback-admin-thread-filters { grid-template-columns: 1fr 1fr; } .feedback-admin-inline-form, .feedback-admin-session-form, .feedback-admin-perspective-row { grid-template-columns: 1fr; } .feedback-admin-session-form .wide { grid-column: auto; } .feedback-admin-summary { grid-template-columns: 1fr 1fr; } .feedback-admin-card-heading { display: grid; } .feedback-admin-manifest-routes li { grid-template-columns: 1fr; gap: .35rem; } .feedback-admin-manifest-routes li code { text-align: start; } .feedback-admin-dialog-backdrop { padding: .5rem; } .feedback-admin-dialog { max-height: calc(100vh - 1rem); } }
+@media (max-width: 980px) { .feedback-admin-session-form { grid-template-columns: 1fr 1fr; } .feedback-admin-perspective-row { grid-template-columns: minmax(12rem, 1fr) minmax(9rem, .7fr); } .feedback-admin-perspective-row > label:last-child { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .feedback-admin-review-layout { grid-template-columns: 1fr; } .feedback-admin-session-sidebar { position: static; } .feedback-admin-thread-filters { grid-template-columns: 1fr 1fr; } .feedback-admin-inline-form, .feedback-admin-session-form, .feedback-admin-perspective-row { grid-template-columns: 1fr; } .feedback-admin-session-form .wide, .feedback-admin-perspective-row > label:last-child { grid-column: auto; } .feedback-admin-summary { grid-template-columns: 1fr 1fr; } .feedback-admin-card-heading { display: grid; } .feedback-admin-manifest-routes li { grid-template-columns: 1fr; gap: .35rem; } .feedback-admin-manifest-routes li code { text-align: start; } .feedback-admin-dialog-backdrop { padding: .35rem; } .feedback-admin-dialog { width: calc(100vw - .7rem); max-height: calc(100vh - .7rem); border-radius: .65rem; } .feedback-admin-dialog > header, .feedback-admin-session-form { padding-inline: 1rem; } .feedback-admin-session-form footer { margin-inline: -1rem; padding-inline: 1rem; } .feedback-admin-selection-actions { align-items: stretch; flex-wrap: wrap; } .feedback-admin-selection-actions span { flex-basis: 100%; } }

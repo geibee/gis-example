@@ -92,6 +92,11 @@ describe("Feedback API v1 互換adapter", () => {
 
     expect(sessions[0]).toMatchObject({ projectId: "project-1", status: "open" });
     expect(sessions[0].perspectives[0]).toMatchObject({ label: "使いやすさ", status: "ACTIVE" });
+    expect(sessions[0].scopes[0]).toMatchObject({
+      pageId: "lands.detail",
+      route: "/lands/{id}",
+      description: "土地詳細"
+    });
     expect(threads[0]).toMatchObject({
       projectId: "project-1",
       pageRoute: "/lands/L-1",
