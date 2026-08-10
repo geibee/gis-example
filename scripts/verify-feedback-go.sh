@@ -14,7 +14,7 @@ command -v rg >/dev/null 2>&1 || fail "ripgrepが見つかりません"
 command -v comm >/dev/null 2>&1 || fail "commが見つかりません"
 [[ -f apps/feedback-service-go/go.mod ]] || fail "Go moduleがありません"
 [[ -f apps/feedback-service-go/internal/contract/openapi.gen.go ]] || fail "OpenAPI生成物がありません"
-rg -q '^FROM --platform=\$BUILDPLATFORM golang:1\.26\.5-alpine@sha256:[0-9a-f]{64} AS build$' \
+rg -q '^FROM docker\.io/library/golang:1\.26\.5-alpine@sha256:[0-9a-f]{64} AS build$' \
   apps/feedback-service-go/Dockerfile || fail "Go builder imageがGo 1.26.5のdigest固定ではありません"
 rg -q '^FROM gcr\.io/distroless/static-debian12:nonroot@sha256:[0-9a-f]{64}$' \
   apps/feedback-service-go/Dockerfile || fail "Go runtime imageがnonroot distrolessのdigest固定ではありません"
