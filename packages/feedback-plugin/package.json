@@ -30,8 +30,8 @@
     "generate:contracts": "openapi-typescript ../../apps/api/openapi.yaml -o src/contracts/generated.ts"
   },
   "dependencies": {
-    "@feedback/contracts": "1.0.0-alpha.1",
-    "@feedback/core": "1.0.0-alpha.1",
+    "@feedback/contracts": "file:../../vendor/feedback-sdk/feedback-contracts-1.0.0-alpha.1.tgz",
+    "@feedback/core": "file:../../vendor/feedback-sdk/feedback-core-1.0.0-alpha.1.tgz",
     "html-to-image": "1.11.13"
   },
   "peerDependencies": {

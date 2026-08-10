@@ -28,17 +28,20 @@ Compose providerを利用するため、`depends_on.condition` とprofilesに対
 podman compose -f infra/docker-compose.yml up --build
 ```
 
-Feedback Serviceと管理画面も起動する場合は、どちらのランタイムでも
-`--profile feedback` を追加します。
+Feedback Serviceと管理画面は独立リポジトリへ移動しました。先に別ターミナルで起動します。
 
 ```bash
-docker compose -f infra/docker-compose.yml --profile feedback up --build
-podman compose -f infra/docker-compose.yml --profile feedback up --build
+cd ../feedback-system
+cp deploy/.env.example deploy/.env  # 初回のみ
+docker compose --env-file deploy/.env -f deploy/compose.yaml \
+  -f ../gis-example/infra/feedback-system.compose.yaml up --build
+# Podmanの場合は先頭を podman compose に置き換える
 ```
 
 Services:
 
 - Web: http://localhost:5173
+- Feedback Admin: http://localhost:5174（独立リポジトリを起動した場合）
 - API health: http://localhost:8080/health
 - Keycloak (OIDC IdP): http://localhost:8081 (管理コンソールは `infra/.env` の `KC_BOOTSTRAP_ADMIN_*`、既定 `admin` / `admin`)
 - Martin: http://localhost:3000 (ループバックのみ)
@@ -221,7 +224,9 @@ Phase 5 として、レビュー画面に管理パネルを実装済み。プロ
 
 Phase 6 として、コメントの本人編集と全版履歴、証跡閲覧成功の監査、証跡の保存期間管理を実装済み。保存期間はプロジェクト既定をセッション単位で上書きでき、未設定は自動削除なし。期限切れ証跡は物理削除前でも API・一覧・集計から遮断され、editor が管理画面または外部スケジューラ向け API から小分けに完全削除できる。
 
-独立 Feedback Service では、コメント全版・状態変更・監査ログ・証跡画像を日次フル＋差分の自己完結ZIPへ自動保存し、認証付きCLIから共有ファイルサーバへ搬送できる。通知は本体と分離したConnector Protocol v1で拡張し、Webhook、Teams、Slack、SMTP Mailの参照コネクタを提供する。詳細は [`docs/feedback-backup-and-connectors.md`](docs/feedback-backup-and-connectors.md)。
+独立 Feedback Serviceの実装・管理UI・運用文書は
+[`geibee/feedback-system`](https://github.com/geibee/feedback-system) を正本とする。このリポジトリには
+Web GIS固有のhost adapterと画面連携だけを残す。
 
 権限は `review.view` (viewer 以上) / `review.comment` (viewer 以上) / `review.manage` (editor 以上) — [`docs/authorization.md`](docs/authorization.md)。
 

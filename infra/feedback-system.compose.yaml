@@ -1,0 +1,49 @@
+# 独立Feedback SystemをWeb GIS consumerとして動かすためのCompose override。
+# Feedback本体のサービス定義・Dockerfile・migrationはfeedback-systemリポジトリを正本とする。
+services:
+  feedback-service:
+    environment:
+      FEEDBACK_OIDC_ISSUER: http://localhost:8081/realms/gis
+      FEEDBACK_OIDC_AUDIENCE: feedback-service
+      FEEDBACK_OIDC_JWKS_URL: http://host.containers.internal:8081/realms/gis/protocol/openid-connect/certs
+      FEEDBACK_ALLOW_INSECURE_HTTP: "1"
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+
+  feedback-bootstrap-web-gis:
+    image: localhost/feedback-system-service:local
+    command: ["/app/bin/feedback-bootstrap"]
+    environment:
+      FEEDBACK_DATABASE_URL: jdbc:postgresql://feedback-postgres:5432/feedback
+      FEEDBACK_DATABASE_USER: feedback
+      FEEDBACK_DATABASE_PASSWORD: ${FEEDBACK_POSTGRES_PASSWORD:?feedback-system/deploy/.env が未作成です}
+      FEEDBACK_BOOTSTRAP_TENANT_KEY: local
+      FEEDBACK_BOOTSTRAP_TENANT_DISPLAY_NAME: ローカル開発
+      FEEDBACK_BOOTSTRAP_APPLICATION_KEY: web-gis
+      FEEDBACK_BOOTSTRAP_APPLICATION_DISPLAY_NAME: Web GIS
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_KEY: local
+      FEEDBACK_BOOTSTRAP_ENVIRONMENT_BASE_URL: http://localhost:5173
+      FEEDBACK_BOOTSTRAP_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:5174
+      FEEDBACK_BOOTSTRAP_EXTERNAL_WORKSPACE_KEY: 00000000-0000-0000-0000-000000000000
+      FEEDBACK_BOOTSTRAP_WORKSPACE_DISPLAY_NAME: デモプロジェクト
+      FEEDBACK_BOOTSTRAP_ISSUER: http://localhost:8081/realms/gis
+      FEEDBACK_BOOTSTRAP_SUBJECT: a0000000-0000-4000-8000-000000000001
+      FEEDBACK_BOOTSTRAP_EMAIL: admin@gis.example
+      FEEDBACK_BOOTSTRAP_DISPLAY_NAME: GIS Admin
+      FEEDBACK_BOOTSTRAP_PERMISSIONS: feedback.read,feedback.comment,feedback.manage,feedback.admin
+    depends_on:
+      feedback-migrate:
+        condition: service_completed_successfully
+
+  feedback-admin:
+    build:
+      args:
+        VITE_FEEDBACK_API_BASE: http://localhost:8090/feedback/v1
+        VITE_FEEDBACK_ADMIN_OIDC_AUTHORITY: http://localhost:8081/realms/gis
+        VITE_FEEDBACK_ADMIN_OIDC_CLIENT_ID: feedback-admin
+        VITE_FEEDBACK_ADMIN_OIDC_REDIRECT_URI: http://localhost:5174/
+        VITE_FEEDBACK_ADMIN_OIDC_SCOPE: openid profile email
+        FEEDBACK_ADMIN_APPLICATION: web-gis
+        FEEDBACK_ADMIN_ENVIRONMENT: local
+        FEEDBACK_ADMIN_WORKSPACE: 00000000-0000-0000-0000-000000000000
+        CSP_CONNECT_SRC_EXTRA: http://localhost:8090 http://localhost:8081

@@ -30,7 +30,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       api: ${{ steps.detect.outputs.api }}
-      feedback: ${{ steps.detect.outputs.feedback }}
       worker: ${{ steps.detect.outputs.worker }}
       web: ${{ steps.detect.outputs.web }}
     steps:
@@ -61,25 +60,6 @@ jobs:
         env:
           VERIFY_SCOPE: api
         run: bash scripts/verify.sh
-
-  feedback:
-    name: feedback Go-only extraction verify (no JDK)
-    needs: scope
-    if: needs.scope.outputs.feedback == '1'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - uses: actions/setup-go@v6
-        with:
-          go-version: 1.26.5
-          cache-dependency-path: apps/feedback-service-go/go.sum
-      - name: allowlist抽出物をclean build/test/image buildする
-        run: bash scripts/check-feedback-extraction.sh
 
   worker:
     name: worker verify (Python)
@@ -179,73 +159,6 @@ jobs:
           PGPASSWORD: gis
         run: bash scripts/verify.sh
 
-  feedback-integration:
-    name: feedback integration (plain PostgreSQL)
-    needs: scope
-    if: needs.scope.outputs.feedback == '1'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    services:
-      db:
-        # V6 handoffのcanonical fingerprintを固定したPostgreSQL minorで検証する。
-        image: postgres:16.14-alpine
-        env:
-          POSTGRES_USER: feedback
-          POSTGRES_PASSWORD: feedback
-          POSTGRES_DB: feedback
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U feedback -d feedback"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
-        with:
-          go-version: 1.26.5
-          cache-dependency-path: apps/feedback-service-go/go.sum
-      - name: S3互換storage (MinIO) を起動
-        run: |
-          docker run -d --name feedback-minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=feedback-minio \
-            -e MINIO_ROOT_PASSWORD=feedback-minio-secret \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for _ in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
-            sleep 1
-          done
-          docker logs feedback-minio
-          exit 1
-      - name: Go clean baselineと実PostgreSQL/MinIOを統合検証
-        env:
-          FEEDBACK_DATABASE_URL: jdbc:postgresql://localhost:5432/feedback
-          FEEDBACK_DATABASE_USER: feedback
-          FEEDBACK_DATABASE_PASSWORD: feedback
-          FEEDBACK_GO_INTEGRATION_DATABASE_URL: jdbc:postgresql://localhost:5432/feedback
-          FEEDBACK_GO_INTEGRATION_LEGACY_DATABASE_URL: jdbc:postgresql://localhost:5432/feedback_w3_admin_legacy
-          FEEDBACK_GO_INTEGRATION_DATABASE_USER: feedback
-          FEEDBACK_GO_INTEGRATION_DATABASE_PASSWORD: feedback
-          FEEDBACK_GO_INTEGRATION_S3_ENDPOINT_URL: http://127.0.0.1:9000
-          FEEDBACK_GO_INTEGRATION_S3_BUCKET: feedback-go-w2-evidence
-          FEEDBACK_GO_INTEGRATION_S3_CREATE_BUCKET: "1"
-          AWS_ACCESS_KEY_ID: feedback-minio
-          AWS_SECRET_ACCESS_KEY: feedback-minio-secret
-          AWS_REGION: us-east-1
-          FEEDBACK_TEST_RUN_ID: w1-ci
-          VERIFY_INTEGRATION: "1"
-        run: |
-          (cd apps/feedback-service-go && go run ./cmd/feedback migrate)
-          PGPASSWORD=feedback dropdb --if-exists --host localhost --username feedback feedback_w3_admin_legacy
-          PGPASSWORD=feedback createdb --host localhost --username feedback --template feedback feedback_w3_admin_legacy
-          PGPASSWORD=feedback psql --host localhost --username feedback --dbname feedback_w3_admin_legacy \
-            -c 'CREATE SCHEMA feedback_migration'
-          PGPASSWORD=feedback psql --host localhost --username feedback --dbname feedback_w3_admin_legacy \
-            --file apps/feedback-service-go/migrations/legacyjournal/V1__feedback_v4_copy_journal.sql
-          bash scripts/verify-feedback-go.sh
-
   web:
     name: web verify (TypeScript)
     needs: scope
@@ -267,7 +180,7 @@ jobs:
   # (スコープ外でスキップされたジョブは成功扱い、失敗・キャンセルのみ落とす)
   verify-result:
     name: verify 結果集約
-    needs: [scope, api, feedback, worker, web, api-integration, feedback-integration, worker-integration]
+    needs: [scope, api, worker, web, api-integration, worker-integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

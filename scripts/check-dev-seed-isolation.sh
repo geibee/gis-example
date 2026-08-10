@@ -6,7 +6,7 @@
 # 混入しない構造を検査する。scripts/verify.sh から毎回実行される。
 #
 # 検査内容:
-#   1. 本番イメージの Dockerfile (apps/api, feedback各runtime, apps/worker-gis, apps/web) が
+#   1. 本番イメージの Dockerfile (apps/api, apps/worker-gis, apps/web) が
 #      infra/ 配下 (シード SQL・realm JSON) を COPY/ADD しないこと
 #      (web の build context はリポジトリルートのため、構造的に到達可能な点に注意)
 #   2. 開発ユーザーの識別子 (固定 UUID prefix / @gis.example / gis-admin 等) が
@@ -22,10 +22,6 @@ fail() { echo "[seed-guard] FAIL: $*" >&2; exit 1; }
 # ---------------------------------------------------- 1. 本番 Dockerfile の検査
 PROD_DOCKERFILES=(
   apps/api/Dockerfile
-  apps/feedback-service-go/Dockerfile
-  apps/feedback-admin/Dockerfile
-  apps/feedback-token-broker-reference/Dockerfile
-  apps/feedback-conformance-consumer/Dockerfile
   apps/worker-gis/Dockerfile
   apps/web/Dockerfile
 )
@@ -42,9 +38,7 @@ log "OK: 本番 Dockerfile は infra/ のシード・realm を参照しない"
 MARKERS='a0000000-0000-4000-8000|@gis\.example|gis-admin|gis-editor|gis-viewer'
 # 検査対象はアプリ本体コードのみ (テストコードは dev 固定 ID の利用を許容する)
 mapfile -t hits < <(git grep -lE "$MARKERS" -- \
-  'apps/api/src/main' 'apps/feedback-service-go' \
-  ':(exclude)apps/feedback-service-go/**/*_test.go' \
-  'apps/worker-gis/src' 'apps/web/src' 2>/dev/null || true)
+  'apps/api/src/main' 'apps/worker-gis/src' 'apps/web/src' 2>/dev/null || true)
 if ((${#hits[@]} > 0)); then
   fail "開発ユーザーの識別子がアプリ本体コードに混入しています (シード / テスト以外に置かない): ${hits[*]}"
 fi

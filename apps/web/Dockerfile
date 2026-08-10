@@ -3,20 +3,10 @@ FROM docker.io/library/node:22-alpine AS build
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
-COPY apps/feedback-admin/package.json apps/feedback-admin/package.json
-COPY contracts/feedback/package.json contracts/feedback/package.json
-COPY packages/feedback-core/package.json packages/feedback-core/package.json
-COPY packages/feedback-react/package.json packages/feedback-react/package.json
-COPY packages/feedback-maplibre/package.json packages/feedback-maplibre/package.json
-COPY packages/feedback-admin-react/package.json packages/feedback-admin-react/package.json
 COPY packages/feedback-plugin/package.json packages/feedback-plugin/package.json
+COPY vendor/feedback-sdk vendor/feedback-sdk
 RUN npm ci
 COPY apps/web apps/web
-COPY contracts/feedback contracts/feedback
-COPY packages/feedback-core packages/feedback-core
-COPY packages/feedback-react packages/feedback-react
-COPY packages/feedback-maplibre packages/feedback-maplibre
-COPY packages/feedback-admin-react packages/feedback-admin-react
 COPY packages/feedback-plugin packages/feedback-plugin
 # OIDC の接続先はビルド時に bundle へ焼き込まれる (import.meta.env)。
 # 本番ビルドでは --build-arg で IdP の HTTPS URL を渡すこと。
@@ -29,7 +19,6 @@ ARG VITE_FEEDBACK_API_BASE
 ARG VITE_FEEDBACK_ADMIN_URL
 ARG FEEDBACK_APPLICATION
 ARG FEEDBACK_ENVIRONMENT
-RUN npm run build:feedback-sdk
 RUN npm --workspace @web-gis/feedback-plugin run build
 RUN VITE_FEEDBACK_APPLICATION_KEY="$FEEDBACK_APPLICATION" \
     VITE_FEEDBACK_ENVIRONMENT_KEY="$FEEDBACK_ENVIRONMENT" \
