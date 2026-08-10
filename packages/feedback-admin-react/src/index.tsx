@@ -228,6 +228,14 @@ function SessionAdministration({
       : retained;
     setScopes(JSON.stringify(next, null, 2));
   };
+  const toggleSelectedRoute = (route: ManifestRoute, checked: boolean) => {
+    if (!selected) return;
+    const retained = selected.scopes.filter((scope) => scope.pageKey !== route.pageKey);
+    const next = checked
+      ? [...retained, { pageKey: route.pageKey, routeTemplate: route.template, reviewable: true }]
+      : retained;
+    patchSessionState({ scopes: next });
+  };
   const toggleThread = async (thread: Thread) => {
     try {
       await transport.request(`/threads/${thread.id}/status`, {
@@ -291,7 +299,8 @@ function SessionAdministration({
           <label>状態<select value={selected.status} onChange={(event) => patchSessionState({ status: event.target.value as Session["status"] })}>
             <option value="draft">下書き</option><option value="open">公開中</option><option value="closed">終了</option>
           </select></label>
-          <details className="feedback-admin-advanced"><summary>対象画面・観点の詳細設定（JSON）</summary><label>対象画面<textarea value={JSON.stringify(selected.scopes, null, 2)} onChange={(event) => {
+          <fieldset><legend>レビュー対象の画面</legend><p className="feedback-admin-help">アプリに登録されている画面から選択してください。</p>{manifestRoutes.map((route) => <label key={route.pageKey}><input type="checkbox" checked={selected.scopes.some((scope) => scope.pageKey === route.pageKey)} onChange={(event) => toggleSelectedRoute(route, event.target.checked)} />{route.label} <code>{route.template}</code></label>)}</fieldset>
+          <details className="feedback-admin-advanced"><summary>観点・対象画面の詳細設定（JSON）</summary><label>対象画面<textarea value={JSON.stringify(selected.scopes, null, 2)} onChange={(event) => {
             try { patchSessionState({ scopes: JSON.parse(event.target.value) }); } catch { /* 入力途中 */ }
           }} /></label><label>レビュー観点<textarea value={JSON.stringify(selected.perspectives, null, 2)} onChange={(event) => {
             try { patchSessionState({ perspectives: JSON.parse(event.target.value) }); } catch { /* 入力途中 */ }
