@@ -126,6 +126,10 @@ function SessionAdministration({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [threadStatus, setThreadStatus] = useState<"" | "open" | "resolved">("");
+  const [threadPerspective, setThreadPerspective] = useState("");
+  const [threadEvidence, setThreadEvidence] = useState<"" | "with" | "without">("");
+  const [threadSearch, setThreadSearch] = useState("");
   const [title, setTitle] = useState("");
   const [manifestVersion, setManifestVersion] = useState("1");
   const [scopes, setScopes] = useState('[{"pageKey":"home","routeTemplate":"/","reviewable":true}]');
@@ -163,6 +167,15 @@ function SessionAdministration({
   }, [onError, selectedId, transport]);
   useEffect(() => () => { if (evidenceUrl) URL.revokeObjectURL(evidenceUrl); }, [evidenceUrl]);
   const selected = sessions.find((session) => session.id === selectedId);
+  const visibleSessions = sessions;
+  const visibleThreads = threads.filter((thread) => {
+    if (threadStatus && thread.status !== threadStatus) return false;
+    if (threadPerspective && thread.perspectiveCode !== threadPerspective) return false;
+    if (threadEvidence === "with" && !thread.evidenceAvailable) return false;
+    if (threadEvidence === "without" && thread.evidenceAvailable) return false;
+    if (threadSearch && !thread.messages.some((message) => message.body.toLowerCase().includes(threadSearch.toLowerCase()))) return false;
+    return true;
+  });
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -241,8 +254,15 @@ function SessionAdministration({
   };
 
   return (
-    <div className="feedback-admin-grid">
-      <form className="feedback-admin-card" onSubmit={(event) => void create(event)}>
+    <div className="feedback-admin-review-layout">
+      <aside className="feedback-admin-card feedback-admin-session-sidebar">
+        <div className="feedback-admin-sidebar-heading"><h2>レビューセッション</h2><button type="button" onClick={() => document.getElementById("feedback-admin-create")?.scrollIntoView({ behavior: "smooth" })}>新規作成</button></div>
+        <label>セッションを検索<input type="search" placeholder="タイトルを検索" onChange={(event) => { const value = event.target.value.toLowerCase(); document.querySelectorAll<HTMLElement>("[data-session-title]").forEach((item) => { item.hidden = value !== "" && !item.dataset.sessionTitle!.includes(value); }); }} /></label>
+        <ul className="feedback-admin-session-list">{visibleSessions.map((session) => <li key={session.id} data-session-title={session.title.toLowerCase()}><button type="button" className={session.id === selectedId ? "selected" : ""} onClick={() => setSelectedId(session.id)}><strong>{session.title}</strong><span>{sessionStatusLabel(session.status)}</span></button></li>)}</ul>
+        {visibleSessions.length === 0 ? <p className="feedback-admin-help">レビューセッションはまだありません。</p> : null}
+      </aside>
+      <div className="feedback-admin-review-main">
+      <form id="feedback-admin-create" className="feedback-admin-card feedback-admin-create-form" onSubmit={(event) => void create(event)}>
         <h2>レビューを作成</h2>
         <label>タイトル<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <label>アプリ設定のバージョン<input required value={manifestVersion} onChange={(event) => setManifestVersion(event.target.value)} /></label>
@@ -261,7 +281,7 @@ function SessionAdministration({
         <details className="feedback-admin-advanced"><summary>詳細設定（JSON）</summary><p className="feedback-admin-help">通常は変更不要です。外部連携や高度な設定を行う場合のみ編集してください。</p><label>対象画面の設定<textarea value={scopes} onChange={(event) => setScopes(event.target.value)} /></label><label>レビュー観点の設定<textarea value={perspectives} onChange={(event) => setPerspectives(event.target.value)} /></label></details>
         <button type="submit">作成</button>
       </form>
-      <div className="feedback-admin-card">
+      <div className="feedback-admin-card feedback-admin-card-wide">
         <h2>レビューを編集</h2>
         <label>レビュー<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
           <option value="">選択</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>)}
@@ -279,9 +299,10 @@ function SessionAdministration({
           <button type="button" onClick={() => void saveSelected()}>変更を保存</button>
         </> : null}
       </div>
-      <div className="feedback-admin-card">
+      <div className="feedback-admin-card feedback-admin-card-wide">
         <h2>スレッドと証跡</h2>
-        {threads.map((thread) => <article key={thread.id}>
+        <form className="feedback-admin-thread-filters" onSubmit={(event) => event.preventDefault()}><label>状態<select value={threadStatus} onChange={(event) => setThreadStatus(event.target.value as typeof threadStatus)}><option value="">すべて</option><option value="open">未解決</option><option value="resolved">解決済み</option></select></label><label>観点<select value={threadPerspective} onChange={(event) => setThreadPerspective(event.target.value)}><option value="">すべて</option>{selected?.perspectives.map((perspective) => <option key={perspective.code} value={perspective.code}>{perspective.label ?? perspective.code}</option>)}</select></label><label>証跡<select value={threadEvidence} onChange={(event) => setThreadEvidence(event.target.value as typeof threadEvidence)}><option value="">すべて</option><option value="with">証跡あり</option><option value="without">証跡なし</option></select></label><label>コメント本文<input type="search" placeholder="コメントを検索" value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} /></label></form>
+        {visibleThreads.map((thread) => <article className="feedback-admin-thread" key={thread.id}>
           <h3>#{thread.displayNumber} {thread.perspectiveCode}</h3>
           <p>{thread.messages[thread.messages.length - 1]?.body}</p>
           <div className="feedback-admin-actions">
@@ -290,7 +311,8 @@ function SessionAdministration({
             {thread.evidenceAvailable ? <button type="button" onClick={() => void showEvidence(thread.id)}>証跡</button> : null}
           </div>
         </article>)}
-        {evidenceUrl ? <img src={evidenceUrl} alt="証跡" /> : null}
+        {visibleThreads.length === 0 ? <p className="feedback-admin-help">条件に一致するフィードバックはありません。</p> : null}{evidenceUrl ? <img src={evidenceUrl} alt="証跡" /> : null}
+      </div>
       </div>
     </div>
   );
@@ -616,6 +638,9 @@ function parseScopeDraft(value: string): Array<{ pageKey: string; routeTemplate?
   }
 }
 function permissionList(value: string): string[] { return value.split(",").map((item) => item.trim()).filter(Boolean); }
+function sessionStatusLabel(value: Session["status"]): string {
+  return value === "open" ? "受付中" : value === "closed" ? "終了" : "下書き";
+}
 function idempotencyKey(): string { return `feedback-admin-${crypto.randomUUID()}`; }
 function versionEtag(version: number): string { return `"v${version}"`; }
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }

@@ -6,6 +6,20 @@
 .feedback-admin-help { margin-block: .35rem .75rem; }
 .feedback-admin nav { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: 1rem; }
 .feedback-admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+.feedback-admin-review-layout { display: grid; grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.feedback-admin-review-main { display: grid; gap: 1rem; min-width: 0; }
+.feedback-admin-session-sidebar { position: sticky; top: 1rem; }
+.feedback-admin-sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.feedback-admin-sidebar-heading h2 { margin-block: 0; font-size: 1.05rem; }
+.feedback-admin-sidebar-heading button { white-space: nowrap; }
+.feedback-admin-session-list { list-style: none; margin: .75rem 0 0; padding: 0; display: grid; gap: .35rem; }
+.feedback-admin-session-list button { display: flex; width: 100%; flex-direction: column; align-items: flex-start; gap: .2rem; border: 1px solid transparent; border-radius: .35rem; padding: .65rem; background: #f8fafc; text-align: start; cursor: pointer; }
+.feedback-admin-session-list button.selected { border-color: #2563eb; background: #eff6ff; }
+.feedback-admin-session-list span { color: #526175; font-size: .8rem; }
+.feedback-admin-card-wide { min-width: 0; }
+.feedback-admin-thread-filters { display: grid; grid-template-columns: repeat(3, minmax(8rem, 1fr)) minmax(12rem, 2fr); gap: .65rem; padding-block: .5rem 1rem; }
+.feedback-admin-thread-filters label { margin: 0; }
+.feedback-admin-thread { border-top: 1px solid #e2e8f0; padding-block: .75rem; }
 .feedback-admin-card { border: 1px solid var(--feedback-admin-border, #cbd5e1); border-radius: .5rem; padding: 1rem; background: var(--feedback-admin-surface, #fff); }
 .feedback-admin label, .feedback-admin input, .feedback-admin select, .feedback-admin textarea { display: block; width: 100%; box-sizing: border-box; }
 .feedback-admin textarea { min-height: 8rem; }
@@ -22,3 +36,4 @@
 .feedback-admin code { display: block; overflow-wrap: anywhere; margin-block: .35rem; }
 .feedback-admin table { width: 100%; border-collapse: collapse; }
 .feedback-admin th, .feedback-admin td { border: 1px solid var(--feedback-admin-border, #cbd5e1); padding: .35rem; text-align: start; }
+@media (max-width: 760px) { .feedback-admin-review-layout { grid-template-columns: 1fr; } .feedback-admin-session-sidebar { position: static; } .feedback-admin-thread-filters { grid-template-columns: 1fr 1fr; } .feedback-admin-inline-form { grid-template-columns: 1fr; } }
