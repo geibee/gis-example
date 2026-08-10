@@ -56,7 +56,7 @@ describe("FeedbackAdminConsole", () => {
     const request = vi.fn(createRequest());
     render(<FeedbackAdminConsole {...scope} transport={createTransport(request)} />);
     await screen.findByText("#1 quality");
-    for (const tab of ["Manifest", "保存・Export", "メンバー", "通知"]) {
+    for (const tab of ["アプリ設定", "保存・エクスポート", "メンバー", "通知"]) {
       fireEvent.click(screen.getByRole("button", { name: tab }));
       await waitFor(() => expect(request.mock.calls.some(([path]) => String(path).includes(expectedPath(tab)))).toBe(true));
     }

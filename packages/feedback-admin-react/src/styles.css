@@ -1,9 +1,21 @@
 .feedback-admin { color: var(--feedback-admin-text, #172033); font-family: system-ui, sans-serif; }
+.feedback-admin header { margin-block: 1rem 1.25rem; }
+.feedback-admin header h1 { margin-block: 0 .35rem; }
+.feedback-admin-scope, .feedback-admin-help { color: #526175; font-size: .9rem; }
+.feedback-admin-scope { margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: .78rem; overflow-wrap: anywhere; }
+.feedback-admin-help { margin-block: .35rem .75rem; }
 .feedback-admin nav { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: 1rem; }
 .feedback-admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
 .feedback-admin-card { border: 1px solid var(--feedback-admin-border, #cbd5e1); border-radius: .5rem; padding: 1rem; background: var(--feedback-admin-surface, #fff); }
 .feedback-admin label, .feedback-admin input, .feedback-admin select, .feedback-admin textarea { display: block; width: 100%; box-sizing: border-box; }
 .feedback-admin textarea { min-height: 8rem; }
+.feedback-admin label { margin-block: .65rem; font-weight: 600; }
+.feedback-admin label input, .feedback-admin label select, .feedback-admin label textarea { margin-block: .25rem 0; font-weight: 400; }
+.feedback-admin label small { display: block; color: #64748b; font-size: .8rem; font-weight: 400; margin-top: .2rem; }
+.feedback-admin-inline-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: .65rem; align-items: end; }
+.feedback-admin-inline-form label { margin: 0; }
+.feedback-admin-advanced { margin-block: .75rem; border-top: 1px solid #e2e8f0; padding-top: .65rem; }
+.feedback-admin-advanced summary { cursor: pointer; color: #475569; font-size: .9rem; }
 .feedback-admin-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
 .feedback-admin-error { color: var(--feedback-admin-error, #b91c1c); }
 .feedback-admin img { max-width: 100%; }

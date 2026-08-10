@@ -57,12 +57,12 @@ export function FeedbackAdminConsole({
   ]);
   return (
     <section className={`feedback-admin${className ? ` ${className}` : ""}`}>
-      <header><h1>Feedback Admin Console</h1><p>{applicationKey} / {environmentKey} / {externalWorkspaceKey}</p></header>
+      <header><h1>フィードバック管理</h1><p className="feedback-admin-scope">対象: {applicationKey} / {environmentKey} / {externalWorkspaceKey}</p><p className="feedback-admin-help">レビュー、メンバー、通知、保存設定を管理します。</p></header>
       <nav aria-label="管理対象">
         {([
           ["sessions", "レビュー"],
-          ["manifest", "Manifest"],
-          ["retention", "保存・Export"],
+          ["manifest", "アプリ設定"],
+          ["retention", "保存・エクスポート"],
           ["memberships", "メンバー"],
           ["notifications", "通知"]
         ] as const).map(([value, label]) => (
@@ -130,6 +130,8 @@ function SessionAdministration({
   const [manifestVersion, setManifestVersion] = useState("1");
   const [scopes, setScopes] = useState('[{"pageKey":"home","routeTemplate":"/","reviewable":true}]');
   const [perspectives, setPerspectives] = useState('[{"code":"quality","label":"品質","status":"active","guidance":null}]');
+  const [perspectiveCode, setPerspectiveCode] = useState("quality");
+  const [perspectiveLabel, setPerspectiveLabel] = useState("品質");
   const [manifestRoutes, setManifestRoutes] = useState<ManifestRoute[]>([]);
   const [evidenceUrl, setEvidenceUrl] = useState<string | null>(null);
   const refresh = useCallback(async () => {
@@ -243,8 +245,8 @@ function SessionAdministration({
       <form className="feedback-admin-card" onSubmit={(event) => void create(event)}>
         <h2>レビューを作成</h2>
         <label>タイトル<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-        <label>Manifest version<input required value={manifestVersion} onChange={(event) => setManifestVersion(event.target.value)} /></label>
-        <fieldset><legend>Manifest の対象画面</legend>
+        <label>アプリ設定のバージョン<input required value={manifestVersion} onChange={(event) => setManifestVersion(event.target.value)} /></label>
+        <fieldset><legend>レビュー対象の画面</legend>
           {manifestRoutes.map((route) => <label key={route.pageKey}>
             <input
               type="checkbox"
@@ -254,37 +256,37 @@ function SessionAdministration({
             {route.label} ({route.template})
           </label>)}
         </fieldset>
-        <label>Scope JSON<textarea value={scopes} onChange={(event) => setScopes(event.target.value)} /></label>
-        <label>Perspective JSON<textarea value={perspectives} onChange={(event) => setPerspectives(event.target.value)} /></label>
+        <p className="feedback-admin-help">レビュー対象の画面を選択してください。選択した画面だけがレビュー対象になります。</p>
+        <div className="feedback-admin-inline-form"><label>観点コード<input value={perspectiveCode} onChange={(event) => setPerspectiveCode(event.target.value)} /></label><label>表示名<input value={perspectiveLabel} onChange={(event) => setPerspectiveLabel(event.target.value)} /></label><button type="button" onClick={() => setPerspectives(JSON.stringify([{ code: perspectiveCode.trim(), label: perspectiveLabel.trim(), status: "active", guidance: null }], null, 2))}>観点を反映</button></div>
+        <details className="feedback-admin-advanced"><summary>詳細設定（JSON）</summary><p className="feedback-admin-help">通常は変更不要です。外部連携や高度な設定を行う場合のみ編集してください。</p><label>対象画面の設定<textarea value={scopes} onChange={(event) => setScopes(event.target.value)} /></label><label>レビュー観点の設定<textarea value={perspectives} onChange={(event) => setPerspectives(event.target.value)} /></label></details>
         <button type="submit">作成</button>
       </form>
       <div className="feedback-admin-card">
-        <h2>Session / Scope / Perspective</h2>
-        <label>Session<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+        <h2>レビューを編集</h2>
+        <label>レビュー<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
           <option value="">選択</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>)}
         </select></label>
         {selected ? <>
           <label>タイトル<input value={selected.title} onChange={(event) => patchSessionState({ title: event.target.value })} /></label>
           <label>状態<select value={selected.status} onChange={(event) => patchSessionState({ status: event.target.value as Session["status"] })}>
-            <option value="draft">draft</option><option value="open">open</option><option value="closed">closed</option>
+            <option value="draft">下書き</option><option value="open">公開中</option><option value="closed">終了</option>
           </select></label>
-          <label>Scope JSON<textarea value={JSON.stringify(selected.scopes, null, 2)} onChange={(event) => {
+          <details className="feedback-admin-advanced"><summary>対象画面・観点の詳細設定（JSON）</summary><label>対象画面<textarea value={JSON.stringify(selected.scopes, null, 2)} onChange={(event) => {
             try { patchSessionState({ scopes: JSON.parse(event.target.value) }); } catch { /* 入力途中 */ }
-          }} /></label>
-          <label>Perspective JSON<textarea value={JSON.stringify(selected.perspectives, null, 2)} onChange={(event) => {
+          }} /></label><label>レビュー観点<textarea value={JSON.stringify(selected.perspectives, null, 2)} onChange={(event) => {
             try { patchSessionState({ perspectives: JSON.parse(event.target.value) }); } catch { /* 入力途中 */ }
-          }} /></label>
-          <button type="button" onClick={() => void saveSelected()}>Sessionを保存</button>
+          }} /></label></details>
+          <button type="button" onClick={() => void saveSelected()}>変更を保存</button>
         </> : null}
       </div>
       <div className="feedback-admin-card">
-        <h2>Threads / Evidence</h2>
+        <h2>スレッドと証跡</h2>
         {threads.map((thread) => <article key={thread.id}>
           <h3>#{thread.displayNumber} {thread.perspectiveCode}</h3>
           <p>{thread.messages[thread.messages.length - 1]?.body}</p>
           <div className="feedback-admin-actions">
             <button type="button" onClick={() => void openThread(thread.id)}>対象アプリを開く</button>
-            <button type="button" onClick={() => void toggleThread(thread)}>{thread.status === "open" ? "resolve" : "reopen"}</button>
+            <button type="button" onClick={() => void toggleThread(thread)}>{thread.status === "open" ? "対応済みにする" : "再オープン"}</button>
             {thread.evidenceAvailable ? <button type="button" onClick={() => void showEvidence(thread.id)}>証跡</button> : null}
           </div>
         </article>)}
@@ -317,9 +319,9 @@ function ManifestAdministration({ transport, applicationKey, onError }: {
       await load();
     } catch (caught) { onError(messageOf(caught)); }
   };
-  return <div className="feedback-admin-card"><h2>Application Manifest</h2>
-    <textarea aria-label="Manifest JSON" value={manifest} onChange={(event) => setManifest(event.target.value)} />
-    <button type="button" onClick={() => void save()}>Manifestを保存</button>
+  return <div className="feedback-admin-card"><h2>アプリ設定</h2><p className="feedback-admin-help">レビュー対象として表示する画面の定義です。通常は変更不要です。</p>
+    <details className="feedback-admin-advanced" open><summary>詳細設定（JSON）</summary><textarea aria-label="Manifest JSON" value={manifest} onChange={(event) => setManifest(event.target.value)} />
+    <button type="button" onClick={() => void save()}>アプリ設定を保存</button></details>
   </div>;
 }
 
@@ -405,21 +407,21 @@ function RetentionAndExport({
     } catch (caught) { onError(messageOf(caught)); }
   };
   return <div className="feedback-admin-grid">
-    <div className="feedback-admin-card"><h2>Retention</h2>{policy ? <>
-      <label>Evidence days<input type="number" value={policy.evidenceRetentionDays ?? ""} onChange={(event) => setPolicy({ ...policy, evidenceRetentionDays: event.target.value ? Number(event.target.value) : null })} /></label>
-      <label>Export days<input type="number" value={policy.exportRetentionDays} onChange={(event) => setPolicy({ ...policy, exportRetentionDays: Number(event.target.value) })} /></label>
+    <div className="feedback-admin-card"><h2>保存期間</h2>{policy ? <>
+      <label>証跡の保存日数（空欄は無期限）<input type="number" min={1} value={policy.evidenceRetentionDays ?? ""} onChange={(event) => setPolicy({ ...policy, evidenceRetentionDays: event.target.value ? Number(event.target.value) : null })} /></label>
+      <label>エクスポートの保存日数<input type="number" min={1} value={policy.exportRetentionDays} onChange={(event) => setPolicy({ ...policy, exportRetentionDays: Number(event.target.value) })} /></label>
       <button type="button" onClick={() => void save()}>保存</button>
     </> : null}</div>
-    <div className="feedback-admin-card"><h2>Server-side Export</h2>
-      <label>形式<select value={format} onChange={(event) => setFormat(event.target.value as "csv" | "xlsx")}><option value="csv">CSV</option><option value="xlsx">XLSX</option></select></label>
-      <div className="feedback-admin-actions"><button type="button" onClick={() => void createExport()}>作成</button>
-        {job ? <button type="button" onClick={() => void refreshJob()}>状態更新</button> : null}
-        {job?.downloadUrl ? <button type="button" onClick={() => void download()}>Download</button> : null}</div>
+    <div className="feedback-admin-card"><h2>データをエクスポート</h2><p className="feedback-admin-help">レビュー記録をファイルとして出力します。</p>
+      <label>ファイル形式<select value={format} onChange={(event) => setFormat(event.target.value as "csv" | "xlsx")}><option value="csv">CSV（表計算ソフト向け）</option><option value="xlsx">Excel（XLSX）</option></select></label>
+      <div className="feedback-admin-actions"><button type="button" onClick={() => void createExport()}>エクスポートを作成</button>
+        {job ? <button type="button" onClick={() => void refreshJob()}>状態を更新</button> : null}
+        {job?.downloadUrl ? <button type="button" onClick={() => void download()}>ファイルをダウンロード</button> : null}</div>
       {job ? <p>{job.status} {job.error}</p> : null}
     </div>
     <div className="feedback-admin-card"><h2>自動証跡バックアップ</h2>{backupPolicy ? <>
       <label><input type="checkbox" checked={backupPolicy.enabled} onChange={(event) => setBackupPolicy({ ...backupPolicy, enabled: event.target.checked })} />有効</label>
-      <label>Timezone<input value={backupPolicy.timezone} onChange={(event) => setBackupPolicy({ ...backupPolicy, timezone: event.target.value })} /></label>
+      <label>タイムゾーン<input value={backupPolicy.timezone} onChange={(event) => setBackupPolicy({ ...backupPolicy, timezone: event.target.value })} /></label>
       <label>日次フル実行時刻<input type="time" value={backupPolicy.fullBackupAt} onChange={(event) => setBackupPolicy({ ...backupPolicy, fullBackupAt: event.target.value })} /></label>
       <label>差分間隔（分）<input type="number" min={15} max={1440} value={backupPolicy.incrementalIntervalMinutes} onChange={(event) => setBackupPolicy({ ...backupPolicy, incrementalIntervalMinutes: Number(event.target.value) })} /></label>
       <label><input type="checkbox" checked={backupPolicy.includeEvidence} onChange={(event) => setBackupPolicy({ ...backupPolicy, includeEvidence: event.target.checked })} />証跡画像を含める</label>
@@ -484,10 +486,10 @@ function MembershipAdministration({ transport, scopeQuery, onError }: {
     } catch (caught) { onError(messageOf(caught)); }
   };
   return <div className="feedback-admin-grid"><form className="feedback-admin-card" onSubmit={(event) => void create(event)}>
-    <h2>Member追加</h2><label>Issuer<input required value={issuer} onChange={(event) => setIssuer(event.target.value)} /></label>
-    <label>Subject<input required value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
-    <label>Permissions<input value={permissions} onChange={(event) => setPermissions(event.target.value)} /></label><button>追加</button>
-  </form><div className="feedback-admin-card"><h2>Memberships</h2>{members.map((member) => <MemberRow key={member.userId} member={member} onSave={update} onDelete={remove} />)}</div></div>;
+    <h2>メンバーを追加</h2><p className="feedback-admin-help">ログインに使う発行者とユーザーIDを入力してください。</p><label>発行者（Issuer）<input required value={issuer} onChange={(event) => setIssuer(event.target.value)} /></label>
+    <label>ユーザーID（Subject）<input required value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
+    <label>権限（カンマ区切り）<input value={permissions} onChange={(event) => setPermissions(event.target.value)} /><small>例: feedback.read, feedback.comment</small></label><button>追加</button>
+  </form><div className="feedback-admin-card"><h2>メンバー一覧</h2>{members.map((member) => <MemberRow key={member.userId} member={member} onSave={update} onDelete={remove} />)}</div></div>;
 }
 
 function MemberRow({ member, onSave, onDelete }: { member: Member; onSave(member: Member, value: string): void; onDelete(member: Member): void }) {
@@ -556,10 +558,10 @@ function NotificationAdministration({ transport, scopeQuery, onError }: {
       await load();
     } catch (caught) { onError(messageOf(caught)); }
   };
-  return <div className="feedback-admin-grid"><div className="feedback-admin-card"><h2>Webhook設定</h2>{settings ? <>
+  return <div className="feedback-admin-grid"><div className="feedback-admin-card"><h2>通知設定</h2>{settings ? <>
     <p>互換用の旧Webhook設定です。新規連携は通知コネクタを使用してください。</p>
     <label><input type="checkbox" checked={settings.webhookEnabled} onChange={(event) => setSettings({ ...settings, webhookEnabled: event.target.checked })} />有効</label>
-    <label>Endpoint<input value={settings.webhookEndpoint ?? ""} onChange={(event) => setSettings({ ...settings, webhookEndpoint: event.target.value || null })} /></label>
+    <label>Webhook URL<input type="url" placeholder="https://example.invalid/webhook" value={settings.webhookEndpoint ?? ""} onChange={(event) => setSettings({ ...settings, webhookEndpoint: event.target.value || null })} /></label>
     <label><input type="checkbox" checked={settings.includeBody} onChange={(event) => setSettings({ ...settings, includeBody: event.target.checked })} />本文を含める</label>
     <label><input type="checkbox" checked={settings.includeEvidence} onChange={(event) => setSettings({ ...settings, includeEvidence: event.target.checked })} />旧互換フラグ（コネクタ配送では証跡を送信しません）</label>
     <button type="button" onClick={() => void save()}>保存</button></> : null}</div>
@@ -568,16 +570,16 @@ function NotificationAdministration({ transport, scopeQuery, onError }: {
         <option value="">選択</option>{connectorTypes.filter((type) => type.enabled).map((type) => <option key={type.key} value={type.key}>{type.displayName}</option>)}
       </select></label>
       <label>表示名<input required value={connectorName} onChange={(event) => setConnectorName(event.target.value)} /></label>
-      <label>Destination ref<input required value={destinationRef} onChange={(event) => setDestinationRef(event.target.value)} /></label>
+      <label>接続先の参照名<input required value={destinationRef} onChange={(event) => setDestinationRef(event.target.value)} /><small>サーバー側で登録した接続先の名前です。</small></label>
       <button type="submit">追加</button>
     </form>
-    <div className="feedback-admin-card"><h2>有効なコネクタ</h2>{connectors.map((connector) => <article key={connector.id}>
-      <strong>{connector.name}</strong> {connector.displayName} / {connector.destinationRef} / {connector.enabled ? "enabled" : "disabled"}
-      <p>Health: {connector.healthStatus}{connector.healthCheckedAt ? ` (${new Date(connector.healthCheckedAt).toLocaleString()})` : ""}</p>
+    <div className="feedback-admin-card"><h2>登録済みの通知先</h2>{connectors.map((connector) => <article key={connector.id}>
+      <strong>{connector.name}</strong> {connector.displayName} / {connector.destinationRef} / {connector.enabled ? "有効" : "無効"}
+      <p>接続状態: {connector.healthStatus}{connector.healthCheckedAt ? ` (${new Date(connector.healthCheckedAt).toLocaleString()})` : ""}</p>
       {connector.healthError ? <p>{connector.healthError}</p> : null}
       <div className="feedback-admin-actions"><button type="button" onClick={() => void toggleConnector(connector)}>{connector.enabled ? "無効化" : "有効化"}</button><button type="button" onClick={() => void removeConnector(connector)}>削除</button></div>
     </article>)}</div>
-    <div className="feedback-admin-card"><h2>配送 / Dead letter</h2>{deliveries.map((delivery) => <article key={delivery.id}><strong>{delivery.eventType}</strong> {delivery.status} ({delivery.attemptCount})
+    <div className="feedback-admin-card"><h2>通知の配送履歴</h2>{deliveries.map((delivery) => <article key={delivery.id}><strong>{delivery.eventType}</strong> {delivery.status === "failed" ? "失敗" : delivery.status === "succeeded" ? "成功" : delivery.status} ({delivery.attemptCount}回)
       {delivery.connectorName ? <span> / {delivery.connectorName}</span> : null}
       {delivery.lastError ? <p>{delivery.lastError}</p> : null}{delivery.status === "failed" ? <button type="button" onClick={() => void retry(delivery.id)}>再送</button> : null}</article>)}</div></div>;
 }
