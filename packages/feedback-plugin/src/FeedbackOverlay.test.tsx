@@ -64,7 +64,12 @@ function response(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function renderHost(fetchMock: typeof fetch, children?: ReactNode, overlayProps: FeedbackOverlayProps = {}) {
+function renderHost(
+  fetchMock: typeof fetch,
+  children?: ReactNode,
+  overlayProps: FeedbackOverlayProps = {},
+  currentPath = "/"
+) {
   vi.stubGlobal("fetch", fetchMock);
   const notifications = vi.fn();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -77,7 +82,7 @@ function renderHost(fetchMock: typeof fetch, children?: ReactNode, overlayProps:
         { pageId: "host.screen.detail", path: "/", label: "テスト画面" },
         { pageId: "lands.detail", path: "/lands/{id}", label: "土地詳細" }
       ]}
-      currentPath="/"
+      currentPath={currentPath}
       getAccessToken={() => "token"}
       onNotification={notifications}
       queryClient={queryClient}
@@ -342,6 +347,33 @@ describe("FeedbackOverlay", () => {
     expect(submittedReply).toMatchObject({ body: "対応します", participantName: "端末利用者" });
     await user.click(await within(drawer).findByRole("button", { name: "解決済みにする" }));
     expect(await within(drawer).findByText("解決済み")).toBeInTheDocument();
+  });
+
+  it("v1のpageRouteだけを持つ画面座標コメントを投稿先の詳細画面に表示する", async () => {
+    const screenThread: FeedbackThread = {
+      ...baseThread,
+      pageRoute: "/lands/L-1?projectId=p1",
+      targetType: "SCREEN_POSITION",
+      targetMetadata: { type: "SCREEN_POSITION", relativeX: 0.25, relativeY: 0.5 },
+      evidence: null,
+      messages: [{ ...baseThread.messages[0], body: "土地の表示位置を確認してください" }]
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/review-sessions?")) return response([session]);
+      if (url.endsWith(`/api/review-sessions/${session.id}/threads`)) return response([screenThread]);
+      throw new Error(`未定義の要求: ${url}`);
+    }) as typeof fetch;
+
+    const { unmount } = renderHost(fetchMock, undefined, {}, "/lands/L-1");
+
+    const pin = await screen.findByRole("button", { name: /土地の表示位置を確認してください/ });
+    expect(pin).toHaveStyle({ left: "256px", top: "384px" });
+
+    unmount();
+    renderHost(fetchMock, undefined, {}, "/lands/L-2");
+    await screen.findByRole("button", { name: "他の人の投稿を見る 1" });
+    expect(screen.queryByRole("button", { name: /土地の表示位置を確認してください/ })).not.toBeInTheDocument();
   });
 
   it("他の人の投稿を画面ごとに表示し、対象画面のスレッドへ移動できる", async () => {

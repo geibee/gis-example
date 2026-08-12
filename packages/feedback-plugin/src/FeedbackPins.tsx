@@ -60,12 +60,14 @@ function screenPinPosition(
   target: Extract<FeedbackTarget, { type: "UI_ELEMENT" | "SCREEN_POSITION" }>,
   pathname: string
 ): { x: number; y: number } | null {
-  const evidencePath = thread.evidence ? pathOf(thread.evidence.route) : null;
   const stored = {
     x: target.relativeX * document.documentElement.clientWidth,
     y: target.relativeY * document.documentElement.clientHeight
   };
-  if (target.type === "SCREEN_POSITION") return evidencePath === pathname ? stored : null;
+  if (target.type === "SCREEN_POSITION") {
+    const storedRoute = thread.pageRoute ?? thread.evidence?.route;
+    return storedRoute && pathOf(storedRoute) === pathOf(pathname) ? stored : null;
+  }
   const owner = findFeedbackOwner(target.feedbackTargetId);
   if (!owner) return null;
   const rect = owner.getBoundingClientRect();
