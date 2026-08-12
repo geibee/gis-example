@@ -1,4 +1,4 @@
-FROM docker.io/library/node:22-alpine AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/node:22-alpine AS build
 
 WORKDIR /repo
 COPY package.json package-lock.json ./
@@ -19,6 +19,11 @@ ARG VITE_FEEDBACK_API_BASE
 ARG VITE_FEEDBACK_ADMIN_URL
 ARG FEEDBACK_APPLICATION
 ARG FEEDBACK_ENVIRONMENT
+ARG CSP_CONNECT_SRC_EXTRA="http://localhost:8081"
+
+COPY apps/web/nginx.conf /tmp/default.conf
+RUN sed -i "s|__CSP_CONNECT_SRC_EXTRA__|${CSP_CONNECT_SRC_EXTRA}|g" /tmp/default.conf
+
 RUN npm --workspace @web-gis/feedback-plugin run build
 RUN VITE_FEEDBACK_APPLICATION_KEY="$FEEDBACK_APPLICATION" \
     VITE_FEEDBACK_ENVIRONMENT_KEY="$FEEDBACK_ENVIRONMENT" \
@@ -29,9 +34,6 @@ FROM docker.io/library/nginx:1.27-alpine
 # CSP の connect-src に加える環境依存の接続先 (OIDC IdP の origin 等)。
 # 本番ビルドでは --build-arg CSP_CONNECT_SRC_EXTRA="https://auth.example.com" のように
 # VITE_OIDC_AUTHORITY の origin と揃えて渡すこと。既定は dev の Keycloak
-ARG CSP_CONNECT_SRC_EXTRA="http://localhost:8081"
-
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
-RUN sed -i "s|__CSP_CONNECT_SRC_EXTRA__|${CSP_CONNECT_SRC_EXTRA}|g" /etc/nginx/conf.d/default.conf
+COPY --from=build /tmp/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

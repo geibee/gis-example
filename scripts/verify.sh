@@ -170,6 +170,7 @@ verify_web() {
     || fail "npm が見つかりません (fail-closed: web 変更は npm なしで合格にできない)"
 
   bash scripts/check-feedback-sdk-artifacts.sh
+  bash scripts/check-node-lock-platforms.sh
   # lockfile は npm workspaces のルートにあるため、ルートで npm ci を実行する
   npm ci
   # 独立Feedback SDKの固定tarballを利用するWeb GIS adapter。
