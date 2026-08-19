@@ -1,0 +1,6 @@
+# 旧 feedback-service のテスト fixture / ローカル開発用サンプル値。
+# いずれも実運用では未使用であることを確認済み。
+afe6d04789b49b94fb3572560dfcb8a474aa3e40:apps/feedback-service/src/test/kotlin/feedback/service/integration/StandaloneMigrationIntegrationTest.kt:generic-api-key:734
+d7512320439d80f728302fc389f1ba525d0d3eaf:deploy/.env.example:generic-api-key:5
+bbd7e8875a57104a9a538cfcf363b869223f6dea:apps/feedback-service/src/test/kotlin/feedback/service/WebhookDispatcherTest.kt:generic-api-key:17
+bbd7e8875a57104a9a538cfcf363b869223f6dea:apps/feedback-service/src/test/kotlin/feedback/service/integration/StandaloneMigrationIntegrationTest.kt:generic-api-key:420
