@@ -38,6 +38,12 @@ jobs:
           sudo mv gitleaks /usr/local/bin/
           gitleaks version
 
+      - name: Trivy をインストール (脆弱性スキャン / SBOM)
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/v0.70.0/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v0.70.0
+          trivy --version
+
       - name: シークレット検出 (git 履歴全体)
         run: |
           mkdir -p ci-results/sarif
@@ -45,13 +51,8 @@ jobs:
             --report-format sarif \
             --report-path ci-results/sarif/gitleaks.sarif
 
-      - name: Trivy をインストール (脆弱性スキャン / SBOM)
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin
-          trivy --version
-
       - name: 脆弱性スキャン (HIGH / CRITICAL で失敗)
+        if: always()
         run: |
           trivy fs --scanners vuln --severity HIGH,CRITICAL \
             --exit-code 1 \
@@ -90,12 +91,12 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Schemathesis をインストール
