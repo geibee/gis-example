@@ -9,6 +9,7 @@ PostGIS を正本データストアにした OSS ベースの Web GIS MVP です
 - GIS worker: Python + GDAL/OGR + psycopg (GIS ingestion only: file import into PostGIS)
 - Tile server: API dynamic MVT endpoint for newly created layers, with Martin included in the stack for PostGIS tile serving
 - DB: PostgreSQL + PostGIS
+- Feedback: `@geibee/feedback-redmine-plugin` + same-origin gateway + Redmine
 - Local runtime: Docker Compose
 
 ## Run
@@ -27,12 +28,28 @@ Services:
 - Keycloak (OIDC IdP): http://localhost:8081 (管理コンソールは `infra/.env` の `KC_BOOTSTRAP_ADMIN_*`、既定 `admin` / `admin`)
 - Martin: http://localhost:3000 (ループバックのみ)
 - PostgreSQL: localhost:5432 (`infra/.env` の `POSTGRES_*`、既定 `gis` / `gis`、ループバックのみ)
+- Feedback Redmine: http://localhost:3001 (ループバックのみ)
+- Feedback gateway: http://localhost:8082 (ループバックのみ。SPAは同一originのproxyを使用)
 
 Martin と PostgreSQL のホスト公開はローカル開発用に `127.0.0.1` バインドへ限定している。どちらも API の認可を迂回できる経路になるため、本番環境ではホストへ公開しないこと。
 
 本番は ECS タスク定義の `secrets` (Secrets Manager / SSM Parameter Store) で同じ環境変数を注入する。全コンポーネントの環境変数一覧 (ECS タスク定義のインプット)・シークレットローテーション運用・dev シード混入ガード・ROPC の扱いは [`docs/environment-variables.md`](docs/environment-variables.md) を参照。
 
 Uploaded files and generated runtime data are stored under `./data` (dev 既定の `UPLOAD_STORAGE=local`)。本番はアップロードを S3 に保存し、DB バックアップは RDS の自動バックアップ + PITR に委譲する — 構成とリストア runbook は [`docs/backup-restore.md`](docs/backup-restore.md) を参照。S3 経路は dev でも `infra/.env` の `UPLOAD_STORAGE=s3` + `docker compose --profile s3 up` (MinIO) で試せる。
+
+## Feedback System
+
+SPAはnpm公開済み`@geibee/feedback-redmine-plugin` `1.0.0-alpha.6`を通常のconsumerとして利用し、
+gatewayは標準イメージ`ghcr.io/geibee/feedback-redmine-gateway:1.0.0-alpha.6`をそのまま実行する。
+Feedback System本体やgateway serverのsourceは本リポジトリへ複製・再実装しない。
+公開gatewayの設定契約と本番配備は
+[`SPA導入ガイド`](https://github.com/geibee/feedback-system/blob/main/docs/spa-integration-guide.md)を正本とする。
+
+SPA右下のFeedback UIは`apps/web/src/feedbackRedmine.tsx`でhost routerへ接続し、MapLibreの
+スクリーンショットは`apps/web/src/feedbackMapRegistry.ts`を介して取得する。Redmine API keyと
+participant署名鍵は公開gatewayコンテナだけに注入し、browserへ公開しない。
+ローカルではComposeがFeedback専用project、integration user、custom fieldsを冪等作成する。
+環境変数と本番での供給元は[`docs/environment-variables.md`](docs/environment-variables.md)を参照。
 
 ## Bundled Tokyo Sample Data
 

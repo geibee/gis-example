@@ -118,6 +118,43 @@ dev: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — compose では MinIO の�
 | `VITE_API_BASE` | 任意 | `""` (同一オリジン相対パス) | ビルド引数 |
 | `VITE_OIDC_AUTHORITY` | 任意 (本番は明示) | `http://localhost:8081/realms/gis` | ビルド引数 |
 | `VITE_OIDC_CLIENT_ID` | 任意 | `gis-web` | ビルド引数 |
+| `VITE_FEEDBACK_REDMINE_APPLICATION_KEY` | Feedback有効時**必須** | composeが注入 | ビルド引数 |
+| `VITE_FEEDBACK_REDMINE_ENVIRONMENT_KEY` | Feedback有効時**必須** | composeが注入 | ビルド引数 |
+| `VITE_FEEDBACK_REDMINE_WORKSPACE_KEY` | Feedback有効時**必須** | composeが注入 | ビルド引数 |
+| `VITE_FEEDBACK_HOST_RELEASE` | Feedback有効時**必須** | `local` (`infra/.env`) | ビルド引数 (commit SHA / release ID) |
+
+## Feedback Redmine gateway (公開標準イメージ)
+
+`ghcr.io/geibee/feedback-redmine-gateway:1.0.0-alpha.6`を利用し、本リポジトリではgateway serverを
+実装・buildしない。gatewayはstatelessで、Feedback専用DBやobject storageを持たない。本番ではSPAと
+同一originの`/internal/feedback-redmine/v1`だけをreverse proxyし、8080番portを直接公開しない。
+
+| 名称 | 必須 | dev 既定 | 本番の供給元 |
+|---|---|---|---|
+| `PORT` | 任意 | `8080` | タスク定義 |
+| `FEEDBACK_PUBLIC_ORIGIN` | **必須** | `http://localhost:5173` | タスク定義 / SSM。本番はSPAのHTTPS origin |
+| `FEEDBACK_REDMINE_GATEWAY_PROFILE_JSON` または `FEEDBACK_REDMINE_GATEWAY_PROFILE_FILE` | どちらか**必須** | Composeがenv-only JSONを構成 | SSMまたはread-only file mount。両方の指定は禁止 |
+| `FEEDBACK_REDMINE_GATEWAY_API_KEY` または `FEEDBACK_REDMINE_GATEWAY_API_KEY_FILE` | どちらか**必須** (既定なし) | `infra/.env`のdev値 | **Secrets Manager**。最小権限integration user |
+| `FEEDBACK_PARTICIPANT_SIGNING_KEY` | **必須** (32 bytes以上、既定なし) | `infra/.env`のdev値 | **Secrets Manager** |
+| `NODE_ENV` | ローカルHTTP時のみ | `development` (Composeのみ) | 本番では設定しない |
+
+ローカルComposeは追加のprofile fileを持たず、`infra/.env`の`FEEDBACK_REDMINE_PROFILE_ID`、
+`FEEDBACK_REDMINE_*_KEY`、perspective、capture上限、Redmine ID群から
+`FEEDBACK_REDMINE_GATEWAY_PROFILE_JSON`を構成する。本番は同じshapeのJSONまたはprovision済みの
+server/client profile fileを配備基盤から供給する。profile JSONへAPI keyやparticipant署名鍵を含めない。
+
+webコンテナは起動時に次の非secret環境変数から
+`/.well-known/feedback-redmine.json`を生成する。Feedbackの有効・無効やgateway pathは
+SPAを再buildせず切り替えられる。
+
+| 名称 | 必須 | dev 既定 | 本番の供給元 |
+|---|---|---|---|
+| `FEEDBACK_REDMINE_ENABLED` | 任意 | `true` (compose) | タスク定義 / feature flag |
+| `FEEDBACK_REDMINE_PROFILE_ID` | Feedback有効時**必須** | `gis-local` | タスク定義 / SSM |
+| `FEEDBACK_REDMINE_GATEWAY_BASE_PATH` | 任意 | `/internal/feedback-redmine/v1` | タスク定義 / SSM |
+
+`FEEDBACK_REDMINE_GATEWAY_API_KEY`はSPA、HTML、client runtime config、profile JSONへ渡さない。
+`FEEDBACK_PARTICIPANT_SIGNING_KEY`の変更後は既存browserのparticipant credentialが無効になるため、再発行を伴う。
 
 ## martin (タイルサーバー)
 
@@ -146,6 +183,9 @@ Keycloak の本番モード運用 (ECS) か Cognito への移行を別途判断�
 | `JOB_QUEUE_MODE` / `ANALYSIS_RUNNER_MODE` | ジョブ実行基盤の切替 ([jobs-architecture.md](jobs-architecture.md))。`sqs` / `external` にする場合は `--profile sqs` で ElasticMQ と analysis-worker を同時起動する | `polling` / `in-process` |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | 開発 MinIO のルート資格情報 (`--profile s3` のときのみ使用。api / worker の `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` としても配線) | `minio` / `minio-secret` |
 | `POSTGRES_HOST_PORT` / `WEB_HOST_PORT` | ホスト側ポートの競合回避 | `5432` / `5173` |
+| `FEEDBACK_REDMINE_DB_PASSWORD` / `FEEDBACK_REDMINE_SECRET_KEY_BASE` | ローカルRedmine DB / Rails secret | `infra/.env.example`のdev値 |
+| `FEEDBACK_REDMINE_OPEN_STATUS_ID` / `FEEDBACK_REDMINE_CLOSED_STATUS_ID` | Redmine bootstrapで使用するstatus ID | `1` / `5` |
+| `FEEDBACK_REDMINE_HOST_PORT` / `FEEDBACK_REDMINE_GATEWAY_HOST_PORT` | ローカルRedmine / gatewayのループバック公開ポート | `3001` / `8082` |
 
 CI / verify 用の変数 (`VERIFY_*`, `SMOKE_*`, `FUZZ_*`) は各スクリプトのヘッダコメントを参照。
 

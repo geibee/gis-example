@@ -7,6 +7,7 @@ import AuthGate from "./AuthGate";
 import { oidcConfig } from "./auth";
 import { createQueryClient } from "./queries/queryClient";
 import { router } from "./router";
+import { FeedbackRedmineIntegration } from "./feedbackRedmine";
 import "./styles.css";
 
 // サーバ状態 (一覧・詳細・ジョブ進捗) のキャッシュを一元管理する QueryClient
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <QueryClientProvider client={queryClient}>
         <AuthGate>
           <RouterProvider router={router} />
+          <FeedbackRedmineIntegration />
         </AuthGate>
       </QueryClientProvider>
     </AuthProvider>

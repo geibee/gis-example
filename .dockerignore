@@ -1,0 +1,35 @@
+.git
+.DS_Store
+
+# ローカル資格情報をbuild contextへ送らない。
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# package install/build/testの生成物は各Dockerfile内で再生成する。
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+.vite
+**/.vite
+coverage
+**/coverage
+.gradle
+**/.gradle
+out
+**/out
+
+# 実行時データ、テスト結果、言語別cache。
+data
+ci-results
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+*.log

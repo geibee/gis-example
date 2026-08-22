@@ -10,6 +10,10 @@ COPY apps/web apps/web
 # 未指定 (dev) では ARG が環境変数として存在しないため、src/auth.ts の localhost 既定が使われる
 ARG VITE_OIDC_AUTHORITY
 ARG VITE_OIDC_CLIENT_ID
+ARG VITE_FEEDBACK_REDMINE_APPLICATION_KEY
+ARG VITE_FEEDBACK_REDMINE_ENVIRONMENT_KEY
+ARG VITE_FEEDBACK_REDMINE_WORKSPACE_KEY
+ARG VITE_FEEDBACK_HOST_RELEASE
 RUN npm --workspace apps/web run build
 
 FROM nginx:1.27-alpine
@@ -20,6 +24,7 @@ FROM nginx:1.27-alpine
 ARG CSP_CONNECT_SRC_EXTRA="http://localhost:8081"
 
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=755 apps/web/docker-entrypoint.d/40-feedback-redmine-runtime-config.sh /docker-entrypoint.d/
 RUN sed -i "s|__CSP_CONNECT_SRC_EXTRA__|${CSP_CONNECT_SRC_EXTRA}|g" /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

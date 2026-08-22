@@ -3,6 +3,7 @@ import maplibregl, { type MapLayerMouseEvent, type Map as MapLibreMap } from "ma
 import "maplibre-gl/dist/maplibre-gl.css";
 import { getAccessToken } from "../auth";
 import { baseStyle, defaultMapZoom, imperialPalaceCenter, layerColors } from "../constants";
+import { registerFeedbackMap } from "../feedbackMapRegistry";
 import {
   addMapLayers,
   focusFeatureResults,
@@ -97,7 +98,9 @@ export default function MapPane({
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.on("load", () => setMapReady(true));
     mapRef.current = map;
+    const unregisterFeedbackMap = registerFeedbackMap(map);
     return () => {
+      unregisterFeedbackMap();
       map.remove();
       mapRef.current = null;
       styleLayersByLayerId.current = {};

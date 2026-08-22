@@ -240,19 +240,132 @@ services:
     depends_on:
       - minio
 
+  # Feedbackの唯一の正本。ローカル検証でもSPAはブラウザ拡張ではなく、同梱pluginから
+  # same-origin gatewayを経由してこのRedmineへissueを作る。
+  feedback-redmine-db:
+    restart: unless-stopped
+    image: postgres:17.6-bookworm
+    environment:
+      POSTGRES_DB: redmine
+      POSTGRES_USER: redmine
+      POSTGRES_PASSWORD: ${FEEDBACK_REDMINE_DB_PASSWORD:?infra/.env のFEEDBACK_REDMINE_DB_PASSWORDが必要です}
+    volumes:
+      - feedback-redmine-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redmine -d redmine"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  feedback-redmine:
+    restart: unless-stopped
+    image: redmine:7.0.0-bookworm@sha256:0ec7a0f75c42b89aab6872bfd73cfcce4547476da6a7ee065af2b960237bfb5c
+    environment:
+      REDMINE_DB_POSTGRES: feedback-redmine-db
+      REDMINE_DB_DATABASE: redmine
+      REDMINE_DB_USERNAME: redmine
+      REDMINE_DB_PASSWORD: ${FEEDBACK_REDMINE_DB_PASSWORD:?infra/.env のFEEDBACK_REDMINE_DB_PASSWORDが必要です}
+      REDMINE_SECRET_KEY_BASE: ${FEEDBACK_REDMINE_SECRET_KEY_BASE:?infra/.env のFEEDBACK_REDMINE_SECRET_KEY_BASEが必要です}
+      REDMINE_LANG: ja
+    ports:
+      - "127.0.0.1:${FEEDBACK_REDMINE_HOST_PORT:-3001}:3000"
+    volumes:
+      - feedback-redmine-files:/usr/src/redmine/files
+    depends_on:
+      feedback-redmine-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "ruby", "-rnet/http", "-e", "exit(Net::HTTP.get_response(URI('http://127.0.0.1:3000/')).is_a?(Net::HTTPSuccess) ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  # Redmineのproject/tracker/11 custom fields/integration userを冪等作成するローカル専用one-shot。
+  # API keyそのものは標準出力へ出さない。
+  feedback-redmine-bootstrap:
+    restart: "no"
+    image: redmine:7.0.0-bookworm@sha256:0ec7a0f75c42b89aab6872bfd73cfcce4547476da6a7ee065af2b960237bfb5c
+    # official entrypointにdatabase.yml生成を任せた後、Rails runnerだけ差し替える。
+    command: ["bundle", "exec", "rails", "runner", "/bootstrap/bootstrap.rb"]
+    working_dir: /usr/src/redmine
+    environment:
+      RAILS_ENV: production
+      REDMINE_DB_POSTGRES: feedback-redmine-db
+      REDMINE_DB_DATABASE: redmine
+      REDMINE_DB_USERNAME: redmine
+      REDMINE_DB_PASSWORD: ${FEEDBACK_REDMINE_DB_PASSWORD:?infra/.env のFEEDBACK_REDMINE_DB_PASSWORDが必要です}
+      REDMINE_SECRET_KEY_BASE: ${FEEDBACK_REDMINE_SECRET_KEY_BASE:?infra/.env のFEEDBACK_REDMINE_SECRET_KEY_BASEが必要です}
+      FEEDBACK_REDMINE_GATEWAY_API_KEY: ${FEEDBACK_REDMINE_GATEWAY_API_KEY:?infra/.env のFEEDBACK_REDMINE_GATEWAY_API_KEYが必要です}
+      FEEDBACK_REDMINE_PROJECT_ID: ${FEEDBACK_REDMINE_PROJECT_ID:?infra/.env のFEEDBACK_REDMINE_PROJECT_IDが必要です}
+      FEEDBACK_REDMINE_TRACKER_ID: ${FEEDBACK_REDMINE_TRACKER_ID:?infra/.env のFEEDBACK_REDMINE_TRACKER_IDが必要です}
+      FEEDBACK_REDMINE_DEFAULT_PRIORITY_ID: ${FEEDBACK_REDMINE_DEFAULT_PRIORITY_ID:?infra/.env のFEEDBACK_REDMINE_DEFAULT_PRIORITY_IDが必要です}
+      FEEDBACK_REDMINE_OPEN_STATUS_ID: ${FEEDBACK_REDMINE_OPEN_STATUS_ID:?infra/.env のFEEDBACK_REDMINE_OPEN_STATUS_IDが必要です}
+      FEEDBACK_REDMINE_CLOSED_STATUS_ID: ${FEEDBACK_REDMINE_CLOSED_STATUS_ID:?infra/.env のFEEDBACK_REDMINE_CLOSED_STATUS_IDが必要です}
+      FEEDBACK_REDMINE_CUSTOM_FIELD_IDS_JSON: ${FEEDBACK_REDMINE_CUSTOM_FIELD_IDS_JSON:?infra/.env のFEEDBACK_REDMINE_CUSTOM_FIELD_IDS_JSONが必要です}
+    volumes:
+      - ./redmine:/bootstrap:ro
+    depends_on:
+      feedback-redmine:
+        condition: service_healthy
+
+  feedback-redmine-gateway:
+    restart: unless-stopped
+    image: ghcr.io/geibee/feedback-redmine-gateway:1.0.0-alpha.6@sha256:dffefd7871332a021d8ede507e1bfbbdac113474e1c5090178eeea0f11f86b03
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      NODE_ENV: development
+      FEEDBACK_PUBLIC_ORIGIN: ${FEEDBACK_PUBLIC_ORIGIN:?infra/.env のFEEDBACK_PUBLIC_ORIGINが必要です}
+      # 公開gatewayのenv-only profile。追加のprofile fileやconsumer側server実装を持たない。
+      FEEDBACK_REDMINE_GATEWAY_PROFILE_JSON: >-
+        {"profileId":"${FEEDBACK_REDMINE_PROFILE_ID:?infra/.env のFEEDBACK_REDMINE_PROFILE_IDが必要です}","clientProfile":{"schemaVersion":"1","id":"${FEEDBACK_REDMINE_PROFILE_ID:?infra/.env のFEEDBACK_REDMINE_PROFILE_IDが必要です}","displayName":"${FEEDBACK_REDMINE_PROFILE_DISPLAY_NAME:?infra/.env のFEEDBACK_REDMINE_PROFILE_DISPLAY_NAMEが必要です}","applicationKey":"${FEEDBACK_REDMINE_APPLICATION_KEY:?infra/.env のFEEDBACK_REDMINE_APPLICATION_KEYが必要です}","environmentKey":"${FEEDBACK_REDMINE_ENVIRONMENT_KEY:?infra/.env のFEEDBACK_REDMINE_ENVIRONMENT_KEYが必要です}","externalWorkspaceKey":"${FEEDBACK_REDMINE_WORKSPACE_KEY:?infra/.env のFEEDBACK_REDMINE_WORKSPACE_KEYが必要です}","perspectives":${FEEDBACK_REDMINE_PERSPECTIVES_JSON:?infra/.env のFEEDBACK_REDMINE_PERSPECTIVES_JSONが必要です},"capture":{"enabled":${FEEDBACK_REDMINE_CAPTURE_ENABLED:?infra/.env のFEEDBACK_REDMINE_CAPTURE_ENABLEDが必要です},"maximumUploadBytes":${FEEDBACK_REDMINE_MAXIMUM_UPLOAD_BYTES:?infra/.env のFEEDBACK_REDMINE_MAXIMUM_UPLOAD_BYTESが必要です},"contentTypes":["image/png","image/webp"]},"attachments":{"maximumInlinePreviewBytes":${FEEDBACK_REDMINE_MAXIMUM_INLINE_PREVIEW_BYTES:?infra/.env のFEEDBACK_REDMINE_MAXIMUM_INLINE_PREVIEW_BYTESが必要です},"maximumDownloadBytes":${FEEDBACK_REDMINE_MAXIMUM_DOWNLOAD_BYTES:?infra/.env のFEEDBACK_REDMINE_MAXIMUM_DOWNLOAD_BYTESが必要です}}},"redmineBaseUrl":"${FEEDBACK_REDMINE_BASE_URL:?infra/.env のFEEDBACK_REDMINE_BASE_URLが必要です}","projectId":${FEEDBACK_REDMINE_PROJECT_ID:?infra/.env のFEEDBACK_REDMINE_PROJECT_IDが必要です},"trackerId":${FEEDBACK_REDMINE_TRACKER_ID:?infra/.env のFEEDBACK_REDMINE_TRACKER_IDが必要です},"isPrivate":${FEEDBACK_REDMINE_IS_PRIVATE:?infra/.env のFEEDBACK_REDMINE_IS_PRIVATEが必要です},"defaultPriorityId":${FEEDBACK_REDMINE_DEFAULT_PRIORITY_ID:?infra/.env のFEEDBACK_REDMINE_DEFAULT_PRIORITY_IDが必要です},"customFieldIds":${FEEDBACK_REDMINE_CUSTOM_FIELD_IDS_JSON:?infra/.env のFEEDBACK_REDMINE_CUSTOM_FIELD_IDS_JSONが必要です},"authorizationMode":"resource-scoped","showRedmineLink":${FEEDBACK_REDMINE_SHOW_REDMINE_LINK:?infra/.env のFEEDBACK_REDMINE_SHOW_REDMINE_LINKが必要です},"closedStatusIds":${FEEDBACK_REDMINE_CLOSED_STATUS_IDS_JSON:?infra/.env のFEEDBACK_REDMINE_CLOSED_STATUS_IDS_JSONが必要です},"secretRef":"FEEDBACK_REDMINE_GATEWAY_API_KEY"}
+      FEEDBACK_REDMINE_GATEWAY_API_KEY: ${FEEDBACK_REDMINE_GATEWAY_API_KEY:?infra/.env のFEEDBACK_REDMINE_GATEWAY_API_KEYが必要です}
+      FEEDBACK_PARTICIPANT_SIGNING_KEY: ${FEEDBACK_PARTICIPANT_SIGNING_KEY:?infra/.env のFEEDBACK_PARTICIPANT_SIGNING_KEYが必要です}
+    ports:
+      - "127.0.0.1:${FEEDBACK_REDMINE_GATEWAY_HOST_PORT:-8082}:8080"
+    depends_on:
+      feedback-redmine:
+        condition: service_healthy
+      feedback-redmine-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:8080/internal/feedback-redmine/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   web:
     restart: unless-stopped
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_FEEDBACK_REDMINE_APPLICATION_KEY: ${FEEDBACK_REDMINE_APPLICATION_KEY:?infra/.env のFEEDBACK_REDMINE_APPLICATION_KEYが必要です}
+        VITE_FEEDBACK_REDMINE_ENVIRONMENT_KEY: ${FEEDBACK_REDMINE_ENVIRONMENT_KEY:?infra/.env のFEEDBACK_REDMINE_ENVIRONMENT_KEYが必要です}
+        VITE_FEEDBACK_REDMINE_WORKSPACE_KEY: ${FEEDBACK_REDMINE_WORKSPACE_KEY:?infra/.env のFEEDBACK_REDMINE_WORKSPACE_KEYが必要です}
+        VITE_FEEDBACK_HOST_RELEASE: ${FEEDBACK_HOST_RELEASE:?infra/.env のFEEDBACK_HOST_RELEASEが必要です}
+    environment:
+      FEEDBACK_REDMINE_ENABLED: ${FEEDBACK_REDMINE_ENABLED:-true}
+      FEEDBACK_REDMINE_PROFILE_ID: ${FEEDBACK_REDMINE_PROFILE_ID:?infra/.env のFEEDBACK_REDMINE_PROFILE_IDが必要です}
+      FEEDBACK_REDMINE_GATEWAY_BASE_PATH: ${FEEDBACK_REDMINE_GATEWAY_BASE_PATH:-/internal/feedback-redmine/v1}
     # ホスト側で 5173 が使用中の場合は WEB_HOST_PORT で変更できる
     # (OIDC のリダイレクト URI と CORS は 5173 前提のため、UI を使う場合は既定のままにする)
     ports:
       - "${WEB_HOST_PORT:-5173}:80"
     depends_on:
-      - api
-      - martin
+      api:
+        condition: service_started
+      martin:
+        condition: service_started
+      feedback-redmine-gateway:
+        condition: service_healthy
 
 volumes:
   postgres-data:
   minio-data:
+  feedback-redmine-db-data:
+  feedback-redmine-files:
