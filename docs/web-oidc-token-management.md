@@ -59,9 +59,9 @@ revocation endpoint で access/refresh token を失効させる。
 - **CSP との整合**: TLS 対応ブランチで導入する CSP に、silent サインインの iframe が IdP を
   読み込めるよう `frame-src <IdP origin>` (または `child-src` への追記) が必要。
   `connect-src` の IdP origin (token endpoint) は導入済みの `__CSP_CONNECT_SRC_EXTRA__` で対応する。
-  また、iframe の戻り先 `/silent-renew.html` だけは同一オリジンの親から表示できるよう、web nginx が
-  `frame-ancestors 'self'` / `X-Frame-Options: SAMEORIGIN` を返す。通常画面は引き続き
-  `frame-ancestors 'none'` / `X-Frame-Options: DENY` とし、埋込みを許可しない。
+  またcallback自身の`/silent-renew.html`はsame-origin iframe内で実行するため、同URIだけ
+  `frame-ancestors 'self'` / `X-Frame-Options: SAMEORIGIN`とする。その他の画面は引き続き
+  `frame-ancestors 'none'` / `X-Frame-Options: DENY`で埋め込みを拒否する。
 - **SSO Cookie**: iframe silent サインインは IdP の SSO Cookie がサードパーティ文脈で送られる
   必要がある。本番ではアプリと IdP を同一サイト (例: `app.example.com` と `auth.example.com`) に
   置くか、Cookie が `SameSite=None; Secure` であること (Keycloak は HTTPS 時に既定で対応)。
