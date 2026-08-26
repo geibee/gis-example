@@ -1,11 +1,6 @@
 import { type ComponentProps, type MutableRefObject, useEffect, useRef, useState } from "react";
 import maplibregl, { type MapLayerMouseEvent, type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import {
-  captureReadyCanvasContextAttributes,
-  FeedbackMapLibreAdapter,
-  useFeedbackPlugin
-} from "@web-gis/feedback-plugin";
 import { getAccessToken } from "../auth";
 import { baseStyle, defaultMapZoom, imperialPalaceCenter, layerColors } from "../constants";
 import {
@@ -51,7 +46,6 @@ export default function MapPane({
   const initializedLayerBounds = useRef(false);
   const seenLayerIds = useRef<Set<string>>(new Set());
   const [mapReady, setMapReady] = useState(false);
-  const { mode: reviewMode } = useFeedbackPlugin();
 
   useEffect(() => {
     apiRef.current = {
@@ -87,9 +81,6 @@ export default function MapPane({
       center: imperialPalaceCenter,
       zoom: defaultMapZoom,
       attributionControl: { compact: true },
-      // レビュー証跡 (docs/prototype-review.md) が地図を PNG に取り込めるようにする。
-      // 外すと地図領域が白紙の証跡になり、しかもエラーにならないので気付けない
-      canvasContextAttributes: captureReadyCanvasContextAttributes,
       // tilejson とタイル (/api/tiles) は MapLibre が直接取得するため、
       // ここでアクセストークンを付与する (API の認証必須化に対応)
       transformRequest: (url) => {
@@ -214,7 +205,6 @@ export default function MapPane({
     if (!mapReady || !map) return;
 
     const handleClick = (event: MapLayerMouseEvent) => {
-      if (reviewMode === "picking" || reviewMode === "capturing") return;
       const queryLayerIds = Object.values(styleLayersByLayerId.current)
         .flat()
         .filter((id) => map.getLayer(id));
@@ -238,7 +228,7 @@ export default function MapPane({
     return () => {
       map.off("click", handleClick);
     };
-  }, [layerById, mapReady, onNotice, onPickFeature, reviewMode]);
+  }, [layerById, mapReady, onNotice, onPickFeature]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => mapRef.current?.resize(), 0);
@@ -253,16 +243,5 @@ export default function MapPane({
     return () => observer.disconnect();
   }, []);
 
-  return (
-    <>
-      <MapSupportPane mapContainerRef={mapContainerRef} {...supportPaneProps} />
-      {mapReady && mapRef.current ? (
-        <FeedbackMapLibreAdapter
-          map={mapRef.current}
-          layers={layers}
-          styleLayersByLayerId={styleLayersByLayerId.current}
-        />
-      ) : null}
-    </>
-  );
+  return <MapSupportPane mapContainerRef={mapContainerRef} {...supportPaneProps} />;
 }

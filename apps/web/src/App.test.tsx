@@ -15,24 +15,6 @@ function useAdminMe() {
   server.use(http.get("*/api/me", () => HttpResponse.json<Me>(makeMe({ systemRole: "admin", displayName: "管理者" }))));
 }
 
-function useViewerMe() {
-  server.use(http.get("*/api/me", () => HttpResponse.json<Me>(makeMe({
-    memberships: [{
-      projectId: "p1",
-      role: "viewer",
-      permissions: [
-        "projects.view",
-        "layers.view",
-        "map.view",
-        "business-data.view",
-        "jobs.view",
-        "review.view",
-        "review.comment"
-      ]
-    }]
-  }))));
-}
-
 describe("区域一覧 (/zones)", () => {
   it("MSW が返す一覧データが描画される", async () => {
     renderWithProviders({ path: "/zones" });
@@ -73,36 +55,6 @@ describe("権限ガード (/admin)", () => {
     // 自分自身 (userId 一致) の行には (自分) マークが付く
     expect(await screen.findByText("(自分)")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/admin");
-  });
-});
-
-describe("レビュー参加者向け案内", () => {
-  it("viewerには管理タブを見せず、対象画面でレビュー内容を初回案内する", async () => {
-    useViewerMe();
-    window.localStorage.removeItem("web-gis.feedback.review-introduction.p1.rs-1");
-    renderWithProviders({ path: "/lands" });
-
-    const guide = await screen.findByRole("dialog", { name: "第1回 業務フローレビュー" });
-    expect(guide).toHaveTextContent("案件検索から詳細確認までの流れを確認してください");
-    expect(guide).toHaveTextContent("今回確認してほしいこと");
-    expect(guide).toHaveTextContent("今回は確認しなくてよいこと");
-    expect(guide).toHaveTextContent("今回の対象画面");
-    expect(screen.queryByRole("button", { name: "レビュー" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {
-      name: "レビュー通知：第1回 業務フローレビュー（この画面は対象、対象1画面）"
-    })).toBeInTheDocument();
-  });
-
-});
-
-describe("フィードバックスレッドのディープリンク", () => {
-  it("feedbackThread付きURLで対象画面とスレッドDrawerを同時に開く", async () => {
-    const threadId = "20000000-0000-4000-8000-000000000001";
-    const { router } = renderWithProviders({ path: `/lands?projectId=p1&feedbackThread=${threadId}` });
-
-    expect(await screen.findByRole("dialog", { name: "フィードバックスレッド" })).toBeInTheDocument();
-    expect(await screen.findByText("ディープリンクから直接開いたコメントです")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/lands");
   });
 });
 

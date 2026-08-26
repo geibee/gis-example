@@ -100,7 +100,6 @@ export function PartyWorkspace({
     <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
       {!detailOpen ? (
       <ObjectSidebar
-        feedbackIdPrefix="parties"
         title="関係者"
         query={query}
         setQuery={setQuery}
@@ -130,7 +129,6 @@ export function PartyWorkspace({
           columns={partyColumns}
           rows={items}
           rowKey={(party) => party.id}
-          rowFeedbackId={(party) => `parties.row.${party.id}`}
           onRowClick={(party) => onSelect(party.id)}
           selectedRowKey={selectedId}
           emptyMessage="関係者はありません"

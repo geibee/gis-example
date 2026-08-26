@@ -1,5 +1,4 @@
 import { useEffect, type DragEvent } from "react";
-import { feedbackMapAttribute } from "@web-gis/feedback-plugin";
 import {
   Eye,
   EyeOff,
@@ -136,7 +135,7 @@ export function MapSupportPane({
       </header>
 
       <div className="support-map-panel">
-        <div ref={mapContainerRef} className="map-container" {...{ [feedbackMapAttribute]: "" }} />
+        <div ref={mapContainerRef} className="map-container" />
       </div>
 
       <div className="map-support-scroll">

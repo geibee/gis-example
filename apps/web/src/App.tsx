@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Building2,
@@ -14,28 +13,15 @@ import {
   Users
 } from "lucide-react";
 import { useAuth } from "react-oidc-context";
-import { createFeedbackTransport, FeedbackTransportError } from "@feedback/core";
-import {
-  FeedbackOverlay,
-  FeedbackPluginProvider,
-  useFeedbackPlugin,
-  type FeedbackPluginNotification
-} from "@web-gis/feedback-plugin";
 import { AppShellProvider, useAppShell } from "./appShell";
-import { getAccessToken, notifyUnauthorized, tryRenewAccessToken } from "./auth";
 import { MapStateProvider } from "./mapState";
 import { MapPaneHost } from "./components/MapPaneHost";
-import { notifyError, notifySuccess } from "./notifications";
 import { ConfirmDialogHost } from "./ui/ConfirmDialog";
 import { Toaster } from "./ui/Toaster";
 import { activeScreenMeta, tabBasePath } from "./routeMeta";
-import { hasProjectPermission, reviewManagePermission } from "./permissions";
+import { hasProjectPermission } from "./permissions";
 import type { BusinessTab } from "./appTypes";
 import type { Me } from "./contracts";
-import { feedbackApplicationManifest, feedbackRoutes } from "./appRoutes";
-import { buildFeedbackAdminUrl } from "./feedbackAdminLink";
-import { resolveWebGisFeedbackThread } from "./feedbackHostAdapter";
-import { syncFeedbackApplicationManifest } from "./feedbackManifestSync";
 
 // ルートレイアウト。認証・レイアウト・ルーター配置のみを担い、
 // サーバ状態は TanStack Query (src/queries/)、画面固有の状態は各 src/screens/、
@@ -43,84 +29,11 @@ import { syncFeedbackApplicationManifest } from "./feedbackManifestSync";
 export default function App() {
   return (
     <AppShellProvider>
-      <FeedbackSdkHost>
-        <MapStateProvider>
-          <AppLayout />
-        </MapStateProvider>
-      </FeedbackSdkHost>
+      <MapStateProvider>
+        <AppLayout />
+      </MapStateProvider>
     </AppShellProvider>
   );
-}
-
-function FeedbackSdkHost({ children }: { children: ReactNode }) {
-  const { selectedProject } = useAppShell();
-  const queryClient = useQueryClient();
-  const currentPath = useRouterState({ select: (state) => state.location.pathname });
-  const feedbackApiBaseUrl = (import.meta.env.VITE_FEEDBACK_API_BASE ?? "/feedback/v1").replace(/\/$/, "");
-  const [manifestRevision, setManifestRevision] = useState(0);
-  useEffect(() => {
-    const configuredApplicationKey = import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis";
-    if (configuredApplicationKey !== feedbackApplicationManifest.applicationKey) {
-      console.warn("Feedback画面定義を同期できません: applicationKeyがホストのmanifestと一致しません");
-      return;
-    }
-    let active = true;
-    const transport = createFeedbackTransport({
-      baseUrl: feedbackApiBaseUrl,
-      getAccessToken: () => getAccessToken() ?? null,
-      refreshAccessToken: async () => await tryRenewAccessToken() ?? null,
-      fetch: window.fetch.bind(window)
-    });
-    let retryTimer: number | undefined;
-    const synchronize = async (attempt: number): Promise<void> => {
-      try {
-        const result = await syncFeedbackApplicationManifest(transport, feedbackApplicationManifest);
-        if (active && result !== "unchanged") setManifestRevision((value) => value + 1);
-      } catch (caught) {
-        if (active && attempt < 4 && isTemporaryManifestSyncError(caught)) {
-          retryTimer = window.setTimeout(() => void synchronize(attempt + 1), 1_000 * 2 ** attempt);
-          return;
-        }
-        // 画面定義の同期失敗で業務画面を停止しない。Feedback SDK側は従来どおりfail-closedになる。
-        console.warn("Feedback画面定義を同期できません", caught);
-      }
-    };
-    void synchronize(0);
-    return () => {
-      active = false;
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
-    };
-  }, [feedbackApiBaseUrl]);
-  return (
-    <FeedbackPluginProvider
-      key={manifestRevision}
-      apiMode="feedback-v1"
-      apiBaseUrl={feedbackApiBaseUrl}
-      applicationKey={import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis"}
-      environmentKey={import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local"}
-      projectId={selectedProject}
-      appVersion={import.meta.env.VITE_APP_VERSION ?? "dev"}
-      routes={feedbackRoutes}
-      currentPath={currentPath}
-      getAccessToken={getAccessToken}
-      refreshAccessToken={tryRenewAccessToken}
-      onNotification={handleFeedbackNotification}
-      queryClient={queryClient}
-    >
-      {children}
-    </FeedbackPluginProvider>
-  );
-}
-
-function isTemporaryManifestSyncError(caught: unknown): boolean {
-  return caught instanceof TypeError ||
-    (caught instanceof FeedbackTransportError && [404, 429, 502, 503, 504].includes(caught.status));
-}
-
-function handleFeedbackNotification(notification: FeedbackPluginNotification) {
-  if (notification.type === "success") notifySuccess(notification.message);
-  else if (notification.type === "error") notifyError(notification.message);
-  else notifyUnauthorized();
 }
 
 function AppLayout() {
@@ -130,7 +43,6 @@ function AppLayout() {
     me,
     projects,
     selectedProject,
-    setSelectedProject,
     paneMode,
     businessPaneOpen,
     mapSupportOpen,
@@ -139,50 +51,12 @@ function AppLayout() {
     mapPaneWidth,
     mapFullscreen
   } = useAppShell();
-  const { openThread } = useFeedbackPlugin();
-  const canManageReview = hasProjectPermission(me, selectedProject, reviewManagePermission);
-  const reviewManagementUrl = selectedProject && (canManageReview || me?.systemRole === "admin")
-    ? buildFeedbackAdminUrl(import.meta.env.VITE_FEEDBACK_ADMIN_URL ?? "http://localhost:5174/", {
-        applicationKey: import.meta.env.VITE_FEEDBACK_APPLICATION_KEY ?? "web-gis",
-        environmentKey: import.meta.env.VITE_FEEDBACK_ENVIRONMENT_KEY ?? "local",
-        externalWorkspaceKey: selectedProject
-      }, "create-review")
-    : undefined;
-
   // URL (マッチ中ルートの staticData) を唯一の正としてタブ強調・タイトルを導出する
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
   const screenTitle = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.title ?? null });
-  const linkedProjectId = useRouterState({
-    select: (state) => {
-      const value = (state.location.search as Record<string, unknown>).projectId;
-      return typeof value === "string" ? value : null;
-    }
-  });
-  const linkedThreadId = useRouterState({
-    select: (state) => resolveWebGisFeedbackThread(state.location.search as Record<string, unknown>)
-  });
-  const handledReviewLink = useRef("");
   useEffect(() => {
     document.title = screenTitle ? `${screenTitle} · Web GIS MVP` : "Web GIS MVP";
   }, [screenTitle]);
-
-  useEffect(() => {
-    if (!linkedThreadId) {
-      handledReviewLink.current = "";
-      return;
-    }
-    if (linkedProjectId && !projects.some((project) => project.id === linkedProjectId)) return;
-    // projectId付きリンクは先にホスト側のプロジェクト文脈を切り替え、次のrenderで
-    // SDKへthreadIdを渡す。異なるprojectIdのキャッシュ／Drawerを一瞬開かない。
-    if (linkedProjectId && linkedProjectId !== selectedProject) {
-      setSelectedProject(linkedProjectId);
-      return;
-    }
-    const linkKey = `${linkedProjectId ?? ""}:${linkedThreadId}`;
-    if (handledReviewLink.current === linkKey) return;
-    handledReviewLink.current = linkKey;
-    openThread(linkedThreadId);
-  }, [linkedProjectId, linkedThreadId, openThread, projects, selectedProject, setSelectedProject]);
 
   const navigateTab = (tab: BusinessTab) => void navigate({ to: tabBasePath[tab] });
 
@@ -197,24 +71,24 @@ function AppLayout() {
           </div>
         </div>
         <nav className="top-tabs" aria-label="業務タブ">
-          <button data-feedback-id="navigation.zones" className={activeTab === "zone" ? "active" : ""} type="button" onClick={() => navigateTab("zone")}>
+          <button className={activeTab === "zone" ? "active" : ""} type="button" onClick={() => navigateTab("zone")}>
             <MapIcon size={17} />
             区域
           </button>
-          <button data-feedback-id="navigation.lands" className={activeTab === "lands" ? "active" : ""} type="button" onClick={() => navigateTab("lands")}>
+          <button className={activeTab === "lands" ? "active" : ""} type="button" onClick={() => navigateTab("lands")}>
             <MapIcon size={17} />
             土地
           </button>
-          <button data-feedback-id="navigation.buildings" className={activeTab === "buildings" ? "active" : ""} type="button" onClick={() => navigateTab("buildings")}>
+          <button className={activeTab === "buildings" ? "active" : ""} type="button" onClick={() => navigateTab("buildings")}>
             <Building2 size={17} />
             建物
           </button>
-          <button data-feedback-id="navigation.parties" className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
+          <button className={activeTab === "parties" ? "active" : ""} type="button" onClick={() => navigateTab("parties")}>
             <Users size={17} />
             関係者
           </button>
           {me?.systemRole === "admin" ? (
-            <button data-feedback-id="navigation.admin" className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
+            <button className={activeTab === "admin" ? "active" : ""} type="button" onClick={() => navigateTab("admin")}>
               <ShieldCheck size={17} />
               管理
             </button>
@@ -232,7 +106,6 @@ function AppLayout() {
             {businessPaneOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
           </button>
           <button
-            data-feedback-id="map.visibility"
             className="icon-button"
             type="button"
             onClick={toggleMapPane}
@@ -266,8 +139,6 @@ function AppLayout() {
         <MapPaneHost />
       </main>
 
-      {/* レビュー機能はどの画面からでも状態が分かるよう、画面ではなく最前面のシェルに置く。 */}
-      <FeedbackOverlay reviewManagementUrl={reviewManagementUrl} />
       <Toaster />
       <ConfirmDialogHost />
     </div>

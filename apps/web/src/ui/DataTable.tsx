@@ -22,8 +22,6 @@ export type DataTableProps<TRow> = {
   selectedRowKey?: string | null;
   /** 行ごとの追加クラス (例: 無効ユーザーのグレーアウト) */
   rowClassName?: (row: TRow) => string | undefined;
-  /** レビューコメントの対象として行を追跡する安定 ID。 */
-  rowFeedbackId?: (row: TRow) => string;
   /** 0 件時に表の下へ出す文言 */
   emptyMessage: string;
   /** 1 ページの行数。指定すると件数がこれを超えたときページャを出す */
@@ -41,7 +39,6 @@ export function DataTable<TRow>({
   onRowClick,
   selectedRowKey,
   rowClassName,
-  rowFeedbackId,
   emptyMessage,
   pageSize,
   tableClassName = "business-table",
@@ -73,7 +70,6 @@ export function DataTable<TRow>({
             <tr
               key={key}
               className={classes || undefined}
-              data-feedback-id={rowFeedbackId?.(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {columns.map((column) => (

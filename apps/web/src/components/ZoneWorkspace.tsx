@@ -240,7 +240,6 @@ export function ZoneWorkspace({
     <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
       {!detailOpen ? (
         <ObjectSidebar
-          feedbackIdPrefix="zones"
           title="区域"
           query={query}
           setQuery={setQuery}
@@ -267,7 +266,6 @@ export function ZoneWorkspace({
             columns={zoneColumns(layers)}
             rows={items}
             rowKey={(zone) => zone.id}
-            rowFeedbackId={(zone) => `zones.row.${zone.id}`}
             onRowClick={(zone) => onSelect(zone.id)}
             selectedRowKey={selectedId}
             emptyMessage="区域はありません"
@@ -289,7 +287,6 @@ export function ZoneWorkspace({
           {hasDetailContent ? (
             <>
               <ObjectDetailHeader
-                feedbackTargetId="zones.detail-header"
                 id={creating ? draft.id || "新規区域" : selected?.id ?? ""}
                 title={draft.name || "区域"}
                 subtitle={draft.zoneType}
@@ -299,16 +296,16 @@ export function ZoneWorkspace({
               />
               <div className="object-form">
                 {!creating ? (
-                  <label data-feedback-id="zones.field.id">
+                  <label>
                     ID
                     <input value={draft.id} disabled onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
                   </label>
                 ) : null}
-                <label data-feedback-id="zones.field.name">
+                <label>
                   区域名
                   <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
                 </label>
-                <label data-feedback-id="zones.field.type">
+                <label>
                   種別
                   <ChoiceSelect
                     value={draft.zoneType}
@@ -317,7 +314,7 @@ export function ZoneWorkspace({
                     emptyLabel="選択"
                   />
                 </label>
-                <label data-feedback-id="zones.field.status">
+                <label>
                   ステータス
                   <ChoiceSelect
                     value={draft.status}
@@ -328,7 +325,7 @@ export function ZoneWorkspace({
                 </label>
                 {!creating ? zoneFeatureFields : null}
                 {!creating ? (
-                  <label className="wide-field" data-feedback-id="zones.field.memo">
+                  <label className="wide-field">
                     メモ
                     <textarea value={draft.memo} onChange={(event) => setDraft((current) => ({ ...current, memo: event.target.value }))} />
                   </label>

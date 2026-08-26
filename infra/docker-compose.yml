@@ -135,13 +135,6 @@ services:
       SQS_ANALYSIS_QUEUE_URL: ${SQS_ANALYSIS_QUEUE_URL:-http://elasticmq:9324/000000000000/analysis-jobs}
       SQS_IMPORT_QUEUE_URL: ${SQS_IMPORT_QUEUE_URL:-http://elasticmq:9324/000000000000/import-jobs}
       SQS_REGION: ${S3_REGION:-us-east-1}
-      # レビュー外部通知は接続先を設定したチャネルだけが管理画面で有効化可能になる
-      REVIEW_APP_URL: http://localhost:5173
-      REVIEW_EMAIL_FROM: ${REVIEW_EMAIL_FROM:-}
-      REVIEW_SES_REGION: ${S3_REGION:-us-east-1}
-      REVIEW_TEAMS_WEBHOOK_URL: ${REVIEW_TEAMS_WEBHOOK_URL:-}
-      REVIEW_ISSUE_WEBHOOK_URL: ${REVIEW_ISSUE_WEBHOOK_URL:-}
-      REVIEW_ISSUE_WEBHOOK_TOKEN: ${REVIEW_ISSUE_WEBHOOK_TOKEN:-}
     ports:
       - "8080:8080"
     volumes:
@@ -266,11 +259,6 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
-      args:
-        VITE_FEEDBACK_API_BASE: ${VITE_FEEDBACK_API_BASE:-http://localhost:8090/feedback/v1}
-        VITE_FEEDBACK_ADMIN_URL: ${VITE_FEEDBACK_ADMIN_URL:-http://localhost:5174/}
-        FEEDBACK_APPLICATION: ${VITE_FEEDBACK_APPLICATION_KEY:-web-gis}
-        FEEDBACK_ENVIRONMENT: ${VITE_FEEDBACK_ENVIRONMENT_KEY:-local}
     # ホスト側で 5173 が使用中の場合は WEB_HOST_PORT で変更できる
     # (OIDC のリダイレクト URI と CORS は 5173 前提のため、UI を使う場合は既定のままにする)
     ports:

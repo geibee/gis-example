@@ -71,13 +71,6 @@ data class ZoneListQuery(
     val offset: Int = 0
 )
 
-data class ReviewSessionListQuery(
-    val projectId: String,
-    val status: String?,
-    val limit: Int? = null,
-    val offset: Int = 0
-)
-
 // limit/offset は検証済みの Int のみを受け取り SQL へ直接埋め込む (バインド順を保つため)
 internal fun pagingClause(limit: Int?, offset: Int): String = buildString {
     if (limit != null) append(" LIMIT ").append(limit)

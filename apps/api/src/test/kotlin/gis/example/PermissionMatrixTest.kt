@@ -24,9 +24,6 @@ class PermissionMatrixTest {
         "ANALYSIS_EXECUTE" to "analysis.run",
         "JOB_READ" to "jobs.view",
         "TILE_READ" to "map.view",
-        "REVIEW_READ" to "review.view",
-        "REVIEW_COMMENT" to "review.comment",
-        "REVIEW_MANAGE" to "review.manage",
         "USER_ADMIN" to "admin.users.manage",
         "MEMBER_ADMIN" to "admin.members.manage"
     )
@@ -64,9 +61,7 @@ class PermissionMatrixTest {
             "layers.view",
             "map.view",
             "business-data.view",
-            "jobs.view",
-            "review.view",
-            "review.comment"
+            "jobs.view"
         ),
         "EDITOR" to setOf(
             "projects.view",
@@ -78,10 +73,7 @@ class PermissionMatrixTest {
             "business-data.edit",
             "import.run",
             "analysis.run",
-            "jobs.view",
-            "review.view",
-            "review.comment",
-            "review.manage"
+            "jobs.view"
         )
     )
 
@@ -107,9 +99,7 @@ class PermissionMatrixTest {
             "FEATURE_READ",
             "BUSINESS_READ",
             "JOB_READ",
-            "TILE_READ",
-            "REVIEW_READ",
-            "REVIEW_COMMENT"
+            "TILE_READ"
         ),
         "EDITOR" to setOf(
             "PROJECT_READ",
@@ -122,10 +112,7 @@ class PermissionMatrixTest {
             "IMPORT_EXECUTE",
             "ANALYSIS_EXECUTE",
             "JOB_READ",
-            "TILE_READ",
-            "REVIEW_READ",
-            "REVIEW_COMMENT",
-            "REVIEW_MANAGE"
+            "TILE_READ"
         )
     )
 

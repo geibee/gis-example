@@ -235,9 +235,7 @@ class AuthzIntegrationTest {
                 "layers.view",
                 "map.view",
                 "business-data.view",
-                "jobs.view",
-                "review.view",
-                "review.comment"
+                "jobs.view"
             ),
             memberships[0].getValue("permissions").jsonArray.map { it.jsonPrimitive.content }.toSet()
         )

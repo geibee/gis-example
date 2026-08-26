@@ -44,7 +44,7 @@ class LocalUploadStorage(private val uploadDir: Path) : UploadStorage {
         Files.createDirectories(uploadDir)
         val target = uploadDir.resolve(objectName)
         require(target.normalize().startsWith(uploadDir.normalize())) { "objectName escapes uploadDir: $objectName" }
-        // objectName は S3 のキー相当なので "review-evidence/xxx.png" のような接頭辞を含み得る。
+        // objectName は S3 のキー相当なので接頭辞を含み得る。
         // ローカル保存でも同じ objectName で成立するよう、親ディレクトリを作る
         target.parent?.let { Files.createDirectories(it) }
         try {

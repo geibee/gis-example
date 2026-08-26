@@ -22,8 +22,6 @@ type FieldOwnProps = {
   error?: string;
   /** 2 カラムグリッド (object-form) で全幅を使う */
   wide?: boolean;
-  /** レビューコメント対象としての安定 ID (label 全体に付与する)。 */
-  feedbackTargetId?: string;
 };
 
 function fieldClassName(wide?: boolean) {
@@ -63,12 +61,12 @@ function fieldAria(required: boolean | undefined, error: string | undefined, err
 export type TextFieldProps = FieldOwnProps & InputHTMLAttributes<HTMLInputElement>;
 
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function TextField(
-  { label, required, error, wide, feedbackTargetId, ...inputProps },
+  { label, required, error, wide, ...inputProps },
   ref
 ) {
   const errorId = useId();
   return (
-    <label className={fieldClassName(wide)} data-feedback-id={feedbackTargetId}>
+    <label className={fieldClassName(wide)}>
       <FieldLabel label={label} required={required} />
       <input ref={ref} {...fieldAria(required, error, errorId)} {...inputProps} />
       <FieldError id={errorId} error={error} />
@@ -87,12 +85,12 @@ export const NumberField = forwardRef<HTMLInputElement, TextFieldProps>(function
 export type TextAreaFieldProps = FieldOwnProps & TextareaHTMLAttributes<HTMLTextAreaElement>;
 
 export const TextAreaField = forwardRef<HTMLTextAreaElement, TextAreaFieldProps>(function TextAreaField(
-  { label, required, error, wide, feedbackTargetId, ...textareaProps },
+  { label, required, error, wide, ...textareaProps },
   ref
 ) {
   const errorId = useId();
   return (
-    <label className={fieldClassName(wide)} data-feedback-id={feedbackTargetId}>
+    <label className={fieldClassName(wide)}>
       <FieldLabel label={label} required={required} />
       <textarea ref={ref} {...fieldAria(required, error, errorId)} {...textareaProps} />
       <FieldError id={errorId} error={error} />
@@ -111,13 +109,13 @@ export type SelectFieldProps = FieldOwnProps &
   };
 
 export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(function SelectField(
-  { label, required, error, wide, feedbackTargetId, options, emptyLabel = "選択", currentValue, ...selectProps },
+  { label, required, error, wide, options, emptyLabel = "選択", currentValue, ...selectProps },
   ref
 ) {
   const errorId = useId();
   const normalizedOptions = mergeChoiceOptions(options, currentValue);
   return (
-    <label className={fieldClassName(wide)} data-feedback-id={feedbackTargetId}>
+    <label className={fieldClassName(wide)}>
       <FieldLabel label={label} required={required} />
       <select ref={ref} {...fieldAria(required, error, errorId)} {...selectProps}>
         {emptyLabel !== null ? <option value="">{emptyLabel}</option> : null}

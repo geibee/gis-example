@@ -6,7 +6,6 @@ import gis.example.routes.AppDependencies
 import gis.example.routes.adminRoutes
 import gis.example.routes.buildingRoutes
 import gis.example.routes.featureRoutes
-import gis.example.routes.feedbackRoutes
 import gis.example.routes.healthRoutes
 import gis.example.routes.jobRoutes
 import gis.example.routes.landRoutes
@@ -14,9 +13,6 @@ import gis.example.routes.layerRoutes
 import gis.example.routes.meRoutes
 import gis.example.routes.partyRoutes
 import gis.example.routes.projectRoutes
-import gis.example.routes.reviewRoutes
-import gis.example.routes.reviewGovernanceRoutes
-import gis.example.routes.reviewNotificationRoutes
 import gis.example.routes.tileRoutes
 import gis.example.routes.zoneRoutes
 import io.ktor.http.HttpStatusCode
@@ -57,11 +53,9 @@ fun Application.module(
     db: Database = Database.fromEnv(),
     oidcSettings: OidcSettings = OidcSettings.fromEnv()
 ) {
-    val apiRouteMode = parseApiRouteMode(System.getenv("API_ROUTE_MODE"))
     val allowedWebOrigins = allowedWebOriginsFromEnv()
     db.migrateSchema()
     val uploadDir = Path.of(System.getenv("UPLOAD_DIR") ?: "/tmp/web-gis-uploads")
-    val reviewNotificationSender = reviewNotificationSenderFromEnv()
     val deps = AppDependencies(
         db = db,
         uploadDir = uploadDir,
@@ -71,17 +65,13 @@ fun Application.module(
         // localhost 既定は dev 専用。本番では CloudFront 配下の HTTPS URL を必ず設定する
         apiPublicUrl = (System.getenv("API_PUBLIC_URL") ?: "http://localhost:8080").trimEnd('/'),
         maxUploadBytes = (System.getenv("UPLOAD_MAX_BYTES") ?: DEFAULT_MAX_UPLOAD_BYTES.toString()).toLong(),
-        reviewNotificationCapabilities = reviewNotificationSender.capabilities,
         // JOB_QUEUE_MODE=sqs でジョブ作成コミット後に SQS へ起動通知を送る (既定 polling は no-op)
         jobDispatcher = jobDispatcherFromEnv()
     )
     // 分析ランナーの配置 (issue #24)。既定 in-process は dev / 単一ホスト互換。
     // 本番 (ECS) は external にして独立サービス (bin/analysis-worker) へ分離し、
     // API のレイテンシが解析負荷の影響を受けないようにする
-    val analysisJobRunner = if (apiRouteMode == ApiRouteMode.REVIEW_SIDECAR) {
-        // レビュー専用コンテナは分析ジョブをclaimしない。同じイメージを安全に並行起動できる。
-        null
-    } else when (val mode = (System.getenv("ANALYSIS_RUNNER_MODE") ?: "in-process").trim().lowercase()) {
+    val analysisJobRunner = when (val mode = (System.getenv("ANALYSIS_RUNNER_MODE") ?: "in-process").trim().lowercase()) {
         "in-process" -> {
             val settings = AnalysisWorkerSettings.fromEnv()
             AnalysisJobRunner(
@@ -96,33 +86,8 @@ fun Application.module(
         else -> error("ANALYSIS_RUNNER_MODE は in-process | external のいずれかを指定してください: $mode")
     }
 
-    // 外部通知は HTTP リクエスト処理から分離し、transactional outbox を非同期に配信する。
-    // 本番で API を水平分割する場合は external + bin/review-notification-worker を推奨する。
-    val reviewNotificationWorker = when (
-        val mode = (System.getenv("REVIEW_NOTIFICATION_RUNNER_MODE") ?: "in-process").trim().lowercase()
-    ) {
-        "in-process" -> if (
-            reviewNotificationSender.capabilities.email ||
-            reviewNotificationSender.capabilities.teams ||
-            reviewNotificationSender.capabilities.issue
-        ) {
-            ReviewNotificationWorker(
-                db,
-                reviewNotificationSender,
-                ReviewNotificationWorkerSettings.fromEnv()
-            ).also { it.start() }
-        } else {
-            null
-        }
-        "external" -> null
-        else -> error(
-            "REVIEW_NOTIFICATION_RUNNER_MODE は in-process | external のいずれかを指定してください: $mode"
-        )
-    }
-
     environment.monitor.subscribe(ApplicationStopped) {
         analysisJobRunner?.stop()
-        reviewNotificationWorker?.stop() ?: reviewNotificationSender.close()
         deps.jobDispatcher.close()
         deps.uploadStorage.close()
         db.close()
@@ -167,25 +132,11 @@ fun Application.module(
         authenticate(OIDC_AUTH_NAME) {
             // 実行時の安全網: 認可判定マーカーのない 2xx 応答を 500 に置き換える
             install(authzGuardPlugin(db))
-            when (apiRouteMode) {
-                ApiRouteMode.FULL -> authenticatedApiRoutes(deps)
-                ApiRouteMode.REVIEW_SIDECAR -> authenticatedReviewSidecarRoutes(deps)
-            }
+            authenticatedApiRoutes(deps)
         }
     }
     // 起動時の安全網: 認可宣言のないルートが 1 つでもあれば起動に失敗する
     validateAuthorizedRoutes(rootRoute)
-}
-
-internal enum class ApiRouteMode {
-    FULL,
-    REVIEW_SIDECAR
-}
-
-internal fun parseApiRouteMode(raw: String?): ApiRouteMode = when (val mode = raw?.trim()?.lowercase() ?: "full") {
-    "full" -> ApiRouteMode.FULL
-    "review-sidecar" -> ApiRouteMode.REVIEW_SIDECAR
-    else -> error("API_ROUTE_MODE は full | review-sidecar のいずれかを指定してください: $mode")
 }
 
 /**
@@ -204,23 +155,6 @@ fun Route.authenticatedApiRoutes(deps: AppDependencies) {
     buildingRoutes(deps)
     partyRoutes(deps)
     zoneRoutes(deps)
-    reviewRoutes(deps)
-    reviewGovernanceRoutes(deps)
-    reviewNotificationRoutes(deps)
-    feedbackRoutes(deps)
     jobRoutes(deps)
     tileRoutes(deps)
-}
-
-/**
- * フィードバックバックエンドを同じイメージのcompanion containerとして分離する経路集合。
- * JWT検証、DBメンバーシップ認可、監査、証跡、通知設定を本体と同じ実装で保ったまま、
- * 分析・GIS・業務CRUDは公開しない。GatewayまたはSDKのapiBaseUrlでこのコンテナへ明示的に振り分ける。
- */
-fun Route.authenticatedReviewSidecarRoutes(deps: AppDependencies) {
-    meRoutes(deps)
-    reviewRoutes(deps)
-    reviewGovernanceRoutes(deps)
-    reviewNotificationRoutes(deps)
-    feedbackRoutes(deps)
 }

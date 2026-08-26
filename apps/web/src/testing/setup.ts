@@ -5,7 +5,7 @@
 // - jsdom で動かないモジュールの全体モック (maplibre-gl / OIDC)
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { clearToasts } from "../notifications";
 import { authStub, makeAuthStub } from "./authStub";
 import { server } from "./server";
@@ -29,12 +29,6 @@ vi.mock("react-oidc-context", async () => {
 window.scrollTo = vi.fn();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-
-// 大半の画面テストでは開始案内を既読にして本来の検証対象へ集中する。
-// 開始案内そのものの統合テストだけがこのキーを削除する。
-beforeEach(() => {
-  window.localStorage.setItem("web-gis.feedback.review-introduction.p1.rs-1", "dismissed");
-});
 
 afterEach(() => {
   server.resetHandlers();

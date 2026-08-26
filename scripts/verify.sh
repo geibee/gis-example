@@ -51,8 +51,6 @@ classify_paths() {
         NEED_WORKER=1 ;;
       apps/web/*)
         NEED_WEB=1 ;;
-      packages/feedback-plugin/* | vendor/feedback-sdk/*)
-        NEED_WEB=1 ;;
       infra/postgres/*)
         # DB スキーマ・シードは api / worker の共有契約
         NEED_API=1; NEED_WORKER=1 ;;
@@ -169,14 +167,9 @@ verify_web() {
   command -v npm >/dev/null 2>&1 \
     || fail "npm が見つかりません (fail-closed: web 変更は npm なしで合格にできない)"
 
-  bash scripts/check-feedback-sdk-artifacts.sh
   bash scripts/check-node-lock-platforms.sh
   # lockfile は npm workspaces のルートにあるため、ルートで npm ci を実行する
   npm ci
-  # 独立Feedback SDKの固定tarballを利用するWeb GIS adapter。
-  npm --workspace @web-gis/feedback-plugin run typecheck
-  npm --workspace @web-gis/feedback-plugin run test
-  npm --workspace @web-gis/feedback-plugin run build
   npm --workspace apps/web run typecheck
   # API 契約: Spectral lint + 生成型 (generated.ts) が openapi.yaml と同期しているか
   npm --workspace apps/web run lint:contracts

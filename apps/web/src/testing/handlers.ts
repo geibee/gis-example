@@ -7,8 +7,6 @@
 import { http, HttpResponse } from "msw";
 import type {
   Building,
-  FeedbackThread,
-  FeedbackSummary,
   Feature,
   FeatureSearchResult,
   Land,
@@ -17,21 +15,14 @@ import type {
   Party,
   Project,
   ProjectMember,
-  ReviewRetentionPolicy,
-  ReviewNotificationSettings,
-  ReviewPerspectiveDefinition,
-  ReviewSession,
   UserAccount,
   Zone,
   ZonePartySummary
 } from "../contracts";
-import { feedbackApplicationManifest } from "../appRoutes";
 import {
   makeMe,
-  makeFeedbackThread,
   makeProject,
   makeProjectMember,
-  makeReviewSession,
   makeUserAccount,
   makeZone,
   makeZonePartySummary
@@ -43,141 +34,9 @@ export const defaultZones: Zone[] = [
 ];
 
 export const defaultHandlers = [
-  http.get("*/feedback/v1/capabilities", () => HttpResponse.json({
-    apiVersion: "1.0",
-    apiMajorVersion: 1,
-    manifestSchemaVersions: ["1"],
-    targetSchemaVersions: ["1"],
-    evidence: { maxBytes: 5_000_000, maxCountPerWorkspace: 1000, acceptedContentTypes: ["image/png"] },
-    features: []
-  })),
-  http.get("*/feedback/v1/applications/:applicationKey/manifest", () =>
-    HttpResponse.json(feedbackApplicationManifest, { headers: { ETag: '"v3"' } })
-  ),
-  http.get("*/feedback/v1/sessions", () => HttpResponse.json({
-    items: [{
-      id: "rs-1",
-      applicationKey: "web-gis",
-      environmentKey: "local",
-      externalWorkspaceKey: "p1",
-      manifestVersion: "3",
-      title: "第1回 業務フローレビュー",
-      description: "案件検索から詳細確認までの流れを確認してください",
-      status: "open",
-      outOfScopePosting: "warn",
-      startAt: "2026-08-10T00:00:00Z",
-      endAt: "2026-08-20T09:00:00Z",
-      scopes: [{ pageKey: "lands.list", routeTemplate: "/lands", reviewable: true }],
-      perspectives: [
-        { code: "BUSINESS_FLOW", label: "業務フロー", status: "active", guidance: null },
-        { code: "UI_DESIGN", label: "デザイン・配色", status: "future", guidance: "次回確認します" },
-        { code: "PERFORMANCE", label: "性能", status: "out-of-scope", guidance: "性能検証で確認します" }
-      ],
-      createdAt: "2026-08-01T00:00:00Z",
-      updatedAt: "2026-08-01T00:00:00Z",
-      version: 1
-    }],
-    nextCursor: null,
-    totalCount: 1
-  })),
-  http.get("*/feedback/v1/sessions/:id/threads", () => HttpResponse.json({ items: [], nextCursor: null, totalCount: 0 })),
-  http.get("*/feedback/v1/me", () => HttpResponse.json({
-    participant: { principalId: "u1", displayName: "一般ユーザー", participantName: "レビュー担当A" },
-    memberships: [{ externalWorkspaceKey: "p1", permissions: ["feedback.read", "feedback.comment", "feedback.manage"] }]
-  })),
-  http.get("*/feedback/v1/threads/:threadId", ({ params }) => HttpResponse.json({
-    id: String(params.threadId),
-    sessionId: "rs-1",
-    displayNumber: 1,
-    location: { schemaVersion: "1", pageKey: "lands.list", routeTemplate: "/lands", pathParameters: {}, queryParameters: {} },
-    target: { schemaVersion: "1", kind: "screen-position", relativeX: 0.5, relativeY: 0.5 },
-    perspectiveCode: "BUSINESS_FLOW",
-    status: "open",
-    reporter: { principalId: "u1", displayName: "一般ユーザー", participantName: "レビュー担当A" },
-    evidenceAvailable: false,
-    messages: [{
-      id: "30000000-0000-4000-8000-000000000001",
-      threadId: String(params.threadId),
-      author: { principalId: "u1", displayName: "一般ユーザー", participantName: "レビュー担当A" },
-      body: "ディープリンクから直接開いたコメントです",
-      createdAt: "2026-08-12T01:15:00Z",
-      editedAt: null,
-      version: 1
-    }],
-    createdAt: "2026-08-12T01:15:00Z",
-    updatedAt: "2026-08-12T01:15:00Z",
-    version: 1
-  })),
   http.get("*/api/me", () => HttpResponse.json<Me>(makeMe())),
   http.get("*/api/projects", () => HttpResponse.json<Project[]>([makeProject()])),
   http.get("*/api/layers", () => HttpResponse.json<Layer[]>([])),
-  http.get("*/api/review-perspectives", () =>
-    HttpResponse.json<ReviewPerspectiveDefinition[]>([
-      {
-        code: "BUSINESS_FLOW",
-        label: "業務フロー",
-        description: "一連の業務が想定どおり進められるか",
-        displayOrder: 10
-      },
-      {
-        code: "MAP_OPERATION",
-        label: "地図操作",
-        description: "地図と業務情報の連動を確認する",
-        displayOrder: 40
-      },
-      {
-        code: "UI_DESIGN",
-        label: "デザイン・配色",
-        description: null,
-        displayOrder: 50
-      },
-      {
-        code: "PERFORMANCE",
-        label: "性能",
-        description: null,
-        displayOrder: 60
-      }
-    ])
-  ),
-  http.get("*/api/review-sessions", () => HttpResponse.json<ReviewSession[]>([makeReviewSession()])),
-  http.get("*/api/review-sessions/:id/threads", () => HttpResponse.json<FeedbackThread[]>([])),
-  http.get("*/api/threads", () => HttpResponse.json<FeedbackThread[]>([], { headers: { "X-Total-Count": "0" } })),
-  http.get("*/api/threads/summary", () =>
-    HttpResponse.json<FeedbackSummary>({
-      totalCount: 0,
-      openCount: 0,
-      resolvedCount: 0,
-      withEvidenceCount: 0,
-      sessions: [],
-      perspectives: []
-    })
-  ),
-  http.get("*/api/review-retention", ({ request }) =>
-    HttpResponse.json<ReviewRetentionPolicy>({
-      projectId: new URL(request.url).searchParams.get("projectId") ?? "p1",
-      defaultEvidenceRetentionDays: null,
-      expiredEvidenceCount: 0,
-      expiredEvidenceBytes: 0
-    })
-  ),
-  http.get("*/api/review-notifications", ({ request }) =>
-    HttpResponse.json<ReviewNotificationSettings>({
-      projectId: new URL(request.url).searchParams.get("projectId") ?? "p1",
-      emailEnabled: false,
-      teamsEnabled: false,
-      issueEnabled: false,
-      emailAvailable: false,
-      teamsAvailable: false,
-      issueAvailable: false,
-      pendingDeliveryCount: 0,
-      failedDeliveryCount: 0,
-      updatedAt: null
-    })
-  ),
-  http.get("*/api/threads/:threadId", ({ params }) =>
-    HttpResponse.json<FeedbackThread>(makeFeedbackThread({ id: String(params.threadId) }))
-  ),
-
   http.get("*/api/zones", () => HttpResponse.json<Zone[]>(defaultZones)),
   http.get("*/api/zones/:id", ({ params }) => {
     const zone = defaultZones.find((item) => item.id === params.id);

@@ -6,8 +6,7 @@ export function ObjectDetailHeader({
   subtitle,
   status,
   href,
-  onBack,
-  feedbackTargetId
+  onBack
 }: {
   id: string;
   title: string;
@@ -15,10 +14,9 @@ export function ObjectDetailHeader({
   status?: string | null;
   href?: string;
   onBack?: () => void;
-  feedbackTargetId?: string;
 }) {
   return (
-    <header className="object-detail-header" data-feedback-id={feedbackTargetId}>
+    <header className="object-detail-header">
       <div className="object-title-group">
         {onBack ? (
           <button className="subtle-button object-back-button" type="button" onClick={onBack}>

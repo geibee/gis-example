@@ -2,9 +2,8 @@
 
 issue #25 の設計ドキュメント。数百画面規模を見据え、認可の語彙を
 「エンドポイント単位の Action」と「画面・機能単位の Permission」の 2 層に分離し、
-ロールを Permission 集合として宣言する。**既存ロール (admin / user, editor / viewer) の
-実効権限は 1 bit も変えていない** (回帰は `AuthzIntegrationTest` と
-`PermissionMatrixTest` のゴールデン表が守る)。
+ロールを Permission 集合として宣言する。実効権限の回帰は `AuthzIntegrationTest` と
+`PermissionMatrixTest` のゴールデン表が守る。
 
 ## 全体像
 
@@ -47,9 +46,6 @@ issue #25 の設計ドキュメント。数百画面規模を見据え、認可�
 | `import.run` | GIS ファイル取込の実行 | `IMPORT_EXECUTE` |
 | `analysis.run` | 空間分析の実行 | `ANALYSIS_EXECUTE` |
 | `jobs.view` | 取込・分析ジョブの進捗閲覧 | `JOB_READ` |
-| `review.view` | レビューセッション・スレッド・コメント版履歴・保存方針の閲覧、証跡取得 | `REVIEW_READ` |
-| `review.comment` | フィードバック投稿・スレッド返信・自分のコメント編集 | `REVIEW_COMMENT` |
-| `review.manage` | セッション/観点/対象画面・証跡保存期間の設定、スレッド解決/再開、期限切れ証跡削除 | `REVIEW_MANAGE` |
 | `admin.users.manage` | ユーザー管理 (system 管理画面) | `USER_ADMIN` |
 | `admin.members.manage` | プロジェクトメンバー管理 (system 管理画面) | `MEMBER_ADMIN` |
 
@@ -66,18 +62,8 @@ issue #25 の設計ドキュメント。数百画面規模を見据え、認可�
 |---|---|---|
 | system `admin` | システム | 全 Permission (組込みの破壊不能ルール。PDP が無条件許可) |
 | system `user` | システム | なし (プロジェクトロールに従う) |
-| project `viewer` | プロジェクト | `projects.view` `layers.view` `map.view` `business-data.view` `jobs.view` `review.view` `review.comment` |
-| project `editor` | プロジェクト | viewer + `layers.manage` `features.edit` `business-data.edit` `import.run` `analysis.run` `review.manage` |
-
-レビュー基盤 (docs/prototype-review.md) のロール想定は本リポジトリの 2 ロールへ次のように対応させている。
-専用ロール (Reviewer / CustomerAdmin / Developer / ReviewManager) を切るのは、顧客側メンバーを
-開発側と分離して管理する必要が出た時点で検討する (`RolePermissionResolver` の差し替え点は既にある)。
-
-| レビュー基盤のロール | 本リポジトリ |
-|---|---|
-| Reviewer (コメント・閲覧) | project `viewer` (`review.view` + `review.comment`) |
-| ReviewManager (セッション・観点の管理) | project `editor` |
-| SystemAdmin | system `admin` |
+| project `viewer` | プロジェクト | `projects.view` `layers.view` `map.view` `business-data.view` `jobs.view` |
+| project `editor` | プロジェクト | viewer + `layers.manage` `features.edit` `business-data.edit` `import.run` `analysis.run` |
 
 新しいロール (例: 取込オペレータ = viewer + `import.run` + `jobs.view`) の追加は
 `Authorization.kt` の `BuiltinRoleDefinitions` への宣言追加のみで完結する。ただし

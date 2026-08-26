@@ -133,7 +133,6 @@ export function LandWorkspace({
     <div className={`object-workspace${detailOpen ? " detail-mode" : " list-mode"}`}>
       {!detailOpen ? (
       <ObjectSidebar
-        feedbackIdPrefix="lands"
         title="土地"
         query={query}
         setQuery={setQuery}
@@ -167,7 +166,6 @@ export function LandWorkspace({
           columns={landColumns}
           rows={items}
           rowKey={(land) => land.id}
-          rowFeedbackId={(land) => `lands.row.${land.id}`}
           onRowClick={(land) => onSelect(land.id)}
           selectedRowKey={selectedId}
           emptyMessage="土地はありません"
@@ -181,7 +179,6 @@ export function LandWorkspace({
         {hasDetailContent ? (
           <>
             <ObjectDetailHeader
-              feedbackTargetId="lands.detail-header"
               id={creating ? draft.id || "新規土地" : selected?.id ?? ""}
               title={draft.lotNumber || "土地"}
               subtitle={draft.address}
@@ -190,19 +187,19 @@ export function LandWorkspace({
               onBack={creating ? onCancelCreate : onBackToList}
             />
             <div className="object-form">
-              <label data-feedback-id="lands.field.id">
+              <label>
                 ID
                 <input value={draft.id} disabled={!creating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
               </label>
-              <label data-feedback-id="lands.field.lot-number">
+              <label>
                 地番
                 <input value={draft.lotNumber} onChange={(event) => setDraft((current) => ({ ...current, lotNumber: event.target.value }))} />
               </label>
-              <label className="wide-field" data-feedback-id="lands.field.address">
+              <label className="wide-field">
                 所在地
                 <input value={draft.address} onChange={(event) => setDraft((current) => ({ ...current, address: event.target.value }))} />
               </label>
-              <label data-feedback-id="lands.field.land-use">
+              <label>
                 地目/用途
                 <ChoiceSelect
                   value={draft.landUse}
@@ -211,7 +208,7 @@ export function LandWorkspace({
                   emptyLabel="選択"
                 />
               </label>
-              <label data-feedback-id="lands.field.area">
+              <label>
                 地積(m2)
                 <input value={draft.areaSqm} onChange={(event) => setDraft((current) => ({ ...current, areaSqm: event.target.value }))} inputMode="decimal" />
               </label>
