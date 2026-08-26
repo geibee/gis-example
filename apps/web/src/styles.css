@@ -294,6 +294,31 @@ h3 {
   color: #263238;
 }
 
+.collapsible-section-header h2 {
+  min-width: 0;
+}
+
+.collapsible-section-header .inline-icon-button:first-of-type {
+  margin-left: auto;
+}
+
+.section-toggle-button:only-of-type {
+  margin-left: auto;
+}
+
+.section-chevron {
+  transform: rotate(-90deg);
+  transition: transform 160ms ease;
+}
+
+.section-chevron.expanded {
+  transform: rotate(0);
+}
+
+.collapsible-section-content[hidden] {
+  display: none;
+}
+
 label {
   display: grid;
   gap: 6px;

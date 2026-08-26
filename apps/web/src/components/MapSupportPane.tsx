@@ -1,5 +1,6 @@
-import { useEffect, type CSSProperties, type DragEvent } from "react";
+import { useEffect, useId, useState, type CSSProperties, type DragEvent } from "react";
 import {
+  ChevronDown,
   Eye,
   EyeOff,
   GripVertical,
@@ -95,6 +96,11 @@ export function MapSupportPane({
   savingFeature: boolean;
   onSaveFeature: () => void;
 }) {
+  const [layersExpanded, setLayersExpanded] = useState(false);
+  const [selectedFeatureExpanded, setSelectedFeatureExpanded] = useState(true);
+  const layersContentId = useId();
+  const selectedFeatureContentId = useId();
+
   useEffect(() => {
     if (!fullscreen) return;
     const exitFullscreen = (event: KeyboardEvent) => {
@@ -153,15 +159,39 @@ export function MapSupportPane({
 
       <div className="map-support-scroll">
         <section className="panel-section layer-list-section">
-          <div className="section-title">
+          <div className="section-title collapsible-section-header">
             <Layers size={16} />
             <h2>レイヤ</h2>
             {loadingLayers ? <Loader2 className="spin muted-icon" size={15} /> : null}
-            <button className="icon-button inline-icon-button" type="button" onClick={onRefreshLayers} title="レイヤ更新">
+            <button
+              className="icon-button inline-icon-button"
+              type="button"
+              onClick={onRefreshLayers}
+              aria-label="レイヤ更新"
+              title="レイヤ更新"
+            >
               <RefreshCcw size={15} />
             </button>
+            <button
+              className="icon-button inline-icon-button section-toggle-button"
+              type="button"
+              onClick={() => setLayersExpanded((expanded) => !expanded)}
+              aria-label={layersExpanded ? "レイヤを折りたたむ" : "レイヤを展開"}
+              aria-expanded={layersExpanded}
+              aria-controls={layersContentId}
+            >
+              <ChevronDown
+                className={`section-chevron${layersExpanded ? " expanded" : ""}`}
+                size={16}
+                aria-hidden="true"
+              />
+            </button>
           </div>
-          <div className="layer-list">
+          <div
+            id={layersContentId}
+            className="collapsible-section-content layer-list"
+            hidden={!layersExpanded}
+          >
             <div className="layer-row base-layer">
               <span className="drag-handle disabled" aria-hidden="true" />
               <button className="icon-button" type="button" onClick={() => setBaseMapVisible((visible) => !visible)} title="ベース地図表示切替">
@@ -268,49 +298,72 @@ export function MapSupportPane({
         </section>
 
         <section className="panel-section">
-          <h2>選択地物</h2>
-          {selectedFeature && selectedFeatureLayer ? (
-            <div className="feature-view">
-              <div className="feature-heading">
-                <div>
-                  <strong>{selectedFeatureLayer.name}</strong>
-                  <span>ID {selectedFeature.featureId}</span>
+          <div className="section-title collapsible-section-header">
+            <h2>選択地物</h2>
+            <button
+              className="icon-button inline-icon-button section-toggle-button"
+              type="button"
+              onClick={() => setSelectedFeatureExpanded((expanded) => !expanded)}
+              aria-label={selectedFeatureExpanded ? "選択地物を折りたたむ" : "選択地物を展開"}
+              aria-expanded={selectedFeatureExpanded}
+              aria-controls={selectedFeatureContentId}
+            >
+              <ChevronDown
+                className={`section-chevron${selectedFeatureExpanded ? " expanded" : ""}`}
+                size={16}
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <div
+            id={selectedFeatureContentId}
+            className="collapsible-section-content"
+            hidden={!selectedFeatureExpanded}
+          >
+            {selectedFeature && selectedFeatureLayer ? (
+              <div className="feature-view">
+                <div className="feature-heading">
+                  <div>
+                    <strong>{selectedFeatureLayer.name}</strong>
+                    <span>ID {selectedFeature.featureId}</span>
+                  </div>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => setFeatureEditOpen((editing) => !editing)}
+                    aria-label={featureEditOpen ? "編集を閉じる" : "地物編集"}
+                    title={featureEditOpen ? "編集を閉じる" : "地物編集"}
+                  >
+                    {featureEditOpen ? <X size={16} /> : <Pencil size={16} />}
+                  </button>
                 </div>
-                <button
-                  className="icon-button"
-                  type="button"
-                  onClick={() => setFeatureEditOpen((editing) => !editing)}
-                  title={featureEditOpen ? "編集を閉じる" : "地物編集"}
-                >
-                  {featureEditOpen ? <X size={16} /> : <Pencil size={16} />}
-                </button>
+                <BusinessLinksPanel links={businessLinks} loading={loadingBusinessLinks} />
+                {featureEditOpen ? (
+                  <FeatureEditor
+                    layer={selectedFeatureLayer}
+                    propertyDraft={featurePropertyDraft}
+                    setPropertyDraft={setFeaturePropertyDraft}
+                    geometryDraft={featureGeometryDraft}
+                    setGeometryDraft={setFeatureGeometryDraft}
+                    saving={savingFeature}
+                    onCancel={() => setFeatureEditOpen(false)}
+                    onSave={onSaveFeature}
+                  />
+                ) : (
+                  <div className="property-table">
+                    {Object.entries(selectedFeature.properties).map(([key, value]) => (
+                      <div className="property-row" key={key}>
+                        <span>{key}</span>
+                        <strong>{formatValue(value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <BusinessLinksPanel links={businessLinks} loading={loadingBusinessLinks} />
-              {featureEditOpen ? (
-                <FeatureEditor
-                  layer={selectedFeatureLayer}
-                  propertyDraft={featurePropertyDraft}
-                  setPropertyDraft={setFeaturePropertyDraft}
-                  geometryDraft={featureGeometryDraft}
-                  setGeometryDraft={setFeatureGeometryDraft}
-                  saving={savingFeature}
-                  onCancel={() => setFeatureEditOpen(false)}
-                  onSave={onSaveFeature}
-                />
-              ) : (
-                <div className="property-table">
-                  {Object.entries(selectedFeature.properties).map(([key, value]) => (
-                    <div className="property-row" key={key}>
-                      <span>{key}</span>
-                      <strong>{formatValue(value)}</strong>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="empty-state">地図上の地物を選択してください</p>
-          )}
+            ) : (
+              <p className="empty-state">地図上の地物を選択してください</p>
+            )}
+          </div>
         </section>
       </div>
     </aside>

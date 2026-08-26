@@ -420,8 +420,6 @@ export function ZoneWorkspace({
                 </>
               ) : null}
 
-              {selected ? <ZonePartySummary zoneId={selected.id} onOpenParty={onOpenParty} /> : null}
-
               {selected ? (
                 <div className="object-related zone-contained-links">
                   <h3>含まれる土地</h3>
@@ -444,6 +442,8 @@ export function ZoneWorkspace({
                   {!(selected.buildings ?? []).length ? <p className="empty-state compact">区域内の建物はありません</p> : null}
                 </div>
               ) : null}
+
+              {selected ? <ZonePartySummary zoneId={selected.id} onOpenParty={onOpenParty} /> : null}
 
               {creating ? (
                 <div className="object-actions">

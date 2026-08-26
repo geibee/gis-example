@@ -1,7 +1,8 @@
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { makeLayer } from "../testing/fixtures";
 import { MapSupportPane } from "./MapSupportPane";
 
 function mapSupportPaneProps(overrides: Partial<Parameters<typeof MapSupportPane>[0]> = {}) {
@@ -46,7 +47,136 @@ function mapSupportPaneProps(overrides: Partial<Parameters<typeof MapSupportPane
   } satisfies Parameters<typeof MapSupportPane>[0];
 }
 
+function controlledContent(button: HTMLElement) {
+  const id = button.getAttribute("aria-controls");
+  expect(id).toBeTruthy();
+  const content = document.getElementById(id!);
+  expect(content).not.toBeNull();
+  return content!;
+}
+
+function EditableFeaturePane() {
+  const [featureEditOpen, setFeatureEditOpen] = useState(false);
+  const [featurePropertyDraft, setFeaturePropertyDraft] = useState<Record<string, string>>({
+    name: "入力前"
+  });
+  const [featureGeometryDraft, setFeatureGeometryDraft] = useState(
+    '{"type":"Point","coordinates":[139.7,35.6]}'
+  );
+  const layer = makeLayer({
+    name: "編集対象レイヤ",
+    attributes: [{ name: "name", dataType: "text", ordinalPosition: 1 }]
+  });
+
+  return (
+    <MapSupportPane
+      {...mapSupportPaneProps({
+        selectedFeature: {
+          layerId: layer.id,
+          featureId: "feature-1",
+          properties: { name: "入力前" }
+        },
+        selectedFeatureLayer: layer,
+        featureEditOpen,
+        setFeatureEditOpen,
+        featurePropertyDraft,
+        setFeaturePropertyDraft,
+        featureGeometryDraft,
+        setFeatureGeometryDraft
+      })}
+    />
+  );
+}
+
 describe("MapSupportPane", () => {
+  it("レイヤは閉じ、選択地物は開いた初期状態で制御対象を DOM に保持する", () => {
+    render(<MapSupportPane {...mapSupportPaneProps()} />);
+
+    const layersToggle = screen.getByRole("button", { name: "レイヤを展開" });
+    const selectedFeatureToggle = screen.getByRole("button", { name: "選択地物を折りたたむ" });
+    const layersContent = controlledContent(layersToggle);
+    const selectedFeatureContent = controlledContent(selectedFeatureToggle);
+
+    expect(layersToggle).toHaveAttribute("aria-expanded", "false");
+    expect(selectedFeatureToggle).toHaveAttribute("aria-expanded", "true");
+    expect(layersToggle.getAttribute("aria-controls")).not.toBe(
+      selectedFeatureToggle.getAttribute("aria-controls")
+    );
+    expect(layersContent).toBeInTheDocument();
+    expect(layersContent).toHaveAttribute("hidden");
+    expect(selectedFeatureContent).toBeInTheDocument();
+    expect(selectedFeatureContent).not.toHaveAttribute("hidden");
+  });
+
+  it("両セクションをキーボードで独立して開閉できる", async () => {
+    const user = userEvent.setup();
+    render(<MapSupportPane {...mapSupportPaneProps()} />);
+
+    const layersToggle = screen.getByRole("button", { name: "レイヤを展開" });
+    layersToggle.focus();
+    await user.keyboard("{Enter}");
+
+    expect(layersToggle).toHaveAttribute("aria-expanded", "true");
+    expect(controlledContent(layersToggle)).not.toHaveAttribute("hidden");
+    expect(screen.getByRole("button", { name: "選択地物を折りたたむ" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+
+    const selectedFeatureToggle = screen.getByRole("button", { name: "選択地物を折りたたむ" });
+    selectedFeatureToggle.focus();
+    await user.keyboard(" ");
+
+    expect(selectedFeatureToggle).toHaveAttribute("aria-expanded", "false");
+    expect(controlledContent(selectedFeatureToggle)).toHaveAttribute("hidden");
+    expect(screen.getByRole("button", { name: "レイヤを折りたたむ" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+  });
+
+  it("レイヤ更新は更新処理だけを呼び、閉じた状態を変えない", async () => {
+    const user = userEvent.setup();
+    const onRefreshLayers = vi.fn();
+    render(<MapSupportPane {...mapSupportPaneProps({ onRefreshLayers })} />);
+
+    await user.click(screen.getByRole("button", { name: "レイヤ更新" }));
+
+    expect(onRefreshLayers).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "レイヤを展開" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+  });
+
+  it("編集中に折りたたんでも編集モード・属性値・GeoJSONを保持する", async () => {
+    const user = userEvent.setup();
+    render(<EditableFeaturePane />);
+
+    const selectedFeatureToggle = screen.getByRole("button", { name: "選択地物を折りたたむ" });
+    await user.click(screen.getByRole("button", { name: "地物編集" }));
+    expect(selectedFeatureToggle).toHaveAttribute("aria-expanded", "true");
+
+    const propertyInput = screen.getByRole("textbox", { name: "name" });
+    const geometryInput = screen.getByRole("textbox", { name: "GeoJSON" });
+    await user.clear(propertyInput);
+    await user.type(propertyInput, "入力途中の属性");
+    await user.clear(geometryInput);
+    fireEvent.change(geometryInput, {
+      target: { value: '{"type":"Point","coordinates":[135,34]}' }
+    });
+
+    await user.click(selectedFeatureToggle);
+    expect(controlledContent(selectedFeatureToggle)).toHaveAttribute("hidden");
+    await user.click(screen.getByRole("button", { name: "選択地物を展開" }));
+
+    expect(screen.getByRole("button", { name: "編集を閉じる" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "name" })).toHaveValue("入力途中の属性");
+    expect(screen.getByRole("textbox", { name: "GeoJSON" })).toHaveValue(
+      '{"type":"Point","coordinates":[135,34]}'
+    );
+  });
+
   it("指定した地図高さと縦幅変更用の境界を表示する", () => {
     const { container } = render(<MapSupportPane {...mapSupportPaneProps()} />);
 
