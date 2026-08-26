@@ -34,6 +34,8 @@ export type AppShellState = {
   toggleMapPane: () => void;
   mapPaneWidth: number;
   setMapPaneWidth: Dispatch<SetStateAction<number>>;
+  mapCanvasHeight: number;
+  setMapCanvasHeight: Dispatch<SetStateAction<number>>;
   mapFullscreen: boolean;
   setMapFullscreen: Dispatch<SetStateAction<boolean>>;
 };
@@ -49,6 +51,9 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
   const [paneMode, setPaneMode] = useState<PaneMode>("split");
   const [mapPaneWidth, setMapPaneWidth] = useState(() =>
     typeof window === "undefined" ? 560 : Math.max(360, Math.round(window.innerWidth * 0.42))
+  );
+  const [mapCanvasHeight, setMapCanvasHeight] = useState(() =>
+    typeof window === "undefined" ? 360 : Math.max(260, Math.round(window.innerHeight * 0.42))
   );
   const [mapFullscreen, setMapFullscreen] = useState(false);
 
@@ -72,10 +77,12 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
       toggleMapPane: () => setPaneMode((current) => nextPaneMode(current, "map")),
       mapPaneWidth,
       setMapPaneWidth,
+      mapCanvasHeight,
+      setMapCanvasHeight,
       mapFullscreen,
       setMapFullscreen
     }),
-    [mapFullscreen, mapPaneWidth, meQuery.data, paneMode, projects, selectedProject]
+    [mapCanvasHeight, mapFullscreen, mapPaneWidth, meQuery.data, paneMode, projects, selectedProject]
   );
 
   return <AppShellContext.Provider value={value}>{children}</AppShellContext.Provider>;

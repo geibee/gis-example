@@ -10,6 +10,8 @@ function mapSupportPaneProps(overrides: Partial<Parameters<typeof MapSupportPane
     onToggle: vi.fn(),
     fullscreen: false,
     onToggleFullscreen: vi.fn(),
+    mapCanvasHeight: 360,
+    onMapCanvasHeightChange: vi.fn(),
     mapContainerRef: createRef<HTMLDivElement>(),
     baseMapVisible: true,
     setBaseMapVisible: vi.fn(),
@@ -45,6 +47,18 @@ function mapSupportPaneProps(overrides: Partial<Parameters<typeof MapSupportPane
 }
 
 describe("MapSupportPane", () => {
+  it("指定した地図高さと縦幅変更用の境界を表示する", () => {
+    const { container } = render(<MapSupportPane {...mapSupportPaneProps()} />);
+
+    expect(container.querySelector(".map-support-pane")).toHaveStyle({
+      "--map-canvas-height": "360px"
+    });
+    expect(screen.getByRole("separator", { name: "地図キャンバスの高さを変更" })).toHaveAttribute(
+      "aria-orientation",
+      "horizontal"
+    );
+  });
+
   it("全画面表示ボタンから表示を切り替えられる", async () => {
     const user = userEvent.setup();
     const onToggleFullscreen = vi.fn();
@@ -69,6 +83,10 @@ describe("MapSupportPane", () => {
       "aria-pressed",
       "true"
     );
+    expect(screen.getByRole("separator", {
+      name: "地図キャンバスの高さを変更",
+      hidden: true
+    })).toHaveClass("hidden");
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(onToggleFullscreen).toHaveBeenCalledOnce();

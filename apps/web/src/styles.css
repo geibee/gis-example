@@ -415,7 +415,11 @@ input[type="file"] {
 .map-support-pane {
   display: grid;
   grid-column: 3;
-  grid-template-rows: auto minmax(260px, 42vh) minmax(0, 1fr);
+  grid-template-rows:
+    auto
+    minmax(260px, var(--map-canvas-height, 42vh))
+    8px
+    minmax(160px, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -434,7 +438,7 @@ input[type="file"] {
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) 0 0;
   border: 0;
   background: #ffffff;
 }
@@ -466,6 +470,40 @@ input[type="file"] {
   position: relative;
   min-height: 0;
   border-bottom: 1px solid #d3dae1;
+}
+
+.map-canvas-resizer {
+  position: relative;
+  z-index: 2;
+  min-height: 8px;
+  background: #e2e8ee;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.map-canvas-resizer::after {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: #aebbc6;
+  content: "";
+}
+
+.map-canvas-resizer:hover,
+.map-canvas-resizer:focus-visible {
+  outline: 0;
+  background: #c5e2df;
+}
+
+.map-canvas-resizer:hover::after,
+.map-canvas-resizer:focus-visible::after {
+  background: #0f766e;
+}
+
+.map-canvas-resizer.hidden {
+  display: none;
 }
 
 .map-support-scroll {
@@ -1725,7 +1763,7 @@ input[type="file"] {
   .map-support-pane {
     grid-column: 1;
     grid-row: 2;
-    grid-template-rows: auto minmax(180px, 24vh) minmax(0, 1fr);
+    grid-template-rows: auto minmax(180px, 24vh) 0 minmax(0, 1fr);
     border-top: 1px solid #cfd7df;
     border-left: 0;
   }
@@ -1734,9 +1772,13 @@ input[type="file"] {
     display: none;
   }
 
+  .map-canvas-resizer {
+    display: none;
+  }
+
   .map-support-pane.fullscreen {
     grid-row: auto;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) 0 0;
   }
 
   .app-shell {

@@ -16,6 +16,8 @@ export function MapPaneHost() {
     toggleMapPane,
     mapPaneWidth,
     setMapPaneWidth,
+    mapCanvasHeight,
+    setMapCanvasHeight,
     mapFullscreen,
     setMapFullscreen
   } = useAppShell();
@@ -53,6 +55,8 @@ export function MapPaneHost() {
           onToggle={toggleMap}
           fullscreen={mapFullscreen}
           onToggleFullscreen={() => setMapFullscreen((fullscreen) => !fullscreen)}
+          mapCanvasHeight={mapCanvasHeight}
+          onMapCanvasHeightChange={setMapCanvasHeight}
           baseMapVisible={map.baseMapVisible}
           setBaseMapVisible={map.setBaseMapVisible}
           layerListItems={map.layerListItems}

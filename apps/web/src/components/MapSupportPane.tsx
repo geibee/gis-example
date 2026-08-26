@@ -1,4 +1,4 @@
-import { useEffect, type DragEvent } from "react";
+import { useEffect, type CSSProperties, type DragEvent } from "react";
 import {
   Eye,
   EyeOff,
@@ -18,12 +18,15 @@ import type { LayerListItem } from "../appTypes";
 import { formatValue } from "../utils";
 import { BusinessLinksPanel } from "./BusinessLinksPanel";
 import { FeatureEditor } from "./FeatureEditor";
+import { MapCanvasResizer } from "./MapCanvasResizer";
 
 export function MapSupportPane({
   open,
   onToggle,
   fullscreen,
   onToggleFullscreen,
+  mapCanvasHeight,
+  onMapCanvasHeightChange,
   mapContainerRef,
   baseMapVisible,
   setBaseMapVisible,
@@ -59,6 +62,8 @@ export function MapSupportPane({
   onToggle: () => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
+  mapCanvasHeight: number;
+  onMapCanvasHeightChange: (height: number) => void;
   mapContainerRef: React.RefObject<HTMLDivElement>;
   baseMapVisible: boolean;
   setBaseMapVisible: React.Dispatch<React.SetStateAction<boolean>>;
@@ -105,6 +110,7 @@ export function MapSupportPane({
       aria-label="地図"
       aria-modal={fullscreen ? true : undefined}
       role={fullscreen ? "dialog" : undefined}
+      style={{ "--map-canvas-height": `${mapCanvasHeight}px` } as CSSProperties}
     >
       <header className="map-support-header">
         <div>
@@ -137,6 +143,13 @@ export function MapSupportPane({
       <div className="support-map-panel">
         <div ref={mapContainerRef} className="map-container" />
       </div>
+
+      <MapCanvasResizer
+        open={open}
+        fullscreen={fullscreen}
+        height={mapCanvasHeight}
+        onHeightChange={onMapCanvasHeightChange}
+      />
 
       <div className="map-support-scroll">
         <section className="panel-section layer-list-section">
