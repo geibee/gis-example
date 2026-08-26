@@ -1,4 +1,4 @@
-import type { DragEvent } from "react";
+import { useEffect, type DragEvent } from "react";
 import { feedbackMapAttribute } from "@web-gis/feedback-plugin";
 import {
   Eye,
@@ -7,6 +7,8 @@ import {
   Layers,
   Loader2,
   Map as MapIcon,
+  Maximize2,
+  Minimize2,
   Pencil,
   RefreshCcw,
   Trash2,
@@ -21,6 +23,8 @@ import { FeatureEditor } from "./FeatureEditor";
 export function MapSupportPane({
   open,
   onToggle,
+  fullscreen,
+  onToggleFullscreen,
   mapContainerRef,
   baseMapVisible,
   setBaseMapVisible,
@@ -54,6 +58,8 @@ export function MapSupportPane({
 }: {
   open: boolean;
   onToggle: () => void;
+  fullscreen: boolean;
+  onToggleFullscreen: () => void;
   mapContainerRef: React.RefObject<HTMLDivElement>;
   baseMapVisible: boolean;
   setBaseMapVisible: React.Dispatch<React.SetStateAction<boolean>>;
@@ -85,16 +91,48 @@ export function MapSupportPane({
   savingFeature: boolean;
   onSaveFeature: () => void;
 }) {
+  useEffect(() => {
+    if (!fullscreen) return;
+    const exitFullscreen = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onToggleFullscreen();
+    };
+    window.addEventListener("keydown", exitFullscreen);
+    return () => window.removeEventListener("keydown", exitFullscreen);
+  }, [fullscreen, onToggleFullscreen]);
+
   return (
-    <aside className={`map-support-pane${open ? "" : " closed"}`}>
+    <aside
+      className={`map-support-pane${open ? "" : " closed"}${fullscreen ? " fullscreen" : ""}`}
+      aria-label="地図"
+      aria-modal={fullscreen ? true : undefined}
+      role={fullscreen ? "dialog" : undefined}
+    >
       <header className="map-support-header">
         <div>
           <p className="eyebrow">Map Support</p>
           <h2>地図</h2>
         </div>
-        <button className="icon-button" type="button" onClick={onToggle} title="地図ペインを閉じる">
-          <EyeOff size={16} />
-        </button>
+        <div className="map-support-actions">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onToggleFullscreen}
+            aria-label={fullscreen ? "地図の全画面表示を終了" : "地図を全画面表示"}
+            aria-pressed={fullscreen}
+            title={fullscreen ? "全画面表示を終了 (Esc)" : "地図を全画面表示"}
+          >
+            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onToggle}
+            aria-label="地図ペインを閉じる"
+            title="地図ペインを閉じる"
+          >
+            <EyeOff size={16} />
+          </button>
+        </div>
       </header>
 
       <div className="support-map-panel">

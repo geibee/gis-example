@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Building2,
-  EyeOff,
   FileText,
   LogOut,
   Map as MapIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   ShieldCheck,
   Users
 } from "lucide-react";
@@ -123,7 +126,19 @@ function handleFeedbackNotification(notification: FeedbackPluginNotification) {
 function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const { me, projects, selectedProject, setSelectedProject, mapSupportOpen, setMapSupportOpen } = useAppShell();
+  const {
+    me,
+    projects,
+    selectedProject,
+    setSelectedProject,
+    paneMode,
+    businessPaneOpen,
+    mapSupportOpen,
+    toggleBusinessPane,
+    toggleMapPane,
+    mapPaneWidth,
+    mapFullscreen
+  } = useAppShell();
   const { openThread } = useFeedbackPlugin();
   const canManageReview = hasProjectPermission(me, selectedProject, reviewManagePermission);
   const reviewManagementUrl = selectedProject && (canManageReview || me?.systemRole === "admin")
@@ -172,7 +187,7 @@ function AppLayout() {
   const navigateTab = (tab: BusinessTab) => void navigate({ to: tabBasePath[tab] });
 
   return (
-    <div className="business-app">
+    <div className={`business-app${mapFullscreen ? " map-fullscreen" : ""}`}>
       <header className="top-shell">
         <div className="product-mark">
           <FileText size={20} />
@@ -205,22 +220,44 @@ function AppLayout() {
             </button>
           ) : null}
         </nav>
-        <button data-feedback-id="map.visibility" className="subtle-button top-map-toggle" type="button" onClick={() => setMapSupportOpen((open) => !open)}>
-          {mapSupportOpen ? <EyeOff size={16} /> : <MapIcon size={16} />}
-          {mapSupportOpen ? "地図を隠す" : "地図を表示"}
-        </button>
-        <button
-          className="subtle-button"
-          type="button"
-          title={auth.user?.profile.preferred_username ?? auth.user?.profile.email ?? undefined}
-          onClick={() => void auth.signoutRedirect()}
-        >
-          <LogOut size={16} />
-          ログアウト
-        </button>
+        <div className="top-shell-actions">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={toggleBusinessPane}
+            aria-label={businessPaneOpen ? "業務画面を隠す" : "業務画面を表示"}
+            aria-pressed={!businessPaneOpen}
+            title={businessPaneOpen ? "業務画面を隠す" : "業務画面を表示"}
+          >
+            {businessPaneOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+          </button>
+          <button
+            data-feedback-id="map.visibility"
+            className="icon-button"
+            type="button"
+            onClick={toggleMapPane}
+            aria-label={mapSupportOpen ? "地図を隠す" : "地図を表示"}
+            aria-pressed={!mapSupportOpen}
+            title={mapSupportOpen ? "地図を隠す" : "地図を表示"}
+          >
+            {mapSupportOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="ログアウト"
+            title={`ログアウト${auth.user?.profile.preferred_username ?? auth.user?.profile.email ? ` (${auth.user?.profile.preferred_username ?? auth.user?.profile.email})` : ""}`}
+            onClick={() => void auth.signoutRedirect()}
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </header>
 
-      <main className={`business-workspace${mapSupportOpen ? " map-open" : " map-closed"}`}>
+      <main
+        className={`business-workspace ${paneMode}${mapFullscreen ? " map-fullscreen" : ""}`}
+        style={{ "--map-pane-width": `${mapPaneWidth}px` } as CSSProperties}
+      >
         <div className="workspace-tabs">
           <ScreenGuard me={me}>
             <Outlet />

@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/node:22-alpine AS build
 
 WORKDIR /repo
 COPY package.json package-lock.json ./
@@ -12,7 +12,7 @@ ARG VITE_OIDC_AUTHORITY
 ARG VITE_OIDC_CLIENT_ID
 RUN npm --workspace apps/web run build
 
-FROM nginx:1.27-alpine
+FROM docker.io/library/nginx:1.27-alpine
 
 # CSP の connect-src に加える環境依存の接続先 (OIDC IdP の origin 等)。
 # 本番ビルドでは --build-arg CSP_CONNECT_SRC_EXTRA="https://auth.example.com" のように

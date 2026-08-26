@@ -54,7 +54,7 @@ export type ZoneMapFocusOptions = {
 // レイヤ一覧はサーバ状態 (useLayersQuery) を正とし、並び順・表示状態などの
 // クライアント状態のみをここで管理する。
 function useMapController() {
-  const { selectedProject, setMapSupportOpen, mapSupportOpen } = useAppShell();
+  const { selectedProject, showMapPane, mapSupportOpen } = useAppShell();
   const activeTab = useRouterState({ select: (state) => activeScreenMeta(state.matches)?.tab ?? "zone" });
 
   const mapApiRef = useRef<MapPaneApi | null>(null);
@@ -381,7 +381,7 @@ function useMapController() {
           layerById.get(sourceLayerId) ?? (await getLayers(selectedProject)).find((item) => item.id === sourceLayerId) ?? null;
         setSelectedFeature(feature);
         setSelectedFeatureLayer(layer);
-        setMapSupportOpen(true);
+        showMapPane();
         if (layer) {
           showLayers([layer.id]);
           options.onFocusLayer?.(layer.id);
@@ -406,14 +406,14 @@ function useMapController() {
         notifyError(errorMessage(error));
       }
     },
-    [layerById, selectedProject, setMapSupportOpen, showLayers]
+    [layerById, selectedProject, showLayers, showMapPane]
   );
 
   // 区域とその区域内の土地・建物をまとめて地図表示する
   const openZoneOnMap = useCallback(
     async (zone: Zone, options: ZoneMapFocusOptions = {}) => {
       try {
-        setMapSupportOpen(true);
+        showMapPane();
         const zoneLayerId = zone.zoneLayerId ?? zone.sourceLayerId;
         const zoneFeatureId = zone.zoneFeatureId ?? zone.sourceFeatureId;
         const layer =
@@ -487,7 +487,7 @@ function useMapController() {
         notifyError(errorMessage(error));
       }
     },
-    [layerById, selectedProject, setMapSupportOpen, showLayers]
+    [layerById, selectedProject, showLayers, showMapPane]
   );
 
   // 検索結果 (FeatureSearchResult) の地物を地図上で開く

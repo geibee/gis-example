@@ -106,6 +106,26 @@ describe("フィードバックスレッドのディープリンク", () => {
   });
 });
 
+describe("業務画面と地図の表示切り替え", () => {
+  it("最後の画面を隠す操作では反対側の画面へ自動的に切り替える", async () => {
+    const { container, user } = renderWithProviders({ path: "/zones" });
+    await screen.findByText("大手町一丁目区域");
+    const workspace = container.querySelector(".business-workspace");
+    expect(workspace).toHaveClass("split");
+
+    await user.click(screen.getByRole("button", { name: "業務画面を隠す" }));
+    expect(workspace).toHaveClass("map");
+    expect(screen.getByRole("button", { name: "業務画面を表示" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "地図を隠す" }));
+    expect(workspace).toHaveClass("business");
+    expect(screen.getByRole("button", { name: "地図を表示" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "業務画面を隠す" }));
+    expect(workspace).toHaveClass("map");
+  });
+});
+
 describe("未知の URL", () => {
   it("存在しないパスは既定画面 (/zones) へ寄せる", async () => {
     const { router } = renderWithProviders({ path: "/no-such-screen" });

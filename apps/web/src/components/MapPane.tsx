@@ -43,7 +43,7 @@ export default function MapPane({
   onNotice,
   ...supportPaneProps
 }: MapPaneProps) {
-  const { open, baseMapVisible, visibleLayerIds } = supportPaneProps;
+  const { open, fullscreen, baseMapVisible, visibleLayerIds } = supportPaneProps;
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const styleLayersByLayerId = useRef<Record<string, string[]>>({});
@@ -243,7 +243,15 @@ export default function MapPane({
   useEffect(() => {
     const timer = window.setTimeout(() => mapRef.current?.resize(), 0);
     return () => window.clearTimeout(timer);
-  }, [open]);
+  }, [fullscreen, open]);
+
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => mapRef.current?.resize());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <>
