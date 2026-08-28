@@ -9,6 +9,7 @@ export function ObjectSidebar({
   onRefresh,
   onSearch,
   onCreate,
+  headerActions,
   filterContent,
   selectedProject,
   projects,
@@ -22,6 +23,7 @@ export function ObjectSidebar({
   onRefresh: () => void;
   onSearch: () => void;
   onCreate: () => void;
+  headerActions?: React.ReactNode;
   filterContent?: React.ReactNode;
   selectedProject: string;
   projects: Project[];
@@ -36,6 +38,7 @@ export function ObjectSidebar({
           <h1>{title}</h1>
         </div>
         <div className="sidebar-actions">
+          {headerActions}
           <button className="icon-button" type="button" onClick={onCreate} title="新規作成">
             <Plus size={18} />
           </button>

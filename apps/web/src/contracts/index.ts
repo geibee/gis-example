@@ -37,6 +37,8 @@ export type Land = Schemas["Land"];
 export type LandWriteRequest = Schemas["LandWriteRequest"];
 export type Building = Schemas["Building"];
 export type BuildingWriteRequest = Schemas["BuildingWriteRequest"];
+export type BusinessEntityImportRequest = Schemas["BusinessEntityImportRequest"];
+export type BusinessEntityImportResult = Schemas["BusinessEntityImportResult"];
 export type Party = Schemas["Party"];
 export type PartyWriteRequest = Schemas["PartyWriteRequest"];
 

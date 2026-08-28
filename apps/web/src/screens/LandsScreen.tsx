@@ -1,18 +1,20 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAppShell } from "../appShell";
 import { useBusinessListHighlights, useMapState } from "../mapState";
-import { notifyError, notifySuccess } from "../notifications";
+import { notifyError, notifyInfo, notifySuccess } from "../notifications";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { LandWorkspace } from "../components/LandWorkspace";
 import { useBuildingsQuery } from "../queries/buildings";
 import {
   useCreateLandMutation,
   useDeleteLandMutation,
+  useImportLandsMutation,
   useLandQuery,
   useLandsQuery,
   useUpdateLandMutation
 } from "../queries/lands";
+import { useCreateImportJobMutation, useImportJobPolling } from "../queries/jobs";
 import { usePartiesQuery } from "../queries/parties";
 import type { Land } from "../contracts";
 import {
@@ -57,7 +59,62 @@ export default function LandsScreen() {
   const createMutation = useCreateLandMutation();
   const updateMutation = useUpdateLandMutation();
   const deleteMutation = useDeleteLandMutation();
+  const createImportJobMutation = useCreateImportJobMutation();
+  const importLandsMutation = useImportLandsMutation();
+  const [importingGeoJson, setImportingGeoJson] = useState(false);
+  const importProjectRef = useRef("");
   const { saveRelationship, removeRelationship } = useRelationshipActions();
+
+  const importPolling = useImportJobPolling({
+    onSucceeded: async (job) => {
+      if (!job.layerId) {
+        setImportingGeoJson(false);
+        notifyError("土地データの取込結果を取得できませんでした");
+        return;
+      }
+      try {
+        const result = await importLandsMutation.mutateAsync({
+          projectId: importProjectRef.current,
+          layerId: job.layerId
+        });
+        const skipped = result.skippedCount ? `、${result.skippedCount.toLocaleString()}件スキップ` : "";
+        notifySuccess(
+          `土地を取り込みました（${result.createdCount.toLocaleString()}件追加、${result.updatedCount.toLocaleString()}件更新${skipped}）`
+        );
+      } catch (error) {
+        notifyError(errorMessage(error));
+      } finally {
+        setImportingGeoJson(false);
+      }
+    },
+    onFailed: (job) => {
+      setImportingGeoJson(false);
+      notifyError(job.errorMessage ?? "土地GeoJSONの取込に失敗しました");
+    },
+    onTimeout: () => {
+      setImportingGeoJson(false);
+      notifyInfo("取込ジョブの完了確認がタイムアウトしました。時間をおいてレイヤ一覧を確認してください");
+    },
+    onError: () => setImportingGeoJson(false)
+  });
+
+  const importLandGeoJson = async (file: File) => {
+    if (!selectedProject) return;
+    const formData = new FormData();
+    formData.set("projectId", selectedProject);
+    formData.set("format", "geojson");
+    formData.set("sourceSrid", "4326");
+    formData.set("file", file);
+    try {
+      setImportingGeoJson(true);
+      importProjectRef.current = selectedProject;
+      const job = await createImportJobMutation.mutateAsync(formData);
+      importPolling.start(job.id);
+    } catch (error) {
+      setImportingGeoJson(false);
+      notifyError(errorMessage(error));
+    }
+  };
 
   const saveLand = async () => {
     if (!screen.draft.lotNumber.trim() || !screen.draft.address.trim() || !screen.draft.status.trim()) {
@@ -144,6 +201,8 @@ export default function LandsScreen() {
         onSearch={list.submit}
         onSelect={screen.select}
         onCreate={screen.beginCreate}
+        importing={importingGeoJson}
+        onImportGeoJson={(file) => void importLandGeoJson(file)}
         onCancelCreate={screen.cancelCreate}
         onBackToList={screen.backToList}
         onSave={() => void saveLand()}

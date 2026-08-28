@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createLand, deleteLand, getLand, getLands, updateLand } from "../api";
-import type { Land, LandWriteRequest } from "../contracts";
+import { createLand, deleteLand, getLand, getLands, importLandsFromLayer, updateLand } from "../api";
+import type { BusinessEntityImportRequest, Land, LandWriteRequest } from "../contracts";
 import type { BusinessListSearchCriteria } from "../appTypes";
 import { keys } from "./keys";
 
@@ -58,5 +58,13 @@ export function useDeleteLandMutation() {
       queryClient.removeQueries({ queryKey: keys.lands.detail(id) });
       invalidateLandRelated(queryClient);
     }
+  });
+}
+
+export function useImportLandsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BusinessEntityImportRequest) => importLandsFromLayer(body),
+    onSuccess: () => invalidateLandRelated(queryClient)
   });
 }

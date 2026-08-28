@@ -241,6 +241,22 @@ data class BuildingDto(
 )
 
 @Serializable
+data class BusinessEntityImportRequest(
+    val projectId: String,
+    val layerId: String,
+    val fieldMapping: Map<String, String> = emptyMap(),
+    val status: String? = null
+)
+
+@Serializable
+data class BusinessEntityImportResultDto(
+    val layerId: String,
+    val createdCount: Int,
+    val updatedCount: Int,
+    val skippedCount: Int
+)
+
+@Serializable
 data class PartyDto(
     val id: String,
     val projectId: String,

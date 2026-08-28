@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createBuilding, deleteBuilding, getBuilding, getBuildings, updateBuilding } from "../api";
-import type { Building, BuildingWriteRequest } from "../contracts";
+import { createBuilding, deleteBuilding, getBuilding, getBuildings, importBuildingsFromLayer, updateBuilding } from "../api";
+import type { Building, BuildingWriteRequest, BusinessEntityImportRequest } from "../contracts";
 import type { BusinessListSearchCriteria } from "../appTypes";
 import { keys } from "./keys";
 
@@ -58,5 +58,13 @@ export function useDeleteBuildingMutation() {
       queryClient.removeQueries({ queryKey: keys.buildings.detail(id) });
       invalidateBuildingRelated(queryClient);
     }
+  });
+}
+
+export function useImportBuildingsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BusinessEntityImportRequest) => importBuildingsFromLayer(body),
+    onSuccess: () => invalidateBuildingRelated(queryClient)
   });
 }

@@ -3,8 +3,10 @@ package gis.example.routes
 
 import gis.example.Action
 import gis.example.ApiException
+import gis.example.BusinessEntityImportRequest
 import gis.example.LandListQuery
 import gis.example.ProjectResourceType
+import gis.example.RouteAuthz.CheckedInHandler
 import gis.example.RouteAuthz.ProjectFromBodyField
 import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
@@ -16,7 +18,9 @@ import gis.example.authorizedRoutes
 import gis.example.createLand
 import gis.example.deleteLand
 import gis.example.getLand
+import gis.example.importLandsFromLayer
 import gis.example.listLands
+import gis.example.requireResourcePermission
 import gis.example.updateLand
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -56,6 +60,17 @@ fun Route.landRoutes(deps: AppDependencies) {
 
         post("/api/lands", ProjectFromBodyField(Action.BUSINESS_WRITE)) {
             call.respond(HttpStatusCode.Created, db.createLand(call.authorizedJsonBody(), call.auditTrail()))
+        }
+
+        post(
+            "/api/lands/from-import",
+            CheckedInHandler(Action.BUSINESS_WRITE, "対象 layerId のプロジェクトを解決して業務データ編集権限を確認するため")
+        ) {
+            val request = call.receive<BusinessEntityImportRequest>()
+            val layerId = request.layerId.trim().takeIf { it.isNotEmpty() }
+                ?: throw ApiException(HttpStatusCode.BadRequest, "layerId is required")
+            call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.LAYER, layerId)
+            call.respond(HttpStatusCode.Created, db.importLandsFromLayer(request, call.auditTrail()))
         }
 
         get("/api/lands/{id}", ResourceFromPath(Action.BUSINESS_READ, ProjectResourceType.LAND)) {

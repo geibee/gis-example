@@ -13,6 +13,8 @@ import type {
   AnalysisJobRequest,
   Building,
   BuildingWriteRequest,
+  BusinessEntityImportRequest,
+  BusinessEntityImportResult,
   BusinessLinks,
   BusinessSpatialSearchRequest,
   ConditionQuery,
@@ -260,6 +262,12 @@ export async function deleteLand(id: string): Promise<void> {
   unwrapVoid(await client.DELETE("/api/lands/{id}", { params: { path: { id } } }));
 }
 
+export async function importLandsFromLayer(
+  body: BusinessEntityImportRequest
+): Promise<BusinessEntityImportResult> {
+  return unwrap(await client.POST("/api/lands/from-import", { body }));
+}
+
 export async function getBuildings(
   projectId?: string,
   q?: string,
@@ -295,6 +303,12 @@ export async function updateBuilding(id: string, body: BuildingWriteRequest): Pr
 
 export async function deleteBuilding(id: string): Promise<void> {
   unwrapVoid(await client.DELETE("/api/buildings/{id}", { params: { path: { id } } }));
+}
+
+export async function importBuildingsFromLayer(
+  body: BusinessEntityImportRequest
+): Promise<BusinessEntityImportResult> {
+  return unwrap(await client.POST("/api/buildings/from-import", { body }));
 }
 
 export async function getParties(projectId?: string, q?: string, filters?: BusinessObjectFilters): Promise<Party[]> {

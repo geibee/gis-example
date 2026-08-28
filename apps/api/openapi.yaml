@@ -531,6 +531,31 @@ paths:
         "204": { description: 削除済み }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/lands/from-import:
+    post:
+      tags: [business]
+      operationId: importLandsFromLayer
+      summary: 取込レイヤのポリゴン地物を土地へ同期
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessEntityImportRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: 同期済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusinessEntityImportResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/buildings:
     get:
       tags: [business]
@@ -647,6 +672,31 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "204": { description: 削除済み }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/buildings/from-import:
+    post:
+      tags: [business]
+      operationId: importBuildingsFromLayer
+      summary: 取込レイヤのポリゴン地物を建物へ同期
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BusinessEntityImportRequest"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: 同期済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusinessEntityImportResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/parties:
@@ -1510,6 +1560,27 @@ components:
         sourceLayerId: { type: [string, "null"] }
         sourceFeatureId: { type: [string, "null"] }
       additionalProperties: true
+
+    BusinessEntityImportRequest:
+      type: object
+      description: 取込済みレイヤから業務レコードへ同期する。fieldMapping 省略時は一般的な属性名を自動判定する
+      properties:
+        projectId: { type: string }
+        layerId: { type: string }
+        fieldMapping:
+          type: object
+          additionalProperties: { type: string }
+        status: { type: [string, "null"] }
+      required: [projectId, layerId]
+
+    BusinessEntityImportResult:
+      type: object
+      properties:
+        layerId: { type: string }
+        createdCount: { type: integer }
+        updatedCount: { type: integer }
+        skippedCount: { type: integer }
+      required: [layerId, createdCount, updatedCount, skippedCount]
 
     Building:
       type: object

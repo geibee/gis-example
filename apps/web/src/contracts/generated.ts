@@ -315,6 +315,23 @@ export interface paths {
         patch: operations["updateLand"];
         trace?: never;
     };
+    "/api/lands/from-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取込レイヤのポリゴン地物を土地へ同期 */
+        post: operations["importLandsFromLayer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/buildings": {
         parameters: {
             query?: never;
@@ -350,6 +367,23 @@ export interface paths {
         head?: never;
         /** 建物更新 */
         patch: operations["updateBuilding"];
+        trace?: never;
+    };
+    "/api/buildings/from-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取込レイヤのポリゴン地物を建物へ同期 */
+        post: operations["importBuildingsFromLayer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/parties": {
@@ -826,6 +860,21 @@ export interface components {
             sourceFeatureId?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /** @description 取込済みレイヤから業務レコードへ同期する。fieldMapping 省略時は一般的な属性名を自動判定する */
+        BusinessEntityImportRequest: {
+            projectId: string;
+            layerId: string;
+            fieldMapping?: {
+                [key: string]: string;
+            };
+            status?: string | null;
+        };
+        BusinessEntityImportResult: {
+            layerId: string;
+            createdCount: number;
+            updatedCount: number;
+            skippedCount: number;
         };
         Building: {
             id: string;
@@ -1697,6 +1746,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    importLandsFromLayer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BusinessEntityImportRequest"];
+            };
+        };
+        responses: {
+            /** @description 同期済み */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessEntityImportResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listBuildings: {
         parameters: {
             query: {
@@ -1836,6 +1913,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Building"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    importBuildingsFromLayer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BusinessEntityImportRequest"];
+            };
+        };
+        responses: {
+            /** @description 同期済み */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessEntityImportResult"];
                 };
             };
             400: components["responses"]["BadRequest"];

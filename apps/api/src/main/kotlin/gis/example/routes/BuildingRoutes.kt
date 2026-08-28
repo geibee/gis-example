@@ -4,7 +4,9 @@ package gis.example.routes
 import gis.example.Action
 import gis.example.ApiException
 import gis.example.BuildingListQuery
+import gis.example.BusinessEntityImportRequest
 import gis.example.ProjectResourceType
+import gis.example.RouteAuthz.CheckedInHandler
 import gis.example.RouteAuthz.ProjectFromBodyField
 import gis.example.RouteAuthz.ProjectFromQuery
 import gis.example.RouteAuthz.ResourceFromPath
@@ -16,7 +18,9 @@ import gis.example.authorizedRoutes
 import gis.example.createBuilding
 import gis.example.deleteBuilding
 import gis.example.getBuilding
+import gis.example.importBuildingsFromLayer
 import gis.example.listBuildings
+import gis.example.requireResourcePermission
 import gis.example.updateBuilding
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -57,6 +61,17 @@ fun Route.buildingRoutes(deps: AppDependencies) {
 
         post("/api/buildings", ProjectFromBodyField(Action.BUSINESS_WRITE)) {
             call.respond(HttpStatusCode.Created, db.createBuilding(call.authorizedJsonBody(), call.auditTrail()))
+        }
+
+        post(
+            "/api/buildings/from-import",
+            CheckedInHandler(Action.BUSINESS_WRITE, "対象 layerId のプロジェクトを解決して業務データ編集権限を確認するため")
+        ) {
+            val request = call.receive<BusinessEntityImportRequest>()
+            val layerId = request.layerId.trim().takeIf { it.isNotEmpty() }
+                ?: throw ApiException(HttpStatusCode.BadRequest, "layerId is required")
+            call.requireResourcePermission(db, Action.BUSINESS_WRITE, ProjectResourceType.LAYER, layerId)
+            call.respond(HttpStatusCode.Created, db.importBuildingsFromLayer(request, call.auditTrail()))
         }
 
         get("/api/buildings/{id}", ResourceFromPath(Action.BUSINESS_READ, ProjectResourceType.BUILDING)) {

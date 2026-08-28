@@ -13,6 +13,7 @@ import { formatArea, gisLinkSummary, mergeChoiceOptions, relationshipSummary, re
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { BusinessFilterPanel } from "./BusinessFilterPanel";
 import { ChoiceSelect } from "./ChoiceSelect";
+import { GeoJsonImportButton } from "./GeoJsonImportButton";
 import { ObjectActions } from "./ObjectActions";
 import { ObjectDetailHeader } from "./ObjectDetailHeader";
 import { ObjectSidebar } from "./ObjectSidebar";
@@ -64,6 +65,8 @@ export function BuildingWorkspace({
   onSearch,
   onSelect,
   onCreate,
+  importing,
+  onImportGeoJson,
   onCancelCreate,
   onBackToList,
   onSave,
@@ -103,6 +106,8 @@ export function BuildingWorkspace({
   onSearch: () => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  importing: boolean;
+  onImportGeoJson: (file: File) => void;
   onCancelCreate: () => void;
   onBackToList: () => void;
   onSave: () => void;
@@ -141,6 +146,7 @@ export function BuildingWorkspace({
         onRefresh={onRefresh}
         onSearch={onSearch}
         onCreate={onCreate}
+        headerActions={<GeoJsonImportButton importing={importing} onSelect={onImportGeoJson} />}
         filterContent={
           <BusinessFilterPanel
             kind="building"
