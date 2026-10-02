@@ -1,7 +1,8 @@
 // maplibre-gl に依存する地図ヘルパー。
 // メインチャンクに maplibre を含めないため、純粋ヘルパー (utils.ts) から分離している。
 // このモジュールは地図チャンク (components/MapPane.tsx) からのみ import すること。
-import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+import type { Map as MapLibreMap } from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import type { FeatureSearchResult, Layer } from "./contracts";
 import { extendBounds, geoJsonGeometryBounds, type GeometryBounds } from "./utils";
 
