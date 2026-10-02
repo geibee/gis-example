@@ -1,5 +1,13 @@
 import { type ComponentProps, type MutableRefObject, useEffect, useRef, useState } from "react";
-import maplibregl, { type MapLayerMouseEvent, type Map as MapLibreMap } from "maplibre-gl";
+import {
+  Map as MapLibreMap,
+  NavigationControl,
+  ScaleControl,
+  setWorkerUrl,
+  type MapLayerMouseEvent,
+  type StyleSpecification
+} from "maplibre-gl";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { getAccessToken } from "../auth";
 import { baseStyle, defaultMapZoom, imperialPalaceCenter, layerColors } from "../constants";
@@ -13,6 +21,9 @@ import {
 import type { FeatureSearchResult, Layer } from "../contracts";
 import type { MapPaneApi } from "../appTypes";
 import { MapSupportPane } from "./MapSupportPane";
+
+// v6 は worker が別ファイル。Vite に依存モジュールごとバンドルさせ、同一オリジンで配信する。
+setWorkerUrl(maplibreWorkerUrl);
 
 type SupportPaneProps = Omit<ComponentProps<typeof MapSupportPane>, "mapContainerRef">;
 
@@ -75,9 +86,9 @@ export default function MapPane({
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
-    const map = new maplibregl.Map({
+    const map = new MapLibreMap({
       container: mapContainerRef.current,
-      style: baseStyle as maplibregl.StyleSpecification,
+      style: baseStyle as StyleSpecification,
       center: imperialPalaceCenter,
       zoom: defaultMapZoom,
       attributionControl: { compact: true },
@@ -93,8 +104,8 @@ export default function MapPane({
         return { url };
       }
     });
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-    map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+    map.addControl(new NavigationControl({ visualizePitch: true }), "top-right");
+    map.addControl(new ScaleControl({ unit: "metric" }), "bottom-left");
     map.on("load", () => setMapReady(true));
     mapRef.current = map;
     return () => {

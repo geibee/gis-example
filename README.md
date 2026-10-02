@@ -24,6 +24,8 @@ docker compose -f infra/docker-compose.yml up -d --build
 
 起動後、ブラウザーで http://localhost:5173 を開きます。
 
+地図の表示には WebGL2 に対応したブラウザー・端末が必要です (MapLibre GL JS v6)。
+
 ### ログインする
 
 通常の操作確認には、編集用ユーザーを使用します。
