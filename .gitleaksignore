@@ -4,3 +4,9 @@ afe6d04789b49b94fb3572560dfcb8a474aa3e40:apps/feedback-service/src/test/kotlin/f
 d7512320439d80f728302fc389f1ba525d0d3eaf:deploy/.env.example:generic-api-key:5
 bbd7e8875a57104a9a538cfcf363b869223f6dea:apps/feedback-service/src/test/kotlin/feedback/service/WebhookDispatcherTest.kt:generic-api-key:17
 bbd7e8875a57104a9a538cfcf363b869223f6dea:apps/feedback-service/src/test/kotlin/feedback/service/integration/StandaloneMigrationIntegrationTest.kt:generic-api-key:420
+
+# 旧 localhost Redmine bootstrap 用の決定的なサンプル API key。
+# b56126c の infra/.env.example に開発専用・本番利用禁止と明記され、
+# 944a270 で設定自体を削除済み。履歴上のこの 1 検出だけを除外する。
+# パス / ルール全体は除外しないため、同じ場所への新規混入も検出される。
+b56126c006740db072ef9f45238b2fed4c8f79e7:infra/.env.example:generic-api-key:45
