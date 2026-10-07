@@ -1,1 +1,1 @@
-2026-10-04: 履歴上の localhost 専用 fixture の Gitleaks 修正を全 nightly ゲートで検証
+2026-10-07: seroval 1.6.8 への更新で CVE-2026-104845 / CVE-2026-104846 と追加の入力検証修正を全 nightly ゲートで検証
