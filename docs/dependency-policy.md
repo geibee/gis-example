@@ -52,3 +52,11 @@
 - サーバ状態: TanStack Query
 
 2026-05 の侵害は `@tanstack/router*` の旧バージョンで発生したが、`min-release-age` と lockfile 固定により同型の攻撃 (公開直後の悪意あるバージョン) は取り込まれない。事件後の TanStack 側の公開フロー強化 (pull_request_target 全廃・SHA ピン・actions/cache 廃止) も確認済み。
+
+### Zod のコンテナ検証 (CVE-2023-54404)
+
+- Zod を 4.6.6 に固定する。上流の修正は、配列・Set・Map に明示した上限を要素の検証より前に評価するもの。
+  **上限なしのコンテナは更新だけでは保護されない**ため、今後コンテナスキーマを追加する場合は入力仕様に応じた `.max()` / `.length()` / `.size()` を宣言し、過大入力の拒否もテストする。
+- 現在のアプリの Zod 利用は `PartyForm.tsx` の文字列フィールドを持つ object スキーマのみで、配列・Set・Map のスキーマは使っていない。今回、業務入力への新しい上限は導入しない。
+- `apps/web/src/security/zod-bounds.test.ts` は、明示した配列上限を超える入力を要素走査なしに拒否することと、上限内の既存動作を検証する。
+- 参考: [上流修正 #6652](https://github.com/colinhacks/zod/pull/6652)、[GitHub Advisory](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)。Trivy の除外や重大度ゲートの緩和は行わない。
